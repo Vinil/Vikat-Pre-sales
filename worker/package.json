@@ -3,14 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Vikat pre-sales AI agent — Cloudflare Worker backend",
+  "description": "Vikat pre-sales AI agent \u2014 Cloudflare Worker backend",
   "scripts": {
     "dev": "wrangler dev --env dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "test": "node --test \"test/**/*.test.js\"",
     "build:knowledge": "node ../scripts/build-knowledge.js",
-    "check:abstractions": "node --test test/no-direct-bindings.test.js"
+    "check:abstractions": "node --test test/no-direct-bindings.test.js",
+    "test:widget": "node --test test/widget.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.72.0"

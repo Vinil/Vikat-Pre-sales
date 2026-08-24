@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Sales Assistant — Vikat</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="./vikat-chat.css">
+
+<style>
+  :root {
+    --bg: #050507;
+    --sf: #111318;
+    --w: #f2f4fa;
+    --w60: rgba(242, 244, 250, .6);
+    --w40: rgba(242, 244, 250, .4);
+    --w08: rgba(242, 244, 250, .08);
+    --cyan: #00d4ff;
+    --violet: #6e56ff;
+    --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--w);
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Ambient wash, matching the marketing site's treatment. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 40% at 15% 0%, rgba(0, 212, 255, .06), transparent 60%),
+      radial-gradient(50% 40% at 85% 10%, rgba(110, 86, 255, .05), transparent 60%);
+  }
+
+  header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 0 clamp(20px, 5vw, 48px);
+    height: 68px;
+    border-bottom: 1px solid var(--w08);
+    background: rgba(5, 5, 7, .96);
+    backdrop-filter: blur(28px) saturate(1.4);
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-m {
+    display: grid; place-items: center;
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--cyan), var(--violet));
+    color: var(--bg); font-weight: 700; font-size: 15px;
+  }
+  .logo-t { font-weight: 600; font-size: 18px; letter-spacing: -.4px; }
+  .logo-t i { font-style: normal; color: var(--cyan); }
+
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--w40);
+    padding: 5px 12px;
+    border: 1px solid var(--w08);
+    border-radius: 100px;
+  }
+
+  main {
+    position: relative;
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+    gap: clamp(24px, 4vw, 56px);
+    align-items: start;
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: clamp(32px, 6vw, 64px) clamp(20px, 5vw, 48px) 48px;
+  }
+
+  h1 {
+    margin: 0 0 14px;
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 600;
+    letter-spacing: -1px;
+    line-height: 1.1;
+  }
+
+  .lede { margin: 0 0 34px; max-width: 46ch; color: var(--w60); font-size: 16px; line-height: 1.65; }
+
+  .cards { display: grid; gap: 12px; max-width: 46ch; }
+
+  .card {
+    padding: 16px 18px;
+    border: 1px solid var(--w08);
+    border-radius: 12px;
+    background: rgba(242, 244, 250, .02);
+  }
+  .card h2 {
+    margin: 0 0 5px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+  .card p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--w60); }
+
+  .assistant { height: min(680px, calc(100vh - 180px)); min-height: 480px; position: sticky; top: 92px; }
+
+  footer {
+    position: relative;
+    padding: 20px clamp(20px, 5vw, 48px) 28px;
+    border-top: 1px solid var(--w08);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .5px;
+    color: var(--w40);
+  }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    .assistant { position: static; height: 620px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-m" aria-hidden="true">V</div>
+    <div class="logo-t">VIKAT<i>.AI</i></div>
+  </div>
+  <div class="badge">Internal</div>
+</header>
+
+<main>
+  <div>
+    <h1>Sales Assistant</h1>
+    <p class="lede">
+      Ask about products, positioning, pricing or competitors. Answers come from
+      Vikat's own material, and every answer tells you what is safe to repeat to
+      a customer.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h2>Before a call</h2>
+        <p>“Brief me on VSentinel for a bank running AWS and Splunk.”</p>
+      </div>
+      <div class="card">
+        <h2>On a call</h2>
+        <p>“They asked about MCP server discovery — what's accurate?”</p>
+      </div>
+      <div class="card">
+        <h2>After a call</h2>
+        <p>“Log Acme: CISO, agent sprawl, budget in Q1.”</p>
+      </div>
+      <div class="card">
+        <h2>When you're unsure</h2>
+        <p>“Can I send them our SOC 2 report?”</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="assistant" id="assistant"></div>
+</main>
+
+<footer>
+  Vikat internal tool · conversations are logged and attributed · verify before sending anything to a customer
+</footer>
+
+<!--
+  Embed contract. When the endpoint moves (a Pages Function, a different
+  hostname), this attribute is the only thing that changes.
+-->
+<script src="./vikat-chat.js"
+        data-endpoint="https://sales-assistant.vikat.ai"
+        data-mode="inline"
+        data-mount="#assistant"
+        defer></script>
+
+</body>
+</html>
