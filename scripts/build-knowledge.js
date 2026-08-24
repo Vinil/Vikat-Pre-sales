@@ -217,6 +217,24 @@ function chunksFromFaq(faqPath, allowDrafts) {
   return { included, skipped };
 }
 
+function chunksFromSharePoint(spPath) {
+  if (!fs.existsSync(spPath)) return { chunks: [], syncedAt: null };
+
+  const data = JSON.parse(fs.readFileSync(spPath, 'utf8'));
+
+  // Strip the sync bookkeeping (itemId, webUrl, modified) down to the chunk
+  // contract the Worker consumes. Provenance stays in sharepoint.json, which
+  // is what a reviewer traces an answer back through.
+  const chunks = (data.chunks || []).map((c) => ({
+    id: c.id,
+    page: c.page,
+    section: c.section,
+    content: c.content,
+  }));
+
+  return { chunks, syncedAt: data.syncedAt || null };
+}
+
 // --- Emit -----------------------------------------------------------------
 
 /** Rough token estimate. Good enough to trip the Tier B retrieval threshold. */
@@ -248,7 +266,15 @@ export const KNOWLEDGE_TOKENS = ${meta.estimatedTokens};
 
 /** Build metadata, surfaced by GET /health for operational visibility. */
 export const KNOWLEDGE_META = ${JSON.stringify(
-    { chunkCount: chunks.length, estimatedTokens: meta.estimatedTokens, pageChunks: meta.pageChunks, faqChunks: meta.faqChunks, skippedFaqEntries: meta.skipped.map((s) => s.id) },
+    {
+      chunkCount: chunks.length,
+      estimatedTokens: meta.estimatedTokens,
+      pageChunks: meta.pageChunks,
+      faqChunks: meta.faqChunks,
+      sharePointChunks: meta.spChunks,
+      sharePointSyncedAt: meta.syncedAt,
+      skippedFaqEntries: meta.skipped.map((s) => s.id),
+    },
     null,
     2,
   )};
@@ -295,7 +321,16 @@ function main() {
   sourceLabels.push('worker/src/knowledge/faq.json');
   console.log(`  faq:   ${faqChunks.length} entr(y|ies) included, ${skipped.length} skipped`);
 
-  const chunks = [...faqChunks, ...pageChunks];
+  const spPath = path.resolve(REPO_ROOT, 'worker/src/knowledge/sharepoint.json');
+  const { chunks: spChunks, syncedAt } = chunksFromSharePoint(spPath);
+  if (spChunks.length) {
+    sourceLabels.push('worker/src/knowledge/sharepoint.json');
+    console.log(`  sharepoint: ${spChunks.length} chunk(s), last synced ${syncedAt || 'unknown'}`);
+  } else {
+    console.log('  sharepoint: (none — run `node scripts/sync-sharepoint.js` to pull decks and docs)');
+  }
+
+  const chunks = [...faqChunks, ...pageChunks, ...spChunks];
   const estimatedTokens = estimateTokens(chunks);
 
   fs.writeFileSync(
@@ -305,6 +340,8 @@ function main() {
       estimatedTokens,
       pageChunks: pageChunks.length,
       faqChunks: faqChunks.length,
+      spChunks: spChunks.length,
+      syncedAt,
       skipped,
     }),
     'utf8',

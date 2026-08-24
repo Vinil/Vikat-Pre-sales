@@ -1645,6 +1645,8 @@ export const KNOWLEDGE_META = {
   "estimatedTokens": 21859,
   "pageChunks": 268,
   "faqChunks": 2,
+  "sharePointChunks": 0,
+  "sharePointSyncedAt": null,
   "skippedFaqEntries": [
     "company-overview",
     "product-vcommand",

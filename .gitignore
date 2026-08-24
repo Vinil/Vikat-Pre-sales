@@ -4,3 +4,9 @@ node_modules/
 *.log
 .DS_Store
 dist/
+
+# SharePoint sync output. Contains internal sales material (pricing,
+# battlecards, customer names) and MUST NOT be committed — this repository is
+# public. The nightly workflow syncs, builds and deploys inside CI without
+# ever committing the result. See README "SharePoint sync".
+worker/src/knowledge/sharepoint.json

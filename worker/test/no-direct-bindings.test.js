@@ -183,6 +183,32 @@ test('dev auth cannot be enabled by a bare AUTH_MODE change', () => {
   );
 });
 
+test('the committed knowledge base contains no SharePoint material', async () => {
+  // This repository is PUBLIC. Site pages and the curated FAQ are already
+  // public; SharePoint chunks are internal sales material (pricing bands,
+  // battlecards, customer names). The nightly workflow merges them inside CI
+  // and deploys without committing, so a SharePoint chunk reaching a commit
+  // means that separation has broken.
+  const { KNOWLEDGE } = await import('../src/knowledge.js');
+  const leaked = KNOWLEDGE.filter((c) => c.page.startsWith('sharepoint/') || c.id.startsWith('sp:'));
+
+  assert.deepEqual(
+    leaked.map((c) => c.page),
+    [],
+    'Internal SharePoint content is in the committed knowledge base. Rebuild without it ' +
+      '(`node scripts/build-knowledge.js --pages <site>`) and confirm sharepoint.json is gitignored.',
+  );
+});
+
+test('the SharePoint sync output is gitignored', () => {
+  const ignore = fs.readFileSync(path.resolve(SRC, '../../.gitignore'), 'utf8');
+  assert.match(
+    ignore,
+    /worker\/src\/knowledge\/sharepoint\.json/,
+    'sharepoint.json holds internal material and must never be committed to a public repo',
+  );
+});
+
 test('wrangler.toml declares no secrets', () => {
   const toml = fs.readFileSync(path.resolve(SRC, '../wrangler.toml'), 'utf8');
   const declarations = toml

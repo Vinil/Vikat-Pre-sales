@@ -1,0 +1,101 @@
+# Nightly knowledge refresh.
+#
+# Pulls approved material from SharePoint, recompiles the knowledge base with
+# the public site pages, and deploys the Worker.
+#
+# NOTHING IS COMMITTED. This repository is public, and the compiled knowledge
+# base contains internal sales material once SharePoint is merged in. Those
+# artifacts live only in the CI runner and in the deployed Worker bundle. The
+# knowledge.js committed to the repo is built from the public site and the
+# curated FAQ alone, and a test enforces that.
+
+name: Sync knowledge base
+
+on:
+  schedule:
+    # 03:20 UTC nightly. Off the hour so it does not queue behind everything
+    # else the world schedules at :00.
+    - cron: '20 3 * * *'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Ignore the delta cursor and resync everything'
+        type: boolean
+        default: false
+
+concurrency:
+  group: sync-knowledge
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the agent
+        uses: actions/checkout@v4
+
+      - name: Check out the site (knowledge source)
+        uses: actions/checkout@v4
+        with:
+          repository: Vinil/vikat-ai-site-v1
+          path: .site
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: |
+          npm --prefix scripts install --no-audit --no-fund
+          npm --prefix worker install --no-audit --no-fund
+
+      # The delta cursor lets each run fetch only what changed. It is cached
+      # rather than committed: sharepoint.json carries file names and folder
+      # paths that should not be public.
+      - name: Restore sync cursor
+        uses: actions/cache/restore@v4
+        with:
+          path: worker/src/knowledge/sharepoint.json
+          key: sharepoint-sync-${{ github.run_id }}
+          restore-keys: sharepoint-sync-
+
+      - name: Sync SharePoint
+        env:
+          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+          SHAREPOINT_HOSTNAME: ${{ vars.SHAREPOINT_HOSTNAME }}
+          SHAREPOINT_SITE_PATH: ${{ vars.SHAREPOINT_SITE_PATH }}
+          SHAREPOINT_LIBRARY: ${{ vars.SHAREPOINT_LIBRARY }}
+          SHAREPOINT_FOLDER: ${{ vars.SHAREPOINT_FOLDER }}
+          FULL: ${{ inputs.full && '--full' || '' }}
+        run: node scripts/sync-sharepoint.js $FULL
+
+      - name: Compile the knowledge base
+        run: node scripts/build-knowledge.js --pages .site
+
+      - name: Verify the build
+        run: |
+          npm --prefix scripts test
+          npm --prefix worker test
+
+      - name: Save sync cursor
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: worker/src/knowledge/sharepoint.json
+          key: sharepoint-sync-${{ github.run_id }}
+
+      - name: Deploy the Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm --prefix worker run deploy -- --env=""
+
+      # A silent sync failure looks exactly like "nothing changed", and the
+      # agent keeps answering from stale material. Make it loud.
+      - name: Report failure
+        if: failure()
+        run: echo "::error::Knowledge sync failed. The agent is still serving the previous knowledge base."
