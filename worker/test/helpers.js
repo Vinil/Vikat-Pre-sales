@@ -13,6 +13,9 @@ export function fakeKV() {
     async put(key, value) {
       store.set(key, value);
     },
+    async delete(key) {
+      store.delete(key);
+    },
     async list({ prefix = '', limit = 1000 } = {}) {
       const keys = [...store.keys()]
         .filter((k) => k.startsWith(prefix))

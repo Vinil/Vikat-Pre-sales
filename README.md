@@ -18,6 +18,8 @@ worker/           Cloudflare Worker — the agent backend
   src/
     index.js        Routing, validation, rate limiting, SSE streaming
     auth.js         Identity. The only module that decides who is calling
+    roles.js        Authorization. What an authenticated person may do
+    admin.js        Admin panel API
     systemPrompt.js Persona, disclosure policy, guardrails
     knowledge.js    GENERATED — compiled knowledge base
     retrieve.js     Knowledge abstraction
@@ -29,8 +31,8 @@ worker/           Cloudflare Worker — the agent backend
       faq.json        Curated entries (compiled only when approved)
       disclosure.json What may be repeated to a customer, and who owns it
       sharepoint.json GENERATED, GITIGNORED — synced internal material
-  test/           124 unit tests
-widget/           Embeddable chat widget + standalone internal page
+  test/           158 unit tests
+widget/           Embeddable chat widget, internal page, and admin panel
 scripts/
   build-knowledge.js   Compile site HTML + FAQ + SharePoint into knowledge.js
   sync-sharepoint.js   Pull approved material from SharePoint via Graph
@@ -50,6 +52,7 @@ grep:
 | `retrieve.js` | Knowledge injection | Full-inject → Vectorize behind the same signature |
 | `leadSink.js` | Outbound notifications | Webhook → CRM without callers knowing |
 | `auth.js` | Identity | Cloudflare Access → Entra ID in one file |
+| `roles.js` | Authorization | Role model changes without touching identity |
 
 ---
 
@@ -77,7 +80,7 @@ Serve the widget against it by editing `data-endpoint` in
 ### Tests
 
 ```bash
-npm --prefix worker test      # 124 tests, no network, no browser
+npm --prefix worker test      # 158 tests, no network, no browser
 npm --prefix scripts test     # 39 tests, extraction and Graph client
 npm --prefix worker run test:widget   # 10 tests, needs Playwright + Chromium
 ```
@@ -256,6 +259,80 @@ from it, and tests assert every topic and owner reaches the prompt.
 
 ---
 
+## Admin panel
+
+`widget/admin.html`, served alongside the assistant. Requires the `admin` role;
+everyone else gets a 403 and a plain explanation.
+
+### Knowledge
+
+Add, edit and remove material the agent answers from. Entries are merged into
+the prompt **at request time**, so a correction typed here is live on the next
+message — no rebuild, no deploy.
+
+New entries default to **draft** and are invisible to the agent until approved.
+Approved entries go into every prompt, so the list is capped at 500 and each
+entry at 20,000 characters; an unbounded list is a slow, invisible way to grow
+cost and latency.
+
+Markup is stripped on the way in, so an entry cannot inject structure into the
+prompt.
+
+### SharePoint
+
+Configures **where** the sync reads: hostname, site path, library, folder.
+Changes apply on the next sync run.
+
+It does **not** configure the Graph credentials, on purpose:
+
+1. A client secret in KV is readable by anything that reaches KV. Today it
+   lives in secret storage and cannot be read back at all. Moving it into a web
+   form makes the admin panel a target worth compromising for tenant-wide
+   SharePoint read access.
+2. The sync runs in GitHub Actions, not in the Worker. A secret typed into the
+   panel would never reach the process that calls Graph.
+
+The panel reports whether credentials are configured and shows the last sync
+result. It cannot display or exfiltrate the secret.
+
+### Users and access
+
+This manages **authorization, not authentication**. It never creates a login.
+
+People sign in with their Vikat account through Entra or Cloudflare Access.
+A grant here decides what they can do once signed in. The property that matters:
+when someone leaves and IT disables their directory account, they lose access
+here immediately, without anyone remembering to revoke anything. A second user
+store with its own passwords would break exactly that.
+
+| Role | Can |
+|---|---|
+| `admin` | Use the assistant, plus the admin panel |
+| `rep` | Use the assistant |
+| `denied` | Nothing — blocked even though the IdP authenticates them |
+
+Precedence: `BOOTSTRAP_ADMINS` from config → an explicit grant in storage →
+`DEFAULT_ROLE`.
+
+`BOOTSTRAP_ADMINS` solves the cold start — with an empty KV nobody could reach
+the panel to grant the first role — and it is the recovery path: config beats
+storage, so a botched grant is fixed by redeploying rather than by editing KV
+by hand. **Keep at least one.**
+
+`DEFAULT_ROLE` decides the posture. `rep` means SSO is the gate: anyone with a
+Vikat account can use the assistant. `denied` makes it an explicit allowlist.
+
+Guardrails: the last admin cannot be demoted, you cannot remove your own admin
+access, bootstrap admins cannot be edited from the panel, and a grant to an
+address outside `ALLOWED_EMAIL_DOMAINS` is refused rather than silently having
+no effect.
+
+Note that with `DEFAULT_ROLE=rep`, *removing* a grant returns someone to `rep`
+rather than blocking them. To actually block someone, set them to `denied`. The
+panel says so when you remove a grant.
+
+---
+
 ## Deploying
 
 ```bash
@@ -263,8 +340,8 @@ npm --prefix worker run deploy -- --env=""
 ```
 
 Before the first deploy, fill the `REPLACE_WITH_` placeholders in
-`wrangler.toml`: the Access team domain and AUD tag, the notification webhook
-URL, and the KV namespace ids.
+`wrangler.toml`: the Access team domain and AUD tag, `BOOTSTRAP_ADMINS`, the
+notification webhook URL, and the KV namespace ids.
 
 ```bash
 wrangler kv namespace create VIKAT_KV
@@ -285,6 +362,9 @@ and pointing `data-endpoint` at the Worker.
   and flags a gap rather than inventing an answer.
 - Check the notification channel for the logged prospect, expert request and
   content gap.
+- Open `/admin.html` as a non-admin. It must refuse.
+- As an admin, add an approved knowledge entry and confirm the assistant uses
+  it on the next message without a redeploy.
 
 ---
 

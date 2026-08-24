@@ -35,6 +35,16 @@ export const DEFAULTS = {
   // Must be explicitly true for AUTH_MODE=dev to function. Never set in prod.
   ALLOW_DEV_AUTH: false,
 
+  // --- Authorization -----------------------------------------------------
+  // Always admin, regardless of what is in storage. Solves the cold start:
+  // with an empty KV nobody could otherwise reach the panel to grant the first
+  // role. Keep at least one, or a bad grant can only be undone by editing KV.
+  BOOTSTRAP_ADMINS: [],
+  // Role for someone the IdP authenticated but nobody has graded.
+  // 'rep' — anyone who can sign in can use the assistant (SSO is the gate).
+  // 'denied' — explicit allowlist; every user must be granted a role first.
+  DEFAULT_ROLE: 'rep',
+
   // --- Request validation ------------------------------------------------
   // Reps hold longer working sessions than prospects did, and paste in
   // prospect emails and RFP excerpts to ask about.
@@ -101,7 +111,7 @@ const NUMERIC_KEYS = new Set([
 
 const BOOLEAN_KEYS = new Set(['ALLOW_DEV_AUTH']);
 
-const LIST_KEYS = new Set(['ALLOWED_ORIGINS', 'ALLOWED_EMAIL_DOMAINS']);
+const LIST_KEYS = new Set(['ALLOWED_ORIGINS', 'ALLOWED_EMAIL_DOMAINS', 'BOOTSTRAP_ADMINS']);
 
 /**
  * Merge environment overrides onto DEFAULTS.

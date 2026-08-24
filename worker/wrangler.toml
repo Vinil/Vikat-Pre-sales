@@ -45,6 +45,16 @@ CF_ACCESS_AUD = "REPLACE_WITH_ACCESS_AUD_TAG"
 ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].
 
+# --- Authorization --------------------------------------------------------
+# Always admin, whatever storage says. Keep at least one: with an empty KV
+# nobody could otherwise reach the admin panel to grant the first role, and a
+# botched grant is recoverable by redeploying rather than by editing KV.
+BOOTSTRAP_ADMINS = "REPLACE_WITH_YOUR_EMAIL@vikat.ai"
+# Role for someone the IdP authenticated but nobody has graded.
+#   rep    — anyone who can sign in can use the assistant (SSO is the gate)
+#   denied — explicit allowlist; every user must be granted a role first
+DEFAULT_ROLE = "rep"
+
 # --- Origins --------------------------------------------------------------
 # Internal hosts only. The public marketing site is deliberately absent.
 ALLOWED_ORIGINS = "https://sales-assistant.vikat.ai"
@@ -77,6 +87,7 @@ preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
 [env.dev.vars]
 AUTH_MODE = "dev"
 ALLOW_DEV_AUTH = "true"
+BOOTSTRAP_ADMINS = "dev@vikat.ai"
 ALLOWED_ORIGINS = "http://localhost:8788,http://127.0.0.1:8788"
 LEAD_SINK = "none"
 INTERNAL_HELP_CHANNEL = "#sales-help"

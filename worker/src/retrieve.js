@@ -62,8 +62,31 @@ function escapeAttr(s) {
  */
 export async function retrieve(query, sessionContext = {}) {
   void query;
-  void sessionContext;
-  return format(KNOWLEDGE);
+
+  // Admin-authored entries are merged at request time, so a correction typed
+  // into the panel is live on the next message rather than the next deploy.
+  // They come last: later entries read as the more recent word on a subject,
+  // which is what an admin adding a correction intends.
+  let runtime = [];
+  if (sessionContext.storage) {
+    try {
+      const entries = await sessionContext.storage.listKnowledge();
+      runtime = entries
+        .filter((e) => e.status === 'approved' && e.content && e.content.trim())
+        .map((e) => ({
+          id: `admin:${e.id}`,
+          page: 'admin/knowledge',
+          section: e.section || 'Note',
+          content: e.content.trim(),
+        }));
+    } catch (err) {
+      // A KV hiccup must not take the assistant down. The compiled base is
+      // still a good answer; log and carry on.
+      console.error('[retrieve] runtime knowledge unavailable:', err?.message || err);
+    }
+  }
+
+  return format([...KNOWLEDGE, ...runtime]);
 }
 
 /**

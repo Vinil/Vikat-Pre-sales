@@ -13,6 +13,9 @@
  *   session:<sessionId>              -> Session JSON
  *   log:<sessionId>:<isoTimestamp>   -> LogEntry JSON
  *   rate:<bucketKey>                 -> { count, resetAt }
+ *   kb:<entryId>                     -> KnowledgeEntry JSON   (admin-authored)
+ *   user:<emailLower>                -> UserRecord JSON       (role grants)
+ *   setting:<key>                    -> arbitrary JSON        (admin settings)
  *
  * Timestamp-prefixed keys keep `list({ prefix })` naturally ordered for the
  * weekly transcript review.
@@ -50,6 +53,37 @@
  * @property {(entry: LogEntry) => Promise<void>} appendLog
  * @property {(sessionId: string) => Promise<LogEntry[]>} getLogs
  * @property {(key: string, limit: number, windowSeconds: number) => Promise<{allowed: boolean, remaining: number, resetAt: number}>} checkRateLimit
+ * @property {() => Promise<KnowledgeEntry[]>} listKnowledge
+ * @property {(id: string) => Promise<KnowledgeEntry|null>} getKnowledge
+ * @property {(entry: object, actor: string) => Promise<KnowledgeEntry>} saveKnowledge
+ * @property {(id: string) => Promise<boolean>} deleteKnowledge
+ * @property {() => Promise<UserRecord[]>} listUsers
+ * @property {(email: string) => Promise<UserRecord|null>} getUser
+ * @property {(email: string, role: string, actor: string) => Promise<UserRecord>} saveUser
+ * @property {(email: string) => Promise<boolean>} deleteUser
+ * @property {(key: string) => Promise<object|null>} getSetting
+ * @property {(key: string, value: object, actor: string) => Promise<object>} saveSetting
+ */
+
+/**
+ * @typedef {object} KnowledgeEntry
+ * @property {string} id
+ * @property {string} section     Short title, shown to the model as the heading.
+ * @property {string} content     The material itself.
+ * @property {'approved'|'draft'} status
+ * @property {string} [notes]     Why this exists; not sent to the model.
+ * @property {string} createdBy
+ * @property {string} updatedBy
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * @typedef {object} UserRecord
+ * @property {string} email
+ * @property {'admin'|'rep'|'denied'} role
+ * @property {string} grantedBy
+ * @property {string} updatedAt
  */
 
 /** Namespaced random id. crypto.randomUUID is available in Workers. */
@@ -126,6 +160,99 @@ export function createStorage(env, cfg) {
      * scale; if it stops being acceptable, the fix is a Durable Object behind
      * this same method — still no caller change.
      */
+    // --- Admin-authored knowledge ---------------------------------------
+    //
+    // Kept separate from the compiled knowledge base so an admin can add or
+    // correct material without a rebuild and deploy. retrieve() merges the two.
+
+    async listKnowledge() {
+      const { keys } = await kv.list({ prefix: 'kb:' });
+      const out = [];
+      for (const k of keys) {
+        const v = await kv.get(k.name, 'json');
+        if (v) out.push(v);
+      }
+      return out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    },
+
+    async getKnowledge(id) {
+      return kv.get(`kb:${id}`, 'json');
+    },
+
+    async saveKnowledge(entry, actor) {
+      const now = new Date().toISOString();
+      const existing = entry.id ? await kv.get(`kb:${entry.id}`, 'json') : null;
+
+      const record = {
+        id: entry.id || newId('kb'),
+        section: entry.section,
+        content: entry.content,
+        status: entry.status === 'approved' ? 'approved' : 'draft',
+        notes: entry.notes || '',
+        createdBy: existing?.createdBy || actor,
+        createdAt: existing?.createdAt || now,
+        updatedBy: actor,
+        updatedAt: now,
+      };
+
+      // No TTL: admin-authored knowledge must not silently expire out of the
+      // agent's answers months after someone wrote it.
+      await kv.put(`kb:${record.id}`, JSON.stringify(record));
+      return record;
+    },
+
+    async deleteKnowledge(id) {
+      if (!(await kv.get(`kb:${id}`))) return false;
+      await kv.delete(`kb:${id}`);
+      return true;
+    },
+
+    // --- Role grants ------------------------------------------------------
+
+    async listUsers() {
+      const { keys } = await kv.list({ prefix: 'user:' });
+      const out = [];
+      for (const k of keys) {
+        const v = await kv.get(k.name, 'json');
+        if (v) out.push(v);
+      }
+      return out.sort((a, b) => String(a.email).localeCompare(String(b.email)));
+    },
+
+    async getUser(email) {
+      return kv.get(`user:${String(email).toLowerCase()}`, 'json');
+    },
+
+    async saveUser(email, role, actor) {
+      const record = {
+        email: String(email).toLowerCase(),
+        role,
+        grantedBy: actor,
+        updatedAt: new Date().toISOString(),
+      };
+      await kv.put(`user:${record.email}`, JSON.stringify(record));
+      return record;
+    },
+
+    async deleteUser(email) {
+      const key = `user:${String(email).toLowerCase()}`;
+      if (!(await kv.get(key))) return false;
+      await kv.delete(key);
+      return true;
+    },
+
+    // --- Settings ---------------------------------------------------------
+
+    async getSetting(key) {
+      return kv.get(`setting:${key}`, 'json');
+    },
+
+    async saveSetting(key, value, actor) {
+      const record = { ...value, updatedBy: actor, updatedAt: new Date().toISOString() };
+      await kv.put(`setting:${key}`, JSON.stringify(record));
+      return record;
+    },
+
     async checkRateLimit(key, limit, windowSeconds) {
       const now = Date.now();
       const kvKey = `rate:${key}`;

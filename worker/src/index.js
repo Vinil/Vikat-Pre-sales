@@ -25,6 +25,8 @@ import { retrieve, retrievalStatus } from './retrieve.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
 import { authenticate } from './auth.js';
+import { resolveRole, canUseAssistant, canAdminister } from './roles.js';
+import { handleAdmin, handleAdminSummary } from './admin.js';
 
 // --- CORS -----------------------------------------------------------------
 
@@ -42,7 +44,7 @@ function corsHeaders(request, cfg) {
 
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cf-Access-Jwt-Assertion, X-Dev-User',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
@@ -197,6 +199,8 @@ async function handleChat(request, env, ctx, cfg, cors, user) {
   const sessionContext = {
     sessionId,
     user,
+    // retrieve() uses this to merge admin-authored entries at request time.
+    storage,
     turnCount: messages.filter((m) => m.role === 'user').length,
   };
 
@@ -371,7 +375,12 @@ export default {
     // Everything below is internal and requires a verified Vikat identity.
     // Authenticate before parsing a body or touching the model, so an
     // unauthenticated caller costs nothing.
-    if (url.pathname === '/chat' || url.pathname === '/whoami') {
+    const isProtected =
+      url.pathname === '/chat' ||
+      url.pathname === '/whoami' ||
+      url.pathname.startsWith('/admin/');
+
+    if (isProtected) {
       const auth = await authenticate(request, env, cfg);
 
       if (!auth.ok) {
@@ -389,9 +398,44 @@ export default {
         );
       }
 
-      // Lets the widget render "signed in as ..." without a chat round-trip.
+      const storage = createStorage(env, cfg);
+      const { role, source } = await resolveRole(auth.user, storage, cfg);
+
+      // Authenticated but not authorized. 403, not 401: signing in again will
+      // not help, and telling them so saves a support round-trip.
+      if (!canUseAssistant(role)) {
+        return json(
+          {
+            error: 'Your account does not have access to the sales assistant. Ask an administrator to grant it.',
+            code: 'forbidden',
+          },
+          403,
+          cors,
+        );
+      }
+
       if (url.pathname === '/whoami') {
-        return json({ email: auth.user.email, name: auth.user.name }, 200, cors);
+        return json({ email: auth.user.email, name: auth.user.name, role, roleSource: source }, 200, cors);
+      }
+
+      if (url.pathname.startsWith('/admin/')) {
+        if (!canAdminister(role)) {
+          return json({ error: 'Administrator access is required.', code: 'forbidden' }, 403, cors);
+        }
+
+        const adminCtx = { storage, user: auth.user, cfg, cors, env };
+
+        try {
+          if (url.pathname === '/admin/summary') {
+            return await handleAdminSummary(request, adminCtx);
+          }
+          const res = await handleAdmin(request, url, adminCtx);
+          if (res) return res;
+          return json({ error: 'Not found.', code: 'not_found' }, 404, cors);
+        } catch (err) {
+          console.error('[admin] unhandled:', err?.message || err);
+          return json({ error: 'Something went wrong.', code: 'internal_error' }, 500, cors);
+        }
       }
 
       if (request.method !== 'POST') {
