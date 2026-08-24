@@ -74,6 +74,12 @@ function stripTags(html) {
     html.replace(BLOCK_STRIP, ' ').replace(COMMENT, ' ').replace(TAG, ' '),
   )
     .replace(/[ \t\r\f\v]+/g, ' ')
+    // Collapse whitespace-only lines. Stripped tags leave one space per tag, so
+    // a nav block becomes dozens of " \n" lines — pure token waste otherwise.
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter((line, i, all) => line !== '' || (i > 0 && all[i - 1] !== ''))
+    .join('\n')
     .replace(/\n{2,}/g, '\n')
     .trim();
 }
