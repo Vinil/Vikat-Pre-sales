@@ -1,0 +1,111 @@
+{
+  "$schema_note": "Curated knowledge. Each entry is compiled into the knowledge base ONLY when status === 'approved'. Draft entries are excluded by scripts/build-knowledge.js and the agent will therefore deflect those questions to a call rather than guess. This is deliberate: Hard Rule 2 forbids invented capabilities, so an unfilled entry must produce silence, not a plausible sentence.",
+  "$fill_instructions": "For each entry: paste the factual, already-published description of the item into `content`, then set status to 'approved'. Keep it to plain prose the agent can quote or paraphrase. Do not write aspirational or roadmap language — only what is true and shippable today. Re-run `npm run build:knowledge` after editing.",
+  "entries": [
+    {
+      "id": "company-overview",
+      "section": "What Vikat is",
+      "status": "draft",
+      "prompt": "One paragraph: what Vikat is, the category it sits in, and who it is for.",
+      "content": ""
+    },
+    {
+      "id": "product-vcommand",
+      "section": "VCommand",
+      "status": "draft",
+      "prompt": "What VCommand is, the problem it solves, and its primary capabilities as currently shipped.",
+      "content": ""
+    },
+    {
+      "id": "product-vshield",
+      "section": "VShield",
+      "status": "draft",
+      "prompt": "What VShield is, the problem it solves, and its primary capabilities as currently shipped.",
+      "content": ""
+    },
+    {
+      "id": "product-vinsight",
+      "section": "VInsight",
+      "status": "draft",
+      "prompt": "What VInsight is, the problem it solves, and its primary capabilities as currently shipped.",
+      "content": ""
+    },
+    {
+      "id": "product-vsentinel",
+      "section": "VSentinel",
+      "status": "draft",
+      "prompt": "What VSentinel is, the problem it solves, and its primary capabilities as currently shipped.",
+      "content": ""
+    },
+    {
+      "id": "solution-mcp-server-security",
+      "section": "Solution area: MCP Server Security",
+      "status": "draft",
+      "prompt": "What Vikat does for MCP server security, which products cover it, and the buyer problem it addresses.",
+      "content": ""
+    },
+    {
+      "id": "solution-agent-security",
+      "section": "Solution area: Agent Security",
+      "status": "draft",
+      "prompt": "What Vikat does for agent security, which products cover it, and the buyer problem it addresses.",
+      "content": ""
+    },
+    {
+      "id": "solution-app-cloud-security",
+      "section": "Solution area: App & Cloud Security",
+      "status": "draft",
+      "prompt": "What Vikat does for application and cloud security, which products cover it, and the buyer problem it addresses.",
+      "content": ""
+    },
+    {
+      "id": "solution-ai-governance",
+      "section": "Solution area: AI Governance",
+      "status": "draft",
+      "prompt": "What Vikat does for AI governance, which products cover it, and the buyer problem it addresses.",
+      "content": ""
+    },
+    {
+      "id": "deployment-models",
+      "section": "Deployment models",
+      "status": "draft",
+      "prompt": "How Vikat is deployed today (e.g. SaaS, self-hosted, hybrid, in-VPC) and what each implies for the customer. Only list models that are actually available.",
+      "content": ""
+    },
+    {
+      "id": "engagement-models",
+      "section": "Engagement models",
+      "status": "draft",
+      "prompt": "How a prospect starts: evaluation, pilot/POC, production rollout. Typical shape and duration of each, without committing to pricing.",
+      "content": ""
+    },
+    {
+      "id": "partnership-posture",
+      "section": "Partnerships and channel",
+      "status": "draft",
+      "prompt": "Vikat's posture on technology partners, resellers, MSSPs and integrations. Name only partners that are publicly announced.",
+      "content": ""
+    },
+    {
+      "id": "integrations",
+      "section": "Integrations",
+      "status": "draft",
+      "prompt": "Systems Vikat integrates with today (cloud providers, SIEM/SOAR, identity, CI/CD). List only shipped integrations.",
+      "content": ""
+    },
+    {
+      "id": "contact-next-steps",
+      "section": "How to get in touch",
+      "status": "approved",
+      "prompt": "Static. Safe to keep approved — contains no product claims.",
+      "content": "Prospects can book time with the Vikat team using the booking link the assistant provides via the request_meeting tool, or reach the team by email. The assistant can pass along a name, email, company, role and a short description of the use case so the team arrives at the call already briefed."
+    },
+    {
+      "id": "assistant-scope",
+      "section": "What this assistant can and cannot do",
+      "status": "approved",
+      "prompt": "Static. Safe to keep approved — describes the assistant, not the product.",
+      "content": "This assistant answers questions about Vikat's products and solution areas from Vikat's published material, and can arrange a conversation with the team. It does not quote prices, discuss company financials, name customers, commit to roadmap dates, or complete security questionnaires — those go to the Vikat team directly. Conversations are logged and reviewed by Vikat."
+    }
+  ]
+}

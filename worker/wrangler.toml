@@ -1,0 +1,55 @@
+# Vikat pre-sales agent — Cloudflare Worker (Tier A)
+#
+# Secrets are NOT set here. Run:
+#   wrangler secret put ANTHROPIC_API_KEY
+# and, if LEAD_SINK = "mailchannels" with DKIM:
+#   wrangler secret put DKIM_PRIVATE_KEY
+#   wrangler secret put MAILCHANNELS_API_KEY
+# or, if LEAD_SINK = "webhook":
+#   wrangler secret put LEAD_WEBHOOK_TOKEN
+
+name = "vikat-agent"
+main = "src/index.js"
+compatibility_date = "2025-05-05"
+compatibility_flags = ["nodejs_compat"]
+
+# Tier B (B1) note: when the site moves to Cloudflare Pages, this Worker becomes
+# a Pages Function at /api/chat. The route below goes away, ALLOWED_ORIGINS
+# narrows to same-origin, and the widget's data-endpoint changes. Nothing in
+# src/ needs to change.
+routes = [
+  { pattern = "agent.vikat.ai/*", zone_name = "vikat.ai" }
+]
+
+[observability]
+enabled = true
+
+# Every value here overrides the same-named key in src/config.js.
+[vars]
+MODEL = "claude-sonnet-4-6"
+MAX_TOKENS = "1024"
+MAX_MESSAGES_PER_SESSION = "30"
+MAX_CHARS_PER_MESSAGE = "2000"
+RATE_LIMIT_REQUESTS = "20"
+RATE_LIMIT_WINDOW_SECONDS = "600"
+ALLOWED_ORIGINS = "https://vikat.ai,https://www.vikat.ai"
+LEAD_SINK = "mailchannels"
+LEAD_TO_EMAIL = "contact@vikat.ai"
+LEAD_FROM_EMAIL = "agent@vikat.ai"
+BOOKING_URL = "https://vikat.ai/contact"
+CONTACT_EMAIL = "contact@vikat.ai"
+
+# Create with:
+#   wrangler kv namespace create VIKAT_KV
+#   wrangler kv namespace create VIKAT_KV --preview
+# then paste the ids below.
+[[kv_namespaces]]
+binding = "VIKAT_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+
+# --- Local development ----------------------------------------------------
+[env.dev]
+[env.dev.vars]
+ALLOWED_ORIGINS = "http://localhost:8788,http://localhost:3000,http://127.0.0.1:8788"
+LEAD_SINK = "none"

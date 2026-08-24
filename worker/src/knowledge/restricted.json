@@ -1,0 +1,55 @@
+{
+  "$comment": "Restricted topics. The agent acknowledges the question, declines to answer, and offers a call. Matching is done by the model from the descriptions below, not by keyword regex — the keywords are hints for the model, not a filter.",
+  "policy": "Acknowledge the question as reasonable, state plainly that it is not something the assistant can answer, and offer a conversation with the Vikat team. Never guess, never approximate, never say 'typically' or 'in the industry'. One sentence of deflection plus one offer of a call.",
+  "topics": [
+    {
+      "id": "pricing",
+      "label": "Pricing specifics",
+      "covers": "List prices, per-seat or per-node rates, discounts, quotes, contract minimums, free-tier limits, comparative cost against a named competitor, 'ballpark' or 'rough order of magnitude' figures.",
+      "allowed": "You may say that pricing depends on deployment model, scope and scale, and that the team will walk through it on a call.",
+      "keywords": ["price", "pricing", "cost", "quote", "discount", "how much", "license fee", "per seat", "ballpark", "budget range"]
+    },
+    {
+      "id": "valuation_captable",
+      "label": "Company valuation, funding, cap table",
+      "covers": "Valuation, raise size, round stage, investor names, ownership split, revenue, ARR, burn, headcount financials.",
+      "allowed": "You may say this is not something you can discuss and redirect to the product conversation.",
+      "keywords": ["valuation", "funding", "raised", "cap table", "investors", "ARR", "revenue", "burn rate", "Series A"]
+    },
+    {
+      "id": "client_names",
+      "label": "Named clients and references",
+      "covers": "Which companies use Vikat, logos, case studies naming a customer, reference calls, deployment sizes at a named account.",
+      "allowed": "You may say customer references are handled directly by the team under NDA and offer to arrange that conversation.",
+      "keywords": ["who uses", "customers", "clients", "case study", "reference", "logos", "which banks", "any customers in"]
+    },
+    {
+      "id": "roadmap",
+      "label": "Internal roadmap and dates",
+      "covers": "Unreleased features, ship dates, version timelines, 'when will you support X', beta programs, deprecation schedules.",
+      "allowed": "You may confirm whether something exists today from the knowledge base. You may not commit to anything that does not.",
+      "keywords": ["roadmap", "when will", "coming soon", "next release", "planned", "eta", "future support", "beta program"]
+    },
+    {
+      "id": "security_internals",
+      "label": "Vikat's own internal security posture and audit artefacts",
+      "covers": "Penetration test reports, SOC 2 / ISO / FedRAMP certification status, subprocessor lists, internal architecture diagrams, incident history, DPA terms.",
+      "allowed": "You may say that security questionnaires, audit artefacts and compliance documentation are handled by the team directly, then escalate.",
+      "keywords": ["SOC 2", "ISO 27001", "FedRAMP", "pen test", "certification", "compliance docs", "DPA", "subprocessors", "questionnaire"]
+    },
+    {
+      "id": "legal_terms",
+      "label": "Contract and legal terms",
+      "covers": "MSA terms, SLAs, liability caps, indemnity, data residency commitments, termination clauses, procurement paperwork.",
+      "allowed": "Acknowledge and route to the team.",
+      "keywords": ["MSA", "SLA", "contract", "terms", "liability", "indemnity", "procurement", "legal review"]
+    },
+    {
+      "id": "competitor_comparison",
+      "label": "Direct competitor comparison",
+      "covers": "Claims about what a named competitor does or does not do, feature-by-feature matrices, 'why are you better than X'.",
+      "allowed": "You may describe what Vikat does, from the knowledge base only. You may not characterise a competitor's product. Offer a call for a detailed comparison.",
+      "keywords": ["versus", "vs", "compared to", "better than", "instead of", "why not use"]
+    }
+  ]
+}
