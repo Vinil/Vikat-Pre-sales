@@ -1,0 +1,67 @@
+{
+  "$comment": "Disclosure classification for an INTERNAL audience. This file replaced restricted.json when the agent's audience changed from prospects to Vikat sales reps. The semantics inverted: the agent no longer refuses these topics, it answers them and labels what the rep may repeat to a customer. Refusing a rep is useless; letting a rep unknowingly repeat internal material to a prospect is the actual risk.",
+  "policy": "Answer from the knowledge base. When the answer touches a classified topic below, end with a short disclosure tag on its own line. Never tag an answer that is already public — over-tagging trains reps to ignore the tags.",
+  "tags": {
+    "external_ok": "[OK to share] — published material, safe to repeat verbatim.",
+    "internal_only": "[Internal only] — do not repeat to a customer, in writing or on a call.",
+    "needs_approval": "[Check before sharing] — repeatable only with the named owner's sign-off."
+  },
+  "topics": [
+    {
+      "id": "pricing",
+      "label": "Pricing, discounting and commercial terms",
+      "covers": "List prices, per-seat or per-node rates, discount bands, floor pricing, contract minimums, deal-desk guidance.",
+      "disclosure": "needs_approval",
+      "owner": "Deal Desk",
+      "guidance": "Give the rep the numbers if the knowledge base has them, and say plainly which are list versus floor. Quoting a floor price to a customer without deal-desk sign-off is the error to prevent."
+    },
+    {
+      "id": "roadmap",
+      "label": "Roadmap, unreleased features and dates",
+      "covers": "Unshipped capabilities, target dates, version timelines, beta programmes, deprecation schedules.",
+      "disclosure": "internal_only",
+      "owner": "Product",
+      "guidance": "Answer for the rep's own planning. Be explicit about what has shipped versus what is planned. A rep must never commit a date to a customer from this material; say so when it comes up."
+    },
+    {
+      "id": "customers",
+      "label": "Named customers, logos and references",
+      "covers": "Which companies use Vikat, deployment size at a named account, reference availability, win/loss detail.",
+      "disclosure": "needs_approval",
+      "owner": "Customer Marketing",
+      "guidance": "Say which logos are publicly referenceable and which are not. An unapproved logo drop on a call is a contract problem, not just an awkward moment."
+    },
+    {
+      "id": "competitors",
+      "label": "Competitive positioning and teardowns",
+      "covers": "Battlecards, feature comparisons, known gaps in a competitor's product, displacement plays.",
+      "disclosure": "internal_only",
+      "owner": "Product Marketing",
+      "guidance": "Give the rep the full battlecard. Frame customer-facing language as what Vikat does, never as a claim about the competitor's product, which is where legal exposure lives."
+    },
+    {
+      "id": "security_posture",
+      "label": "Vikat's own security posture and audit artefacts",
+      "covers": "Certification status, pen test findings, subprocessor lists, incident history, architecture internals, questionnaire responses.",
+      "disclosure": "needs_approval",
+      "owner": "Security",
+      "guidance": "State certification status plainly if the knowledge base has it. Completed questionnaires and pen test findings go out only under NDA via Security — route the rep there rather than answering from a cached response."
+    },
+    {
+      "id": "financials",
+      "label": "Company financials and funding",
+      "covers": "Valuation, raise size, investors, revenue, ARR, burn, runway, headcount economics.",
+      "disclosure": "internal_only",
+      "owner": "Finance",
+      "guidance": "Most reps do not need this. Answer only what the knowledge base states and tag it internal. Never supply a figure a customer or partner asked the rep to obtain."
+    },
+    {
+      "id": "legal_terms",
+      "label": "Contract and legal terms",
+      "covers": "MSA and SLA terms, liability caps, indemnity, data residency commitments, termination clauses.",
+      "disclosure": "needs_approval",
+      "owner": "Legal",
+      "guidance": "Describe the standard position where documented. Any deviation, redline or customer-specific commitment goes to Legal — a rep agreeing to a term on a call can bind the company."
+    }
+  ]
+}

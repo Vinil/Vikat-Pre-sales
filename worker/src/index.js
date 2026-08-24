@@ -6,6 +6,11 @@
  *   GET  /health   Build + config visibility. No secrets.
  *   OPTIONS *      CORS preflight.
  *
+ * AUDIENCE: internal. Every /chat request must carry a verified Vikat identity
+ * (see auth.js). The agent answers from material that is not cleared for
+ * customers, so an unauthenticated request is refused before the model is
+ * reached and before anything is billed.
+ *
  * The worker is stateless in Tier A: the client sends the full history each
  * turn. Tier B (B2) makes the server session-authoritative — the client will
  * then send only `sessionId` plus the new message, and this handler will load
@@ -19,6 +24,7 @@ import { createStorage } from './storage.js';
 import { retrieve, retrievalStatus } from './retrieve.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
+import { authenticate } from './auth.js';
 
 // --- CORS -----------------------------------------------------------------
 
@@ -37,7 +43,8 @@ function corsHeaders(request, cfg) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cf-Access-Jwt-Assertion, X-Dev-User',
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
@@ -140,7 +147,7 @@ function sse(event, data) {
 
 // --- Chat -----------------------------------------------------------------
 
-async function handleChat(request, env, ctx, cfg, cors) {
+async function handleChat(request, env, ctx, cfg, cors, user) {
   if (!env.ANTHROPIC_API_KEY) {
     console.error('[chat] ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY');
     return json({ error: 'The assistant is not available right now.', code: 'misconfigured' }, 503, cors);
@@ -160,17 +167,21 @@ async function handleChat(request, env, ctx, cfg, cors) {
 
   const storage = createStorage(env, cfg);
 
-  // Rate limit by client IP. CF-Connecting-IP is set by Cloudflare's edge and
-  // cannot be spoofed by the client at this layer.
-  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const rate = await storage.checkRateLimit(ip, cfg.RATE_LIMIT_REQUESTS, cfg.RATE_LIMIT_WINDOW_SECONDS);
+  // Rate limit per authenticated user, not per IP: reps share office egress
+  // and NAT, so an IP bucket would throttle a whole team at once. Abuse is not
+  // the threat model here — a runaway client loop is.
+  const rate = await storage.checkRateLimit(
+    `user:${user.sub}`,
+    cfg.RATE_LIMIT_REQUESTS,
+    cfg.RATE_LIMIT_WINDOW_SECONDS,
+  );
 
   if (!rate.allowed) {
     const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
     const waitMinutes = Math.max(1, Math.ceil(retryAfter / 60));
     return json(
       {
-        error: `You've hit the message limit for now. Try again in about ${waitMinutes} minute${waitMinutes === 1 ? '' : 's'}, or email ${cfg.CONTACT_EMAIL} and we'll pick it up from there.`,
+        error: `Rate limit reached — try again in about ${waitMinutes} minute${waitMinutes === 1 ? '' : 's'}. If this is unexpected, flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
         code: 'rate_limited',
         retryAfter,
       },
@@ -182,9 +193,12 @@ async function handleChat(request, env, ctx, cfg, cors) {
   const { sessionId, messages } = parsed;
   const userMessage = messages[messages.length - 1].content;
 
-  // Tier A: no server-side session state. Tier B (B2) loads it here and the
-  // returning-visitor branch in buildSystemPrompt() starts firing.
-  const sessionContext = { sessionId, turnCount: messages.filter((m) => m.role === 'user').length };
+  // Tier A: no server-side session state. Tier B (B2) loads it here.
+  const sessionContext = {
+    sessionId,
+    user,
+    turnCount: messages.filter((m) => m.role === 'user').length,
+  };
 
   const knowledge = await retrieve(userMessage, sessionContext);
   const system = buildSystemPrompt(cfg, knowledge, sessionContext);
@@ -247,7 +261,7 @@ async function handleChat(request, env, ctx, cfg, cors) {
 
             const result = await runTool(
               { name: block.name, input: block.input },
-              { sessionId, storage, env, cfg },
+              { sessionId, user, storage, env, cfg },
             );
 
             results.push({
@@ -257,11 +271,6 @@ async function handleChat(request, env, ctx, cfg, cors) {
               ...(result.isError ? { is_error: true } : {}),
             });
 
-            if (block.name === 'request_meeting' && result.effect?.bookingUrl) {
-              // Let the widget render a button rather than relying on the model
-              // to reproduce the URL correctly in prose.
-              send('meeting', { bookingUrl: result.effect.bookingUrl });
-            }
           }
 
           convo.push({ role: 'user', content: results });
@@ -278,7 +287,7 @@ async function handleChat(request, env, ctx, cfg, cors) {
         send('error', {
           message: isOverloaded
             ? 'The assistant is busy right now. Try again in a moment.'
-            : `Something went wrong on our side. Email ${cfg.CONTACT_EMAIL} and we'll pick it up from there.`,
+            : `Something went wrong. Retry, and if it persists flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
           code: isOverloaded ? 'upstream_busy' : 'upstream_error',
         });
       } finally {
@@ -287,6 +296,7 @@ async function handleChat(request, env, ctx, cfg, cors) {
           storage
             .appendLog({
               sessionId,
+              userEmail: user.email,
               timestamp: new Date().toISOString(),
               userMessage,
               agentResponse: fullText,
@@ -337,6 +347,8 @@ export default {
       return new Response(null, { status: 204, headers: cors });
     }
 
+    // Unauthenticated: deployment sanity only. Deliberately says nothing about
+    // the knowledge base's contents, only its size.
     if (url.pathname === '/health' && request.method === 'GET') {
       return json(
         {
@@ -344,21 +356,50 @@ export default {
           model: cfg.MODEL,
           knowledge: retrievalStatus(),
           leadSink: cfg.LEAD_SINK,
-          rateLimit: `${cfg.RATE_LIMIT_REQUESTS}/${cfg.RATE_LIMIT_WINDOW_SECONDS}s`,
+          authMode: cfg.AUTH_MODE,
+          rateLimit: `${cfg.RATE_LIMIT_REQUESTS}/${cfg.RATE_LIMIT_WINDOW_SECONDS}s per user`,
           apiKeyConfigured: Boolean(env.ANTHROPIC_API_KEY),
           kvConfigured: Boolean(env.VIKAT_KV),
+          // Loudly visible if dev auth is ever live in production.
+          devAuthOpen: cfg.AUTH_MODE === 'dev' && cfg.ALLOW_DEV_AUTH,
         },
         200,
         cors,
       );
     }
 
-    if (url.pathname === '/chat') {
+    // Everything below is internal and requires a verified Vikat identity.
+    // Authenticate before parsing a body or touching the model, so an
+    // unauthenticated caller costs nothing.
+    if (url.pathname === '/chat' || url.pathname === '/whoami') {
+      const auth = await authenticate(request, env, cfg);
+
+      if (!auth.ok) {
+        const misconfigured = auth.reason === 'misconfigured' || auth.reason === 'dev_auth_disabled';
+        return json(
+          {
+            error: misconfigured
+              ? 'The assistant is not configured correctly. Flag this to whoever deployed it.'
+              : 'Sign in with your Vikat account to use the sales assistant.',
+            code: misconfigured ? 'misconfigured' : 'unauthorized',
+            reason: auth.reason,
+          },
+          misconfigured ? 503 : 401,
+          cors,
+        );
+      }
+
+      // Lets the widget render "signed in as ..." without a chat round-trip.
+      if (url.pathname === '/whoami') {
+        return json({ email: auth.user.email, name: auth.user.name }, 200, cors);
+      }
+
       if (request.method !== 'POST') {
         return json({ error: 'Use POST.', code: 'method_not_allowed' }, 405, cors);
       }
+
       try {
-        return await handleChat(request, env, ctx, cfg, cors);
+        return await handleChat(request, env, ctx, cfg, cors, auth.user);
       } catch (err) {
         console.error('[chat] unhandled:', err?.message || err);
         return json({ error: 'Something went wrong.', code: 'internal_error' }, 500, cors);

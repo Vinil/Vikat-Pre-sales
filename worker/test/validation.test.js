@@ -150,18 +150,20 @@ test('validateChatBody rejects a body that sanitizes down to nothing', () => {
 
 // --- CORS -----------------------------------------------------------------
 
-test('corsHeaders allows a configured origin', () => {
-  const h = corsHeaders(req({ Origin: 'https://vikat.ai' }), cfg);
-  assert.equal(h['Access-Control-Allow-Origin'], 'https://vikat.ai');
+test('corsHeaders allows a configured internal origin', () => {
+  const h = corsHeaders(req({ Origin: 'https://sales.vikat.ai' }), cfg);
+  assert.equal(h['Access-Control-Allow-Origin'], 'https://sales.vikat.ai');
   assert.equal(h.Vary, 'Origin');
 });
 
 test('corsHeaders returns null for a disallowed origin', () => {
   assert.equal(corsHeaders(req({ Origin: 'https://evil.example' }), cfg), null);
   // A prefix of an allowed origin must not pass.
-  assert.equal(corsHeaders(req({ Origin: 'https://vikat.ai.evil.example' }), cfg), null);
+  assert.equal(corsHeaders(req({ Origin: 'https://sales.vikat.ai.evil.example' }), cfg), null);
   // Nor must a scheme downgrade.
-  assert.equal(corsHeaders(req({ Origin: 'http://vikat.ai' }), cfg), null);
+  assert.equal(corsHeaders(req({ Origin: 'http://sales.vikat.ai' }), cfg), null);
+  // The public marketing site is NOT an allowed origin for an internal tool.
+  assert.equal(corsHeaders(req({ Origin: 'https://vikat.ai' }), cfg), null);
 });
 
 test('corsHeaders allows a request with no Origin, without CORS headers', () => {
@@ -172,5 +174,11 @@ test('corsHeaders allows a request with no Origin, without CORS headers', () => 
 test('corsHeaders honours the ALLOWED_ORIGINS override', () => {
   const custom = loadConfig({ ALLOWED_ORIGINS: 'https://staging.vikat.ai' });
   assert.ok(corsHeaders(req({ Origin: 'https://staging.vikat.ai' }), custom));
-  assert.equal(corsHeaders(req({ Origin: 'https://vikat.ai' }), custom), null);
+  assert.equal(corsHeaders(req({ Origin: 'https://sales.vikat.ai' }), custom), null);
+});
+
+test('CORS exposes the headers the Access-authenticated widget must send', () => {
+  const h = corsHeaders(req({ Origin: 'https://sales.vikat.ai' }), cfg);
+  assert.match(h['Access-Control-Allow-Headers'], /Cf-Access-Jwt-Assertion/);
+  assert.equal(h['Access-Control-Allow-Credentials'], 'true', 'the Access cookie must survive the request');
 });

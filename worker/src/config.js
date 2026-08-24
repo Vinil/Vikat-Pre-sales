@@ -9,51 +9,74 @@
  *
  * Secrets are NEVER defaulted here — ANTHROPIC_API_KEY is read straight from
  * `env` at the call site and must be set via `wrangler secret put`.
+ *
+ * AUDIENCE: this agent is internal to Vikat. It answers sales reps from
+ * material that is not cleared for customers. Defaults here are chosen for a
+ * closed, authenticated tool, not a public website widget.
  */
 
 /** Static defaults. Overridable per-environment via wrangler.toml [vars]. */
 export const DEFAULTS = {
   // --- Model -------------------------------------------------------------
-  // Pinned by spec. Swappable without a code change via the MODEL var.
   MODEL: 'claude-sonnet-4-6',
-  MAX_TOKENS: 1024,
+  // Reps ask for briefs and objection handling, which need more room than a
+  // two-sentence answer to a prospect did.
+  MAX_TOKENS: 2048,
+
+  // --- Authentication ----------------------------------------------------
+  // 'cf-access' | 'entra' | 'dev'
+  AUTH_MODE: 'cf-access',
+  CF_ACCESS_TEAM_DOMAIN: '', // e.g. vikat.cloudflareaccess.com
+  CF_ACCESS_AUD: '', // Application Audience tag from the Access app
+  ENTRA_TENANT_ID: '',
+  ENTRA_AUDIENCE: '',
+  // Second gate behind SSO. Empty list disables the check.
+  ALLOWED_EMAIL_DOMAINS: ['vikat.ai'],
+  // Must be explicitly true for AUTH_MODE=dev to function. Never set in prod.
+  ALLOW_DEV_AUTH: false,
 
   // --- Request validation ------------------------------------------------
-  MAX_MESSAGES_PER_SESSION: 30,
-  MAX_CHARS_PER_MESSAGE: 2000,
+  // Reps hold longer working sessions than prospects did, and paste in
+  // prospect emails and RFP excerpts to ask about.
+  MAX_MESSAGES_PER_SESSION: 100,
+  MAX_CHARS_PER_MESSAGE: 8000,
 
-  // --- Rate limiting (per IP) --------------------------------------------
-  RATE_LIMIT_REQUESTS: 20,
+  // --- Rate limiting (per authenticated user) ----------------------------
+  // Abuse is not the threat model here; a runaway client loop is. Set high
+  // enough that a working rep never sees it.
+  RATE_LIMIT_REQUESTS: 120,
   RATE_LIMIT_WINDOW_SECONDS: 600, // 10 minutes
 
   // --- CORS --------------------------------------------------------------
-  // Comma-separated in wrangler.toml; parsed to an array by loadConfig().
+  // Internal hosts only. Comma-separated in wrangler.toml.
   ALLOWED_ORIGINS: [
-    'https://vikat.ai',
-    'https://www.vikat.ai',
+    'https://sales.vikat.ai',
     'http://localhost:8788',
-    'http://localhost:3000',
     'http://127.0.0.1:8788',
   ],
 
-  // --- Lead delivery -----------------------------------------------------
+  // --- Notification sink -------------------------------------------------
+  // Where logged prospects, expert requests and content gaps are delivered.
   // 'mailchannels' | 'webhook' | 'none'
-  //   mailchannels — the Tier A default per spec. NOTE: MailChannels ended its
-  //     free Cloudflare Workers tier; an account + DKIM setup is required for
-  //     delivery to succeed. See README "Lead delivery".
-  //   webhook — POSTs the lead JSON to LEAD_WEBHOOK_URL (Zapier/Make/n8n/etc).
-  //     No new vendor relationship required beyond whatever the operator picks.
-  //   none — log only. Useful for local dev and CI.
-  LEAD_SINK: 'mailchannels',
-  LEAD_TO_EMAIL: 'contact@vikat.ai',
+  //   mailchannels — NOTE: MailChannels ended its free Cloudflare Workers tier
+  //     in June 2024. Requires an account plus DKIM setup on the sending domain.
+  //   webhook — POSTs JSON to LEAD_WEBHOOK_URL (Teams/Slack/Zapier/internal).
+  //     For an internal tool a Teams incoming webhook is usually the best fit.
+  //   none — log only. Local dev and CI.
+  LEAD_SINK: 'webhook',
+  LEAD_TO_EMAIL: 'sales@vikat.ai',
   LEAD_TO_NAME: 'Vikat Sales',
   LEAD_FROM_EMAIL: 'agent@vikat.ai',
-  LEAD_FROM_NAME: 'Vikat Pre-Sales Agent',
-  LEAD_WEBHOOK_URL: '', // only used when LEAD_SINK === 'webhook'
+  LEAD_FROM_NAME: 'Vikat Sales Assistant',
+  LEAD_WEBHOOK_URL: '',
+  // Where content gaps go, so the knowledge owner sees them.
+  CONTENT_OWNER_EMAIL: 'marketing@vikat.ai',
 
-  // --- Booking -----------------------------------------------------------
+  // --- Links -------------------------------------------------------------
   BOOKING_URL: 'https://vikat.ai/contact',
-  CONTACT_EMAIL: 'contact@vikat.ai',
+  CONTACT_EMAIL: 'sales@vikat.ai',
+  // Where a rep goes when the agent cannot help.
+  INTERNAL_HELP_CHANNEL: '#sales-help',
 
   // --- Retention ---------------------------------------------------------
   LOG_TTL_SECONDS: 60 * 60 * 24 * 90, // 90 days
@@ -61,8 +84,6 @@ export const DEFAULTS = {
   SESSION_TTL_SECONDS: 60 * 60 * 24 * 30, // 30 days
 
   // --- Agent loop --------------------------------------------------------
-  // Cap on tool round-trips within a single /chat turn. Guards against a
-  // pathological loop burning tokens.
   MAX_TOOL_ITERATIONS: 4,
 };
 
@@ -78,11 +99,16 @@ const NUMERIC_KEYS = new Set([
   'MAX_TOOL_ITERATIONS',
 ]);
 
+const BOOLEAN_KEYS = new Set(['ALLOW_DEV_AUTH']);
+
+const LIST_KEYS = new Set(['ALLOWED_ORIGINS', 'ALLOWED_EMAIL_DOMAINS']);
+
 /**
  * Merge environment overrides onto DEFAULTS.
  *
  * Every key in DEFAULTS may be overridden by a same-named var in `env`.
- * Numeric keys are coerced; ALLOWED_ORIGINS accepts a comma-separated string.
+ * Numeric keys are coerced; list keys accept a comma-separated string;
+ * booleans accept only the exact string "true".
  *
  * @param {Record<string, unknown>} env Worker environment bindings.
  * @returns {typeof DEFAULTS} Effective config.
@@ -94,13 +120,19 @@ export function loadConfig(env = {}) {
     const raw = env[key];
     if (raw === undefined || raw === null || raw === '') continue;
 
-    if (key === 'ALLOWED_ORIGINS') {
+    if (LIST_KEYS.has(key)) {
       cfg[key] = Array.isArray(raw)
         ? raw
         : String(raw)
             .split(',')
-            .map((s) => s.trim())
+            .map((s) => s.trim().toLowerCase())
             .filter(Boolean);
+      continue;
+    }
+
+    if (BOOLEAN_KEYS.has(key)) {
+      // Anything other than an explicit "true" leaves the safe default in place.
+      cfg[key] = raw === true || raw === 'true';
       continue;
     }
 

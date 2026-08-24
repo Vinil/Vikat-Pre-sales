@@ -13,7 +13,7 @@ const MAILCHANNELS_URL = 'https://api.mailchannels.net/tx/v1/send';
 
 /**
  * @typedef {object} LeadPayload
- * @property {'lead'|'meeting'|'escalation'} kind
+ * @property {'lead'|'escalation'|'content_gap'} kind
  * @property {boolean} [urgent]
  * @property {string} sessionId
  * @property {Record<string, unknown>} data     Tool input, as the agent supplied it.
@@ -31,19 +31,30 @@ function esc(s) {
 
 function subjectFor(payload) {
   const d = payload.data || {};
-  const who = d.name || d.email || 'Unknown prospect';
-  const company = d.company ? ` (${d.company})` : '';
 
   switch (payload.kind) {
-    case 'escalation':
-      return `URGENT — Vikat agent escalation: ${d.reason || 'unspecified'}`;
-    case 'meeting':
-      return `Meeting request — ${who}${company}`;
+    case 'escalation': {
+      // An expert request. The rep who asked matters more than the topic here,
+      // because the owning team needs to know who to answer.
+      const prefix = payload.urgent ? 'URGENT — ' : '';
+      const from = d.requestedByName || d.requestedBy || 'a rep';
+      return `${prefix}${d.owner || 'Expert'} request from ${from}`;
+    }
+    case 'content_gap':
+      return `Content gap (${d.gap_type || 'unspecified'}) — ${truncate(d.question, 60)}`;
     default: {
+      const who = d.prospect_name || d.prospect_email || 'Unnamed prospect';
+      const company = d.company ? ` (${d.company})` : '';
       const score = d.qualification_score ? `[${d.qualification_score}] ` : '';
-      return `${score}New Vikat lead — ${who}${company}`;
+      const by = d.loggedByName || d.loggedBy;
+      return `${score}${who}${company}${by ? ` — logged by ${by}` : ''}`;
     }
   }
+}
+
+function truncate(s, n) {
+  const str = String(s ?? '');
+  return str.length > n ? `${str.slice(0, n - 1)}…` : str;
 }
 
 function bodyFor(payload) {
@@ -109,10 +120,13 @@ async function sendViaMailChannels(payload, env, cfg) {
     ],
   };
 
-  // Reply straight to the prospect when they gave an address.
-  const replyTo = payload.data?.email;
+  // Reply-to targets whoever the recipient will want to answer: the prospect
+  // on a logged lead, the rep who asked on an expert request or content gap.
+  const d = payload.data || {};
+  const replyTo =
+    payload.kind === 'lead' ? d.prospect_email || d.loggedBy : d.requestedBy || d.reportedBy || d.loggedBy;
   if (typeof replyTo === 'string' && replyTo.includes('@')) {
-    body.reply_to = { email: replyTo, name: payload.data?.name || replyTo };
+    body.reply_to = { email: replyTo, name: d.prospect_name || d.requestedByName || replyTo };
   }
 
   // DKIM is optional in the request shape but required in practice for

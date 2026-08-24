@@ -9,10 +9,12 @@ const basePayload = {
   kind: 'lead',
   sessionId: 'sess1234abcd',
   data: {
-    name: 'Ada Lovelace',
-    email: 'ada@example.com',
+    prospect_name: 'Ada Lovelace',
+    prospect_email: 'ada@example.com',
     company: 'Analytical Engines',
     qualification_score: 'HOT',
+    loggedBy: 'rep@vikat.ai',
+    loggedByName: 'Test Rep',
   },
   summary: 'Named problem, Q1 deadline, owns the budget.',
 };
@@ -48,7 +50,8 @@ test('mailchannels sink posts a well-formed message', async () => {
   assert.equal(sent.from.email, cfg.LEAD_FROM_EMAIL);
   assert.match(sent.subject, /\[HOT\]/);
   assert.match(sent.subject, /Ada Lovelace/);
-  assert.equal(sent.reply_to.email, 'ada@example.com');
+  assert.match(sent.subject, /logged by Test Rep/, 'the recipient needs to know which rep logged it');
+  assert.equal(sent.reply_to.email, 'ada@example.com', 'a logged lead replies to the prospect');
   assert.equal(sent.content.length, 2, 'plain text and html parts');
   assert.match(sent.content[0].value, /ada@example\.com/);
 });
@@ -56,7 +59,7 @@ test('mailchannels sink posts a well-formed message', async () => {
 test('mailchannels sink omits reply_to when there is no usable email', async () => {
   const cfg = loadConfig({ LEAD_SINK: 'mailchannels' });
   const fetchStub = stubFetch();
-  const payload = { ...basePayload, data: { name: 'Anon' } };
+  const payload = { ...basePayload, data: { prospect_name: 'Anon' } };
 
   await withFetch(fetchStub, () => deliverLead(payload, {}, cfg));
   const sent = JSON.parse(fetchStub.calls[0].init.body);
@@ -91,7 +94,8 @@ test('webhook sink posts a flat JSON lead to the configured URL', async () => {
 
   const sent = JSON.parse(fetchStub.calls[0].init.body);
   assert.equal(sent.kind, 'lead');
-  assert.equal(sent.name, 'Ada Lovelace');
+  assert.equal(sent.prospect_name, 'Ada Lovelace');
+  assert.equal(sent.loggedBy, 'rep@vikat.ai');
   assert.equal(sent.qualification_score, 'HOT');
   assert.equal(sent.sessionId, 'sess1234abcd');
   assert.ok(sent.receivedAt);
@@ -153,22 +157,64 @@ test('the none sink sends nothing and reports not-delivered', async () => {
 
 // --- Escalations ----------------------------------------------------------
 
-test('an escalation is subject-flagged URGENT', async () => {
+test('a blocking expert request is subject-flagged URGENT and names the owner', async () => {
   const cfg = loadConfig({ LEAD_SINK: 'mailchannels' });
   const fetchStub = stubFetch();
   const payload = {
     kind: 'escalation',
     urgent: true,
     sessionId: 'sess1234abcd',
-    data: { reason: 'security_questionnaire', contact_email: 'ciso@example.com' },
-    summary: 'Sent a 200-question SIG Lite.',
+    data: {
+      owner: 'Security',
+      question: 'Can we share the SIG Lite under NDA?',
+      requestedBy: 'rep@vikat.ai',
+      requestedByName: 'Test Rep',
+    },
+    summary: 'Acme security review is the last gate.',
   };
 
   await withFetch(fetchStub, () => deliverLead(payload, {}, cfg));
   const sent = JSON.parse(fetchStub.calls[0].init.body);
   assert.match(sent.subject, /^URGENT/);
-  assert.match(sent.subject, /security_questionnaire/);
+  assert.match(sent.subject, /Security request from Test Rep/);
   assert.match(sent.content[0].value, /URGENT/);
+  assert.equal(sent.reply_to.email, 'rep@vikat.ai', 'the owner answers the rep, not a prospect');
+});
+
+test('a non-blocking expert request is not flagged urgent', async () => {
+  const cfg = loadConfig({ LEAD_SINK: 'mailchannels' });
+  const fetchStub = stubFetch();
+  const payload = {
+    kind: 'escalation',
+    urgent: false,
+    sessionId: 'sess1234abcd',
+    data: { owner: 'Deal Desk', question: 'q', requestedByName: 'Test Rep' },
+  };
+
+  await withFetch(fetchStub, () => deliverLead(payload, {}, cfg));
+  const sent = JSON.parse(fetchStub.calls[0].init.body);
+  assert.ok(!sent.subject.startsWith('URGENT'), 'only blocking_a_call earns an interrupt');
+});
+
+test('a content gap is subject-tagged and truncated', async () => {
+  const cfg = loadConfig({ LEAD_SINK: 'mailchannels' });
+  const fetchStub = stubFetch();
+  const payload = {
+    kind: 'content_gap',
+    sessionId: 'sess1234abcd',
+    data: {
+      gap_type: 'outdated',
+      question: 'A'.repeat(200),
+      reportedBy: 'rep@vikat.ai',
+    },
+    summary: 'The integrations list has not been updated since last year.',
+  };
+
+  await withFetch(fetchStub, () => deliverLead(payload, {}, cfg));
+  const sent = JSON.parse(fetchStub.calls[0].init.body);
+  assert.match(sent.subject, /^Content gap \(outdated\)/);
+  assert.ok(sent.subject.length < 120, 'a long question must not blow up the subject line');
+  assert.equal(sent.reply_to.email, 'rep@vikat.ai');
 });
 
 test('lead content is HTML-escaped in the email body', async () => {
@@ -176,7 +222,7 @@ test('lead content is HTML-escaped in the email body', async () => {
   const fetchStub = stubFetch();
   const payload = {
     ...basePayload,
-    data: { name: '<script>alert(1)</script>', email: 'x@example.com' },
+    data: { prospect_name: '<script>alert(1)</script>', prospect_email: 'x@example.com' },
   };
 
   await withFetch(fetchStub, () => deliverLead(payload, {}, cfg));

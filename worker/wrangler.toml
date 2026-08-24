@@ -1,24 +1,27 @@
-# Vikat pre-sales agent — Cloudflare Worker (Tier A)
+# Vikat internal sales assistant — Cloudflare Worker
+#
+# AUDIENCE: Vikat employees only. This Worker serves material that is not
+# cleared for customers. It must sit behind Cloudflare Access (or equivalent)
+# and must never be reachable anonymously. See AUTH_MODE below.
 #
 # Secrets are NOT set here. Run:
 #   wrangler secret put ANTHROPIC_API_KEY
-# and, if LEAD_SINK = "mailchannels" with DKIM:
-#   wrangler secret put DKIM_PRIVATE_KEY
+# and, depending on LEAD_SINK:
+#   wrangler secret put LEAD_WEBHOOK_TOKEN     # LEAD_SINK = "webhook"
+#   wrangler secret put DKIM_PRIVATE_KEY       # LEAD_SINK = "mailchannels"
 #   wrangler secret put MAILCHANNELS_API_KEY
-# or, if LEAD_SINK = "webhook":
-#   wrangler secret put LEAD_WEBHOOK_TOKEN
 
-name = "vikat-agent"
+name = "vikat-sales-assistant"
 main = "src/index.js"
 compatibility_date = "2025-05-05"
 compatibility_flags = ["nodejs_compat"]
 
-# Tier B (B1) note: when the site moves to Cloudflare Pages, this Worker becomes
-# a Pages Function at /api/chat. The route below goes away, ALLOWED_ORIGINS
-# narrows to same-origin, and the widget's data-endpoint changes. Nothing in
-# src/ needs to change.
+# Put a Cloudflare Access application in front of this hostname before the
+# first deploy. Without it, AUTH_MODE=cf-access rejects every request (fails
+# closed), so the tool is unusable rather than exposed — but the Access app is
+# what actually authenticates people.
 routes = [
-  { pattern = "agent.vikat.ai/*", zone_name = "vikat.ai" }
+  { pattern = "sales-assistant.vikat.ai/*", zone_name = "vikat.ai" }
 ]
 
 [observability]
@@ -27,17 +30,36 @@ enabled = true
 # Every value here overrides the same-named key in src/config.js.
 [vars]
 MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = "1024"
-MAX_MESSAGES_PER_SESSION = "30"
-MAX_CHARS_PER_MESSAGE = "2000"
-RATE_LIMIT_REQUESTS = "20"
+MAX_TOKENS = "2048"
+MAX_MESSAGES_PER_SESSION = "100"
+MAX_CHARS_PER_MESSAGE = "8000"
+RATE_LIMIT_REQUESTS = "120"
 RATE_LIMIT_WINDOW_SECONDS = "600"
-ALLOWED_ORIGINS = "https://vikat.ai,https://www.vikat.ai"
-LEAD_SINK = "mailchannels"
-LEAD_TO_EMAIL = "contact@vikat.ai"
+
+# --- Authentication -------------------------------------------------------
+AUTH_MODE = "cf-access"
+# From Zero Trust > Settings > Custom Pages, or your team domain.
+CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_TEAM.cloudflareaccess.com"
+# Application Audience (AUD) tag from the Access application's Overview tab.
+CF_ACCESS_AUD = "REPLACE_WITH_ACCESS_AUD_TAG"
+ALLOWED_EMAIL_DOMAINS = "vikat.ai"
+# Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].
+
+# --- Origins --------------------------------------------------------------
+# Internal hosts only. The public marketing site is deliberately absent.
+ALLOWED_ORIGINS = "https://sales-assistant.vikat.ai"
+
+# --- Notifications --------------------------------------------------------
+# A Teams or Slack incoming webhook is usually the best fit for an internal
+# tool: logged prospects, expert requests and content gaps land in a channel
+# the team already watches.
+LEAD_SINK = "webhook"
+LEAD_WEBHOOK_URL = "REPLACE_WITH_TEAMS_OR_SLACK_WEBHOOK_URL"
+LEAD_TO_EMAIL = "sales@vikat.ai"
 LEAD_FROM_EMAIL = "agent@vikat.ai"
-BOOKING_URL = "https://vikat.ai/contact"
-CONTACT_EMAIL = "contact@vikat.ai"
+CONTENT_OWNER_EMAIL = "marketing@vikat.ai"
+CONTACT_EMAIL = "sales@vikat.ai"
+INTERNAL_HELP_CHANNEL = "#sales-help"
 
 # Create with:
 #   wrangler kv namespace create VIKAT_KV
@@ -49,7 +71,12 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
 
 # --- Local development ----------------------------------------------------
+# `wrangler dev --env dev` bypasses SSO with a fixed identity. Both flags are
+# required, so a stray AUTH_MODE change alone cannot open the door.
 [env.dev]
 [env.dev.vars]
-ALLOWED_ORIGINS = "http://localhost:8788,http://localhost:3000,http://127.0.0.1:8788"
+AUTH_MODE = "dev"
+ALLOW_DEV_AUTH = "true"
+ALLOWED_ORIGINS = "http://localhost:8788,http://127.0.0.1:8788"
 LEAD_SINK = "none"
+INTERNAL_HELP_CHANNEL = "#sales-help"

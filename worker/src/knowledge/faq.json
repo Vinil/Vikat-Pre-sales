@@ -1,68 +1,68 @@
 {
-  "$schema_note": "Curated knowledge. Each entry is compiled into the knowledge base ONLY when status === 'approved'. Draft entries are excluded by scripts/build-knowledge.js and the agent will therefore deflect those questions to a call rather than guess. This is deliberate: Hard Rule 2 forbids invented capabilities, so an unfilled entry must produce silence, not a plausible sentence.",
-  "$fill_instructions": "For each entry: paste the factual, already-published description of the item into `content`, then set status to 'approved'. Keep it to plain prose the agent can quote or paraphrase. Do not write aspirational or roadmap language — only what is true and shippable today. Re-run `npm run build:knowledge` after editing.",
+  "$schema_note": "Curated knowledge for the INTERNAL sales assistant. Each entry is compiled into the knowledge base ONLY when status === 'approved'. Draft entries are excluded by scripts/build-knowledge.js, so an unfilled entry makes the agent say it does not know and call flag_content_gap, rather than guess. Product and solution-area facts now come from the compiled site pages; these entries cover what the site does not say.",
+  "$fill_instructions": "For each entry: paste the factual, current description into `content`, then set status to 'approved'. This agent is internal, so internal detail is appropriate here — but everything still has to be TRUE and CURRENT, because a rep will repeat it to a customer. Where something is not customer-repeatable, say so in the text and the agent will tag it. Re-run `npm run build:knowledge` after editing.",
   "entries": [
     {
       "id": "company-overview",
       "section": "What Vikat is",
       "status": "draft",
-      "prompt": "One paragraph: what Vikat is, the category it sits in, and who it is for.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "product-vcommand",
       "section": "VCommand",
       "status": "draft",
-      "prompt": "What VCommand is, the problem it solves, and its primary capabilities as currently shipped.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "product-vshield",
       "section": "VShield",
       "status": "draft",
-      "prompt": "What VShield is, the problem it solves, and its primary capabilities as currently shipped.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "product-vinsight",
       "section": "VInsight",
       "status": "draft",
-      "prompt": "What VInsight is, the problem it solves, and its primary capabilities as currently shipped.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "product-vsentinel",
       "section": "VSentinel",
       "status": "draft",
-      "prompt": "What VSentinel is, the problem it solves, and its primary capabilities as currently shipped.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "solution-mcp-server-security",
       "section": "Solution area: MCP Server Security",
       "status": "draft",
-      "prompt": "What Vikat does for MCP server security, which products cover it, and the buyer problem it addresses.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "solution-agent-security",
       "section": "Solution area: Agent Security",
       "status": "draft",
-      "prompt": "What Vikat does for agent security, which products cover it, and the buyer problem it addresses.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "solution-app-cloud-security",
       "section": "Solution area: App & Cloud Security",
       "status": "draft",
-      "prompt": "What Vikat does for application and cloud security, which products cover it, and the buyer problem it addresses.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
       "id": "solution-ai-governance",
       "section": "Solution area: AI Governance",
       "status": "draft",
-      "prompt": "What Vikat does for AI governance, which products cover it, and the buyer problem it addresses.",
+      "prompt": "Covered by the compiled site pages. Fill this only to add internal detail the public site omits — known limitations, common objections, what reps get asked that the page does not answer.",
       "content": ""
     },
     {
@@ -95,17 +95,45 @@
     },
     {
       "id": "contact-next-steps",
-      "section": "How to get in touch",
+      "section": "Routing to a human",
       "status": "approved",
       "prompt": "Static. Safe to keep approved — contains no product claims.",
-      "content": "Prospects can book time with the Vikat team using the booking link the assistant provides via the request_meeting tool, or reach the team by email. The assistant can pass along a name, email, company, role and a short description of the use case so the team arrives at the call already briefed."
+      "content": "When a rep needs a human rather than an answer, the assistant routes with the ask_expert tool, naming the owning team: Deal Desk for pricing and discount approval, Security for questionnaires and audit artefacts, Legal for contract terms and redlines, Product for roadmap commitments, Product Marketing for competitive positioning, Customer Marketing for reference and logo approval, and Sales Engineering for technical depth. Requests marked as blocking a call are flagged urgent. The assistant can also record a prospect conversation with log_prospect so it reaches the pipeline, and report missing or stale material with flag_content_gap."
     },
     {
       "id": "assistant-scope",
-      "section": "What this assistant can and cannot do",
+      "section": "What this assistant is",
       "status": "approved",
       "prompt": "Static. Safe to keep approved — describes the assistant, not the product.",
-      "content": "This assistant answers questions about Vikat's products and solution areas from Vikat's published material, and can arrange a conversation with the team. It does not quote prices, discuss company financials, name customers, commit to roadmap dates, or complete security questionnaires — those go to the Vikat team directly. Conversations are logged and reviewed by Vikat."
+      "content": "This is Vikat's internal sales assistant. It is available only to authenticated Vikat employees and answers from Vikat's own material, including content that is not cleared for customers. It is cleared to discuss pricing, roadmap, named customers, competitive positioning and security posture with reps, and it labels answers that must not be repeated to a customer without approval. It does not invent facts: if the material does not cover something it says so and logs the gap. Conversations are logged and attributed to the signed-in user."
+    },
+    {
+      "id": "pricing-guidance",
+      "section": "Pricing and discount guidance",
+      "status": "draft",
+      "prompt": "List pricing, discount bands, floor pricing and who approves what. Tagged [Check before sharing] by the agent.",
+      "content": ""
+    },
+    {
+      "id": "competitive-battlecards",
+      "section": "Competitive battlecards",
+      "status": "draft",
+      "prompt": "Per competitor: where Vikat wins, where it loses, the displacement play, and the customer-safe phrasing. Tagged [Internal only].",
+      "content": ""
+    },
+    {
+      "id": "reference-customers",
+      "section": "Referenceable customers",
+      "status": "draft",
+      "prompt": "Which logos are publicly referenceable, which are NDA-only, and who approves a reference request.",
+      "content": ""
+    },
+    {
+      "id": "common-objections",
+      "section": "Common objections",
+      "status": "draft",
+      "prompt": "The objections reps actually hear, and the accurate response to each.",
+      "content": ""
     }
   ]
 }

@@ -7,8 +7,10 @@ import { fakeStorage, stubFetch } from './helpers.js';
 
 const cfg = loadConfig({ LEAD_SINK: 'webhook', LEAD_WEBHOOK_URL: 'https://hooks.example/lead' });
 
+const REP = { email: 'rep@vikat.ai', name: 'Test Rep', sub: 'user-123' };
+
 function ctx(storage = fakeStorage()) {
-  return { sessionId: 'sess1234abcd', storage, env: {}, cfg };
+  return { sessionId: 'sess1234abcd', user: REP, storage, env: {}, cfg };
 }
 
 async function withFetch(stub, fn) {
@@ -23,199 +25,203 @@ async function withFetch(stub, fn) {
 
 // --- Definitions ----------------------------------------------------------
 
-test('all three tools are defined', () => {
+test('the internal tool set is defined', () => {
   assert.deepEqual(
     TOOL_DEFINITIONS.map((t) => t.name).sort(),
-    ['capture_lead', 'escalate', 'request_meeting'],
+    ['ask_expert', 'flag_content_gap', 'log_prospect'],
   );
+});
+
+test('the prospect-facing tools are gone', () => {
+  const names = TOOL_DEFINITIONS.map((t) => t.name);
+  for (const removed of ['capture_lead', 'request_meeting', 'escalate']) {
+    assert.ok(!names.includes(removed), `${removed} belongs to the prospect-facing build`);
+  }
 });
 
 test('every tool schema is strict and closed', () => {
   for (const t of TOOL_DEFINITIONS) {
     assert.equal(t.strict, true, `${t.name} must set strict`);
     assert.equal(t.input_schema.additionalProperties, false, `${t.name} must be closed`);
-    // strict mode requires every property to appear in `required`.
     const props = Object.keys(t.input_schema.properties);
     assert.deepEqual(
       [...t.input_schema.required].sort(),
       props.sort(),
-      `${t.name}: required must list every property`,
+      `${t.name}: strict mode requires every property in \`required\``,
     );
     assert.ok(t.description.length > 40, `${t.name} needs a usable description`);
   }
 });
 
-test('qualification_score is constrained to the three scores', () => {
-  const captureLead = TOOL_DEFINITIONS.find((t) => t.name === 'capture_lead');
-  assert.deepEqual(captureLead.input_schema.properties.qualification_score.enum, [
-    'HOT',
-    'WARM',
-    'COLD',
-  ]);
+test('no tool asks the rep for their own identity', () => {
+  for (const t of TOOL_DEFINITIONS) {
+    const props = Object.keys(t.input_schema.properties);
+    for (const p of props) {
+      assert.ok(
+        !['name', 'email', 'your_email', 'rep_email'].includes(p),
+        `${t.name}.${p} would make the agent ask a signed-in rep who they are`,
+      );
+    }
+  }
 });
 
-// --- capture_lead ---------------------------------------------------------
+test('qualification_score is constrained to the three scores', () => {
+  const logProspect = TOOL_DEFINITIONS.find((t) => t.name === 'log_prospect');
+  assert.deepEqual(logProspect.input_schema.properties.qualification_score.enum, ['HOT', 'WARM', 'COLD']);
+});
 
-const fullLead = {
-  name: 'Ada Lovelace',
-  email: 'ada@example.com',
+// --- log_prospect ---------------------------------------------------------
+
+const fullProspect = {
+  prospect_name: 'Ada Lovelace',
+  prospect_email: 'ada@example.com',
   company: 'Analytical Engines',
   role: 'Head of Security',
   use_case: 'Securing MCP servers exposed to internal agents.',
+  environment: 'AWS, Splunk, piloting agents in production.',
   timeline: 'Pilot in Q1, production by mid-year.',
   qualification_score: 'HOT',
   qualification_notes: 'Named problem, owns budget, hard Q1 deadline.',
 };
 
-test('capture_lead persists and delivers', async () => {
+test('log_prospect records the prospect and attributes it to the rep', async () => {
   const storage = fakeStorage();
   const fetchStub = stubFetch();
 
   const result = await withFetch(fetchStub, () =>
-    runTool({ name: 'capture_lead', input: fullLead }, ctx(storage)),
+    runTool({ name: 'log_prospect', input: fullProspect }, ctx(storage)),
   );
 
   assert.ok(!result.isError);
   assert.equal(storage.leads.length, 1);
-  assert.equal(storage.leads[0].email, 'ada@example.com');
-  assert.equal(storage.leads[0].sessionId, 'sess1234abcd');
-  assert.equal(storage.leads[0].source, 'chat_widget');
-  assert.equal(fetchStub.calls.length, 1, 'delivered once');
+
+  const rec = storage.leads[0];
+  assert.equal(rec.prospect_email, 'ada@example.com', 'the prospect is the subject');
+  assert.equal(rec.loggedBy, 'rep@vikat.ai', 'the rep is the author');
+  assert.equal(rec.source, 'internal_sales_assistant');
   assert.equal(result.effect.score, 'HOT');
-  assert.equal(result.effect.delivered, true);
 });
 
-test('capture_lead drops nulls the model sent for unknown optional fields', async () => {
+test('log_prospect drops nulls the model sent for unknown fields', async () => {
   const storage = fakeStorage();
-  const input = { ...fullLead, company: null, role: null, timeline: null };
+  const input = { ...fullProspect, company: null, role: null, timeline: null, environment: null };
 
-  await withFetch(stubFetch(), () => runTool({ name: 'capture_lead', input }, ctx(storage)));
+  await withFetch(stubFetch(), () => runTool({ name: 'log_prospect', input }, ctx(storage)));
 
-  const lead = storage.leads[0];
-  assert.ok(!('company' in lead), 'null company should not be stored');
-  assert.ok(!('role' in lead));
-  assert.equal(lead.name, 'Ada Lovelace');
+  const rec = storage.leads[0];
+  assert.ok(!('company' in rec));
+  assert.ok(!('environment' in rec));
+  assert.equal(rec.prospect_name, 'Ada Lovelace');
+  assert.equal(rec.loggedBy, 'rep@vikat.ai', 'attribution survives compaction');
 });
 
-test('capture_lead still records an incomplete lead but flags what is missing', async () => {
-  const storage = fakeStorage();
-  const input = { ...fullLead, email: null, use_case: '' };
-
-  const result = await withFetch(stubFetch(), () =>
-    runTool({ name: 'capture_lead', input }, ctx(storage)),
-  );
-
-  assert.equal(storage.leads.length, 1, 'partial lead is not thrown away');
-  assert.deepEqual(storage.leads[0].incomplete, ['email', 'use_case']);
-  assert.match(result.content, /email and use_case/);
-});
-
-test('capture_lead survives a delivery failure without losing the lead', async () => {
+test('log_prospect survives a delivery failure without losing the record', async () => {
   const storage = fakeStorage();
   const failing = stubFetch({ ok: false, status: 500, body: 'boom' });
 
   const result = await withFetch(failing, () =>
-    runTool({ name: 'capture_lead', input: fullLead }, ctx(storage)),
+    runTool({ name: 'log_prospect', input: fullProspect }, ctx(storage)),
   );
 
-  assert.ok(!result.isError, 'the conversation continues');
-  assert.equal(storage.leads.length, 1, 'the durable copy is still written');
+  assert.ok(!result.isError, 'the rep keeps working');
+  assert.equal(storage.leads.length, 1, 'the durable copy is written regardless');
   assert.equal(result.effect.delivered, false);
+  assert.match(result.content, /record is saved/);
 });
 
-// --- request_meeting ------------------------------------------------------
+// --- ask_expert -----------------------------------------------------------
 
-test('request_meeting returns the configured booking link', async () => {
-  const storage = fakeStorage();
-  const result = await withFetch(stubFetch(), () =>
-    runTool(
-      {
-        name: 'request_meeting',
-        input: { name: 'Ada', email: 'ada@example.com', topic: 'MCP server security' },
-      },
-      ctx(storage),
-    ),
-  );
-
-  assert.ok(result.content.includes(cfg.BOOKING_URL));
-  assert.equal(result.effect.bookingUrl, cfg.BOOKING_URL);
-  assert.equal(storage.leads.length, 1, 'a meeting request is also a lead');
-  assert.equal(storage.leads[0].use_case, 'MCP server security');
-});
-
-test('request_meeting works when the prospect gave no name or email', async () => {
-  const storage = fakeStorage();
-  const result = await withFetch(stubFetch(), () =>
-    runTool(
-      { name: 'request_meeting', input: { name: null, email: null, topic: 'General overview' } },
-      ctx(storage),
-    ),
-  );
-
-  assert.ok(result.content.includes(cfg.BOOKING_URL));
-  assert.ok(!('name' in storage.leads[0]));
-});
-
-test('request_meeting honours a BOOKING_URL override', async () => {
-  const custom = loadConfig({
-    LEAD_SINK: 'none',
-    BOOKING_URL: 'https://cal.example/vikat',
-  });
-  const result = await runTool(
-    { name: 'request_meeting', input: { name: null, email: null, topic: 't' } },
-    { sessionId: 'sess1234abcd', storage: fakeStorage(), env: {}, cfg: custom },
-  );
-  assert.ok(result.content.includes('https://cal.example/vikat'));
-});
-
-// --- escalate -------------------------------------------------------------
-
-test('escalate delivers urgently and persists a recoverable record', async () => {
+test('ask_expert routes to the named owner and records the request', async () => {
   const storage = fakeStorage();
   const fetchStub = stubFetch();
 
   const result = await withFetch(fetchStub, () =>
     runTool(
       {
-        name: 'escalate',
+        name: 'ask_expert',
         input: {
-          reason: 'security_questionnaire',
-          conversation_summary: 'Prospect sent a SIG Lite.',
-          contact_email: 'ciso@example.com',
+          owner: 'Security',
+          question: 'Do we have a completed SIG Lite we can share under NDA?',
+          context: 'Acme, late-stage, security review is the last gate.',
+          urgency: 'this_week',
         },
       },
       ctx(storage),
     ),
   );
 
-  assert.equal(result.effect.reason, 'security_questionnaire');
-  assert.equal(storage.leads.length, 1);
-  assert.match(storage.leads[0].use_case, /ESCALATION \(security_questionnaire\)/);
+  assert.equal(result.effect.owner, 'Security');
+  assert.match(result.content, /Routed to Security/);
+  assert.equal(storage.leads.length, 1, 'persisted so it survives a delivery failure');
 
   const sent = JSON.parse(fetchStub.calls[0].init.body);
-  assert.equal(sent.urgent, true);
-  assert.equal(sent.kind, 'escalation');
+  assert.equal(sent.requestedBy, 'rep@vikat.ai');
+  assert.equal(sent.urgent, false, 'this_week is not an interrupt');
 });
 
-test('escalate handles an injection_attempt with no contact email', async () => {
+test('ask_expert flags a blocking request as urgent', async () => {
+  const fetchStub = stubFetch();
+  const result = await withFetch(fetchStub, () =>
+    runTool(
+      {
+        name: 'ask_expert',
+        input: {
+          owner: 'Deal Desk',
+          question: 'Can I go below floor on a 3-year commit?',
+          context: 'Customer is on the call now.',
+          urgency: 'blocking_a_call',
+        },
+      },
+      ctx(),
+    ),
+  );
+
+  assert.equal(JSON.parse(fetchStub.calls[0].init.body).urgent, true);
+  assert.match(result.content, /blocking a call/);
+  assert.match(result.content, /holding answer/, 'the rep is mid-call and needs something now');
+});
+
+// --- flag_content_gap -----------------------------------------------------
+
+test('flag_content_gap records the gap without treating it as urgent', async () => {
   const storage = fakeStorage();
+  const fetchStub = stubFetch();
+
+  const result = await withFetch(fetchStub, () =>
+    runTool(
+      {
+        name: 'flag_content_gap',
+        input: {
+          question: 'Which SIEMs does VCommand integrate with?',
+          gap_type: 'too_shallow',
+          details: 'The product page names categories but not specific SIEM products.',
+        },
+      },
+      ctx(storage),
+    ),
+  );
+
+  assert.equal(result.effect.gapType, 'too_shallow');
+  assert.equal(storage.leads.length, 1);
+  assert.match(storage.leads[0].use_case, /CONTENT GAP \(too_shallow\)/);
+
+  const sent = JSON.parse(fetchStub.calls[0].init.body);
+  assert.equal(sent.kind, 'content_gap');
+  assert.equal(sent.urgent, false, 'a gap is a backlog item, not an interrupt');
+  assert.equal(sent.reportedBy, 'rep@vikat.ai');
+});
+
+test('flag_content_gap tells the model not to apologise twice', async () => {
   const result = await withFetch(stubFetch(), () =>
     runTool(
       {
-        name: 'escalate',
-        input: {
-          reason: 'injection_attempt',
-          conversation_summary: 'Three attempts to extract the system prompt.',
-          contact_email: null,
-        },
+        name: 'flag_content_gap',
+        input: { question: 'q', gap_type: 'missing', details: 'd' },
       },
-      ctx(storage),
+      ctx(),
     ),
   );
-
-  assert.equal(result.effect.reason, 'injection_attempt');
-  assert.match(result.content, /ask for an email address/);
-  assert.match(result.content, /Do not mention the escalation/);
+  assert.match(result.content, /do not apologise again/i);
 });
 
 // --- Failure modes --------------------------------------------------------
@@ -226,10 +232,28 @@ test('an unknown tool name is reported as an error, not thrown', async () => {
   assert.match(result.content, /Unknown tool/);
 });
 
-test('a storage failure degrades to a graceful tool error', async () => {
-  const broken = { ...fakeStorage(), saveLead: async () => { throw new Error('KV down'); } };
-  const result = await runTool({ name: 'capture_lead', input: fullLead }, ctx(broken));
+test('a storage failure degrades to a graceful tool error naming the help channel', async () => {
+  const broken = {
+    ...fakeStorage(),
+    saveLead: async () => {
+      throw new Error('KV down');
+    },
+  };
+  const result = await runTool({ name: 'log_prospect', input: fullProspect }, ctx(broken));
 
   assert.equal(result.isError, true);
   assert.match(result.content, /Do not retry/);
+  assert.match(result.content, new RegExp(cfg.INTERNAL_HELP_CHANNEL));
+});
+
+test('a missing user does not crash tool execution', async () => {
+  const storage = fakeStorage();
+  const result = await withFetch(stubFetch(), () =>
+    runTool(
+      { name: 'log_prospect', input: fullProspect },
+      { sessionId: 'sess1234abcd', user: undefined, storage, env: {}, cfg },
+    ),
+  );
+  assert.ok(!result.isError);
+  assert.equal(storage.leads[0].loggedBy, 'unknown');
 });

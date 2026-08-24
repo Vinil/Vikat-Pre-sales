@@ -135,6 +135,54 @@ test('hard rule 1: the API key is only ever read from env', () => {
   }
 });
 
+test('rule 5: only auth.js decides identity', () => {
+  const IDENTITY = /(Cf-Access-Jwt-Assertion|CF_Authorization|cloudflareaccess\.com|login\.microsoftonline\.com|X-Dev-User)/i;
+  const violations = [];
+  for (const f of sourceFiles()) {
+    if (f.rel === 'auth.js' || f.rel === 'config.js') continue;
+    for (const v of offendingLines(f.text, IDENTITY)) {
+      // index.js legitimately names the headers in its CORS allowlist.
+      if (f.rel === 'index.js' && /Access-Control-Allow-Headers/.test(v.line)) continue;
+      violations.push(`${f.rel}:${v.n}  ${v.line}`);
+    }
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    `Identity must be established in auth.js only:\n${violations.join('\n')}`,
+  );
+});
+
+test('hard rule: /chat is not reachable without authenticate()', () => {
+  const index = sourceFiles().find((f) => f.rel === 'index.js').text;
+  const chatRoute = index.indexOf("url.pathname === '/chat'");
+  assert.ok(chatRoute > 0, 'the /chat route should exist');
+
+  const authCall = index.indexOf('await authenticate(');
+  assert.ok(authCall > 0, 'authenticate() must be called');
+
+  // The CALL, not the declaration — `function handleChat(request, ...)` appears
+  // earlier in the file and would make this assertion pass vacuously.
+  const handleChatCall = index.indexOf('await handleChat(');
+  assert.ok(handleChatCall > 0, 'handleChat() must be called');
+  assert.ok(
+    authCall < handleChatCall,
+    'authenticate() must run before handleChat() so an anonymous caller costs nothing',
+  );
+
+  // And the guard must actually reject, not merely compute a result.
+  assert.match(index, /if \(!auth\.ok\)/, 'the auth result must gate the request');
+});
+
+test('dev auth cannot be enabled by a bare AUTH_MODE change', () => {
+  const auth = sourceFiles().find((f) => f.rel === 'auth.js').text;
+  assert.match(
+    auth,
+    /if \(!cfg\.ALLOW_DEV_AUTH\)/,
+    'dev mode must be gated on a second explicit flag, not just AUTH_MODE',
+  );
+});
+
 test('wrangler.toml declares no secrets', () => {
   const toml = fs.readFileSync(path.resolve(SRC, '../wrangler.toml'), 'utf8');
   const declarations = toml

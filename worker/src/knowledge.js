@@ -3,7 +3,7 @@
  *
  * Regenerate with: npm run build:knowledge
  * Source: 16 HTML page(s) from /home/user/vinil/vikat-ai-site-v1 + worker/src/knowledge/faq.json
- * Chunks: 270   Estimated tokens: ~21733
+ * Chunks: 270   Estimated tokens: ~21859
  *
  * Chunk shape is { id, page, section, content }. Tier B (Vectorize) embeds
  * exactly these chunks, so the shape is part of the forward-compatibility
@@ -17,14 +17,14 @@ export const KNOWLEDGE = [
   {
     "id": "faq:contact-next-steps",
     "page": "curated/faq.json",
-    "section": "How to get in touch",
-    "content": "Prospects can book time with the Vikat team using the booking link the assistant provides via the request_meeting tool, or reach the team by email. The assistant can pass along a name, email, company, role and a short description of the use case so the team arrives at the call already briefed."
+    "section": "Routing to a human",
+    "content": "When a rep needs a human rather than an answer, the assistant routes with the ask_expert tool, naming the owning team: Deal Desk for pricing and discount approval, Security for questionnaires and audit artefacts, Legal for contract terms and redlines, Product for roadmap commitments, Product Marketing for competitive positioning, Customer Marketing for reference and logo approval, and Sales Engineering for technical depth. Requests marked as blocking a call are flagged urgent. The assistant can also record a prospect conversation with log_prospect so it reaches the pipeline, and report missing or stale material with flag_content_gap."
   },
   {
     "id": "faq:assistant-scope",
     "page": "curated/faq.json",
-    "section": "What this assistant can and cannot do",
-    "content": "This assistant answers questions about Vikat's products and solution areas from Vikat's published material, and can arrange a conversation with the team. It does not quote prices, discuss company financials, name customers, commit to roadmap dates, or complete security questionnaires — those go to the Vikat team directly. Conversations are logged and reviewed by Vikat."
+    "section": "What this assistant is",
+    "content": "This is Vikat's internal sales assistant. It is available only to authenticated Vikat employees and answers from Vikat's own material, including content that is not cleared for customers. It is cleared to discuss pricing, roadmap, named customers, competitive positioning and security posture with reps, and it labels answers that must not be repeated to a customer without approval. It does not invent facts: if the material does not cover something it says so and logs the gap. Conversations are logged and attributed to the signed-in user."
   },
   {
     "id": "page:about-html:we-ve-led-enterprise-digital-transformation-from-the-inside",
@@ -1637,12 +1637,12 @@ export const KNOWLEDGE = [
 ];
 
 /** Approximate token count of the compiled knowledge base. */
-export const KNOWLEDGE_TOKENS = 21733;
+export const KNOWLEDGE_TOKENS = 21859;
 
 /** Build metadata, surfaced by GET /health for operational visibility. */
 export const KNOWLEDGE_META = {
   "chunkCount": 270,
-  "estimatedTokens": 21733,
+  "estimatedTokens": 21859,
   "pageChunks": 268,
   "faqChunks": 2,
   "skippedFaqEntries": [
@@ -1658,6 +1658,10 @@ export const KNOWLEDGE_META = {
     "deployment-models",
     "engagement-models",
     "partnership-posture",
-    "integrations"
+    "integrations",
+    "pricing-guidance",
+    "competitive-battlecards",
+    "reference-customers",
+    "common-objections"
   ]
 };
