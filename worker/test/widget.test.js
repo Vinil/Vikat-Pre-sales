@@ -219,3 +219,39 @@ test('re-rendering replaces the body rather than appending to it', async () => {
   assert.equal(r.text, 'second b');
   assert.equal(r.links, 1);
 });
+
+test('a generated document links to this origin without opening a tab', async () => {
+  const r = await render('Here it is: [2026-08-25-call-prep.pptx](/document/doc_abc123)');
+  assert.equal(r.links.length, 1);
+  assert.equal(r.links[0].href, '/document/doc_abc123');
+  assert.equal(r.links[0].label, '2026-08-25-call-prep.pptx');
+  assert.equal(r.links[0].target, '', 'a same-origin download stays in place');
+});
+
+test('a protocol-relative link is never treated as same-origin', async () => {
+  // "//evil.test" leaves the origin while looking like a path.
+  for (const src of ['[click](//evil.test/x)', '[click](///evil.test)']) {
+    const r = await render(src);
+    assert.equal(r.links.length, 0, `${src} must not produce an anchor`);
+  }
+});
+
+test('a relative link cannot smuggle a scheme past the path branch', async () => {
+  for (const src of ['[x](/javascript:alert(1))', '[x](:/javascript:alert(1))']) {
+    const r = await render(src);
+    for (const link of r.links) {
+      assert.match(link.href, /^\//, `${src} produced ${link.href}`);
+      assert.ok(!/^\/\//.test(link.href));
+    }
+  }
+});
+
+test('SharePoint and document links coexist in one answer', async () => {
+  const r = await render(
+    'Built [the deck](/document/doc_1). Background is in [the overview](https://vikatai.sharepoint.com/x.pptx).',
+  );
+  assert.equal(r.links.length, 2);
+  assert.equal(r.links[0].target, '');
+  assert.equal(r.links[1].target, '_blank');
+  assert.match(r.links[1].rel, /noopener/);
+});

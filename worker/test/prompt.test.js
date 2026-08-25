@@ -187,3 +187,12 @@ test('the prompt forbids inventing a link, not just inventing a fact', async () 
   assert.match(p, /Never construct a SharePoint URL/i);
   assert.match(p, /Only link to a document/i);
 });
+
+test('the prompt holds generated documents to a higher bar than chat', async () => {
+  // A deck outlives the conversation and gets forwarded. The prompt has to say
+  // so, or the model treats it like any other answer.
+  const p = await prompt({ user: REP });
+  assert.match(p, /create_document/);
+  assert.match(p, /outlives this conversation/i);
+  assert.match(p, /more restrictive/i);
+});

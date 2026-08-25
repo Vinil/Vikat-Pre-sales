@@ -163,12 +163,16 @@ test('hard rule 1: the API key is only ever read from env', () => {
   }
 });
 
-test('rule 5: only auth.js decides identity', () => {
-  const IDENTITY = /(Cf-Access-Jwt-Assertion|CF_Authorization|cloudflareaccess\.com|login\.microsoftonline\.com|X-Dev-User)/i;
+test('rule 5: only auth.js decides who the caller is', () => {
+  // Deliberately about the CALLER. documentStore.js also talks to Microsoft's
+  // token endpoint, but to prove who the Worker is to Graph — a service
+  // credential, not a claim about the person on the other end of the request.
+  // Rule 5a below is what keeps those two apart.
+  const CALLER_IDENTITY = /(Cf-Access-Jwt-Assertion|CF_Authorization|cloudflareaccess\.com|X-Dev-User)/i;
   const violations = [];
   for (const f of sourceFiles()) {
     if (f.rel === 'auth.js' || f.rel === 'config.js') continue;
-    for (const v of offendingLines(f.text, IDENTITY)) {
+    for (const v of offendingLines(f.text, CALLER_IDENTITY)) {
       // index.js legitimately names the headers in its CORS allowlist.
       if (f.rel === 'index.js' && /Access-Control-Allow-Headers/.test(v.line)) continue;
       violations.push(`${f.rel}:${v.n}  ${v.line}`);
@@ -177,8 +181,32 @@ test('rule 5: only auth.js decides identity', () => {
   assert.deepEqual(
     violations,
     [],
-    `Identity must be established in auth.js only:\n${violations.join('\n')}`,
+    `Caller identity must be established in auth.js only:\n${violations.join('\n')}`,
   );
+});
+
+test('rule 5a: the Microsoft token endpoint is reached from documentStore.js only', () => {
+  const violations = [];
+  for (const f of sourceFiles()) {
+    if (f.rel === 'documentStore.js' || f.rel === 'auth.js' || f.rel === 'config.js') continue;
+    for (const v of offendingLines(f.text, /login\.microsoftonline\.com/i)) {
+      violations.push(`${f.rel}:${v.n}  ${v.line}`);
+    }
+  }
+  assert.deepEqual(violations, [], `Graph credentials belong in documentStore.js:\n${violations.join('\n')}`);
+});
+
+test("rule 5a: documentStore.js never reads the caller's request", () => {
+  // This is what makes rule 5's exemption safe. The moment documentStore.js
+  // looks at an incoming header or cookie, its Microsoft token stops being a
+  // service credential and starts being a second, unreviewed answer to "who
+  // is calling" — which is exactly the thing auth.js exists to own.
+  const store = sourceFiles().find((f) => f.rel === 'documentStore.js');
+  assert.ok(store, 'documentStore.js should exist');
+
+  for (const v of offendingLines(store.text, /request\.|\.cookies|headers\.get\(/)) {
+    assert.fail(`documentStore.js:${v.n} reads from the request: ${v.line}`);
+  }
 });
 
 test('hard rule: /chat is not reachable without authenticate()', () => {
@@ -242,6 +270,64 @@ test('wrangler.toml declares no secrets', () => {
   const declarations = toml
     .split('\n')
     .filter((l) => !l.trim().startsWith('#'))
-    .filter((l) => /(ANTHROPIC_API_KEY|DKIM_PRIVATE_KEY|MAILCHANNELS_API_KEY|LEAD_WEBHOOK_TOKEN)\s*=/.test(l));
+    .filter((l) =>
+      /(ANTHROPIC_API_KEY|DKIM_PRIVATE_KEY|MAILCHANNELS_API_KEY|LEAD_WEBHOOK_TOKEN|GRAPH_CLIENT_SECRET|GRAPH_CLIENT_ID|GRAPH_TENANT_ID)\s*=/.test(
+        l,
+      ),
+    );
   assert.deepEqual(declarations, [], 'Secrets must be set with `wrangler secret put`, never in config.');
+});
+
+test('no committed file contains something shaped like a client secret', () => {
+  // wrangler.toml is committed and this repository is public. An Entra client
+  // secret is short, high-entropy and easy to paste into config "just to test
+  // it" — and once pushed it is burned.
+  const files = ['../wrangler.toml', 'config.js', 'documentStore.js'];
+  const SECRETISH = /["'][A-Za-z0-9~._-]{30,}["']/g;
+
+  for (const rel of files) {
+    const text = fs.readFileSync(path.resolve(SRC, rel), 'utf8');
+    for (const [i, line] of text.split('\n').entries()) {
+      if (line.trim().startsWith('#') || line.trim().startsWith('*') || line.trim().startsWith('//')) continue;
+      // Known-safe long strings. Each is an identifier that is meaningless
+      // without a credential to go with it: the Access audience tag and team
+      // domain, the KV namespace ids, the SharePoint location, and URLs.
+      const IDENTIFIERS = /^\s*(CF_ACCESS_AUD|CF_ACCESS_TEAM_DOMAIN|SHAREPOINT_\w+|id|preview_id)\s*=/;
+      if (IDENTIFIERS.test(line) || /https?:\/\//.test(line)) continue;
+
+      for (const match of line.match(SECRETISH) || []) {
+        assert.fail(`${rel}:${i + 1} contains a credential-shaped literal: ${match.slice(0, 12)}…`);
+      }
+    }
+  }
+});
+
+test('the Worker and the sync agree on which folder is the assistant’s own', () => {
+  // The Worker writes generated decks into this folder; the sync skips it.
+  // If the two defaults drift apart, the sync starts indexing the assistant's
+  // output and the assistant starts citing itself as a source — silently, and
+  // only visible weeks later as a confidently wrong answer.
+  const config = fs.readFileSync(path.join(SRC, 'config.js'), 'utf8');
+  const sync = fs.readFileSync(path.join(SRC, '../../scripts/sync-sharepoint.js'), 'utf8');
+
+  const worker = /SHAREPOINT_GENERATED_FOLDER:\s*'([^']+)'/.exec(config);
+  assert.ok(worker, 'the Worker must define SHAREPOINT_GENERATED_FOLDER');
+
+  const script = /SHAREPOINT_GENERATED_FOLDER\s*\|\|\s*'([^']+)'/.exec(sync);
+  assert.ok(script, 'the sync must default SHAREPOINT_GENERATED_FOLDER');
+
+  assert.equal(script[1], worker[1], 'the two defaults must match exactly');
+});
+
+test('the sync excludes the generated folder before any other scope check', () => {
+  const sync = fs.readFileSync(path.join(SRC, '../../scripts/sync-sharepoint.js'), 'utf8');
+  const inScope = sync.slice(sync.indexOf('function inScope'), sync.indexOf('function isSupported'));
+
+  assert.match(inScope, /generatedFolder/, 'inScope must consider the generated folder');
+  // Before the early `return true` for an unscoped sync, or a deployment with
+  // no SHAREPOINT_FOLDER set would index everything the assistant produced.
+  assert.ok(
+    inScope.indexOf('generatedFolder') < inScope.indexOf('return true'),
+    'the exclusion must come before the unscoped shortcut',
+  );
 });

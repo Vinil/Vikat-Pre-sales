@@ -24,7 +24,12 @@ worker/           Cloudflare Worker — the agent backend
     knowledge.js    GENERATED — compiled knowledge base
     retrieve.js     Knowledge abstraction
     collateral.js   SharePoint document index — search and links
-    tools.js        log_prospect, ask_expert, flag_content_gap, find_collateral
+    tools.js        log_prospect, ask_expert, flag_content_gap,
+                    find_collateral, create_document
+    brand.js        The Vikat.AI visual system, as data
+    documentStore.js Generated-document delivery abstraction (Graph)
+    documents/      Deck and document renderers
+    fonts/          Inter and JetBrains Mono (SIL OFL)
     storage.js      Storage abstraction (KV)
     leadSink.js     Notification abstraction (webhook / email)
     config.js       Every tunable
@@ -32,7 +37,7 @@ worker/           Cloudflare Worker — the agent backend
       faq.json        Curated entries (compiled only when approved)
       disclosure.json What may be repeated to a customer, and who owns it
       sharepoint.json GENERATED, GITIGNORED — synced internal material
-  test/           197 unit tests
+  test/           246 unit tests
 widget/           Embeddable chat widget, internal page, and admin panel
   index.html         Full-screen app shell: Chat and Collateral tabs
   vikat-chat.js      The chat widget
@@ -59,6 +64,7 @@ grep:
 | `leadSink.js` | Outbound notifications | Webhook → CRM without callers knowing |
 | `auth.js` | Identity | Cloudflare Access → Entra ID in one file |
 | `roles.js` | Authorization | Role model changes without touching identity |
+| `documentStore.js` | Generated-document delivery | SharePoint → Drive or a CRM attachment |
 
 ---
 
@@ -106,6 +112,9 @@ Never in `wrangler.toml`, never in code. A test asserts this.
 wrangler secret put ANTHROPIC_API_KEY
 wrangler secret put LEAD_WEBHOOK_TOKEN     # if LEAD_SINK = "webhook"
 wrangler secret put DKIM_PRIVATE_KEY       # if LEAD_SINK = "mailchannels"
+wrangler secret put GRAPH_TENANT_ID        # to file generated documents
+wrangler secret put GRAPH_CLIENT_ID
+wrangler secret put GRAPH_CLIENT_SECRET
 ```
 
 For the nightly workflow, as GitHub **secrets**: `GRAPH_TENANT_ID`,
@@ -204,9 +213,9 @@ answer, which is how an unreleased roadmap deck ends up quoted on a call.
 export GRAPH_TENANT_ID=...
 export GRAPH_CLIENT_ID=...
 export GRAPH_CLIENT_SECRET=...
-export SHAREPOINT_HOSTNAME=vikat.sharepoint.com
-export SHAREPOINT_SITE_PATH=/sites/Sales
-export SHAREPOINT_LIBRARY="Sales Enablement"
+export SHAREPOINT_HOSTNAME=vikatai.sharepoint.com
+export SHAREPOINT_SITE_PATH=/sites/VikatGTM
+export SHAREPOINT_LIBRARY=Documents      # the DRIVE name, not the URL segment
 export SHAREPOINT_FOLDER=Approved        # optional, recommended
 
 node scripts/sync-sharepoint.js --dry-run   # fetch and report, write nothing
@@ -222,6 +231,14 @@ to `.docx` or `.pptx`. Legacy `.ppt`/`.doc` are rejected rather than mangled.
 Deletions propagate: a file removed from SharePoint has its chunks dropped on
 the next sync. That is why the sync uses a Graph delta query rather than
 re-listing.
+
+The sync **always skips `SHAREPOINT_GENERATED_FOLDER`**, whatever the rest of
+the scope says. That is where the assistant files its own output. Reading it
+back would close a loop — the assistant would index what it wrote, then cite it
+as a source, and a guess it made last week would become a fact this week. Two
+tests hold the two halves together: one asserts the Worker and the sync use the
+same folder name, the other asserts the exclusion runs before the unscoped
+shortcut.
 
 ### Why nothing is committed
 
@@ -246,6 +263,103 @@ cursor is kept in the Actions cache rather than committed, since it embeds file
 and folder names.
 
 Run it on demand from the Actions tab; tick **full** to ignore the cursor.
+
+---
+
+## Generated documents
+
+The assistant can build a branded deck (`.pptx`) or document (`.pdf`) on
+request, keep a copy the rep can download immediately, and file it in
+SharePoint. The model writes the content; it never chooses a colour, a size or
+a position. Everything visual comes from `src/brand.js`, which encodes the
+Vikat.AI brand guidelines.
+
+| File | What it owns |
+|---|---|
+| `src/brand.js` | Palette, type scale, casing and copy rules |
+| `src/documents/spec.js` | The contract the model fills in, and its limits |
+| `src/documents/measure.js` | Real glyph metrics, read from the font files |
+| `src/documents/pptx.js` | 16:9 deck — cover, a slide per section, close |
+| `src/documents/pdf.js` | A4 document, flowed across pages |
+| `src/documents/fonts.js` | The only module that imports font bytes |
+| `src/documentStore.js` | The only module that talks to Graph |
+
+### What the renderers guarantee
+
+- Inter and JetBrains Mono are **embedded** in the PDF and subsetted, so a
+  customer sees the document as it was designed. Both are SIL Open Font
+  License; the licences ship in `src/fonts/`.
+- Every page and every slide carries a disclosure label. It is drawn by the
+  renderer, not by the model, so there is no path to a document without one.
+- Only palette colours and brand typefaces reach the file. A test walks the
+  generated XML and fails on anything else.
+- The brand gradient appears on covers and dividers only, never on a card or a
+  component, as the guidelines require.
+- Layout is measured against the real fonts rather than estimated from
+  character counts, so headings and body copy do not collide or leave holes.
+
+Costs, measured in `workerd`: a deck takes ~20ms of CPU, a PDF ~180ms. Both
+need the Workers Paid plan — the free tier's 10ms limit is not enough. The
+bundle including all four typefaces is ~1.5MB gzipped, well inside the limit.
+
+### Filing to SharePoint
+
+Uploading needs a **second** Graph app registration — or write permission
+added to the sync's — plus three Worker secrets:
+
+```bash
+wrangler secret put GRAPH_TENANT_ID
+wrangler secret put GRAPH_CLIENT_ID
+wrangler secret put GRAPH_CLIENT_SECRET
+```
+
+These are Worker **secrets**, never `[vars]` — `wrangler.toml` is committed and
+this repository is public.
+
+Grant it **`Sites.Selected`**, then grant *write* on the one site:
+
+1. Azure Portal → App registrations → API permissions → Microsoft Graph →
+   **Application** permissions → `Sites.Selected` → grant admin consent.
+2. Resolve the site id:
+   `GET /sites/vikatai.sharepoint.com:/sites/VikatGTM`
+3. Grant that app write on that site and nothing else:
+   ```http
+   POST /sites/{site-id}/permissions
+   { "roles": ["write"],
+     "grantedToIdentities": [{ "application":
+       { "id": "<client-id>", "displayName": "Vikat sales assistant" } }] }
+   ```
+   This step needs a tenant admin. `Files.ReadWrite.All` would skip it and give
+   the app write access to every site in the tenant — not worth the five
+   minutes saved.
+
+Delivery **fails soft**. If Graph is unreachable, misconfigured, or refuses,
+the rep still gets their document from the Worker's own copy and the assistant
+says plainly that it was not filed. `GET /health` reports whether filing is
+configured at all.
+
+The Worker's copy lives in KV for `DOCUMENT_TTL_SECONDS` (7 days) and is served
+from `GET /document/<id>` to any signed-in rep. It is a handoff, not an
+archive — SharePoint is the durable copy.
+
+### What is not in this repository
+
+The brand guidelines PDF is marked confidential and is **not committed**, nor
+is anything in it beyond the visual tokens above — which are already visible to
+anyone who loads vikat.ai. The trademark register and the suite architecture it
+documents cover marks that are pending registration, and this repository is
+public.
+
+The full logo lockup pairs the wordmark with the chip-in-orbit emblem. That
+emblem is a supplied asset, and the guidelines prohibit reconstructing or
+altering a mark, so the renderers set the **wordmark alone** — which is
+registered in its own right and a legitimate variant. Drop the emblem SVG into
+the repository to upgrade to the full lockup.
+
+One honest limitation: PowerPoint resolves typefaces by name, so a `.pptx`
+opened on a machine without Inter installed will substitute. The PDF path has
+no such problem because the fonts are embedded. For anything going to a
+customer, prefer PDF.
 
 ---
 
@@ -393,6 +507,10 @@ works if the front end is ever hosted separately.
   filter them, and a link must open the file in SharePoint.
 - Ask the chat for a deck on a topic you know is in SharePoint. It must return
   a clickable link, not a described one.
+- Ask for "a one-pager on VShield for Acme". Open the PDF: the fonts must be
+  Inter and JetBrains Mono, and a disclosure line must be on every page.
+- Check the SharePoint link on that document lands in
+  `Generated by assistant/`, not in the library root.
 
 ---
 

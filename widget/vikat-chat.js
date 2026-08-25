@@ -268,9 +268,17 @@
     return n;
   }
 
-  // Markdown links and bare URLs, http(s) only. A javascript: or data: URL
-  // never matches, so there is no scheme to sanitise afterwards.
-  var LINK_RE = /\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"')\]]+)/g;
+  // Markdown links and bare URLs.
+  //
+  // Three alternatives, in order: a markdown link to an absolute http(s) URL
+  // (a SharePoint document); a markdown link to a same-origin path (a document
+  // this Worker generated, at /document/<id>); and a bare http(s) URL in prose.
+  //
+  // The same-origin branch requires exactly one leading slash: "//evil.test"
+  // is protocol-relative and would leave the origin. No scheme can appear in
+  // any branch, so javascript: and data: never match and there is nothing to
+  // sanitise afterwards.
+  var LINK_RE = /\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]{1,120})\]\((\/[^\/\s)][^\s)]*)\)|(https?:\/\/[^\s<>"')\]]+)/g;
 
   /**
    * Render agent text into `node`, turning links into anchors.
@@ -290,10 +298,12 @@
     while ((m = LINK_RE.exec(text)) !== null) {
       if (m.index > last) node.appendChild(document.createTextNode(text.slice(last, m.index)));
 
-      var url = m[2] || m[3];
+      var label = m[1] || m[3];
+      var url = m[2] || m[4] || m[5];
+      var sameOrigin = Boolean(m[4]);
       var trail = '';
 
-      if (!m[1]) {
+      if (!label) {
         // Bare URL: trailing punctuation belongs to the sentence, not the link.
         while (/[.,;:!?]$/.test(url)) {
           trail = url.slice(-1) + trail;
@@ -301,10 +311,14 @@
         }
       }
 
-      var a = el('a', 'vk-link', m[1] || url);
+      var a = el('a', 'vk-link', label || url);
       a.href = url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
+      // A generated document is served as an attachment from this same origin,
+      // so it downloads in place rather than opening a blank tab first.
+      if (!sameOrigin) {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      }
       node.appendChild(a);
 
       if (trail) node.appendChild(document.createTextNode(trail));

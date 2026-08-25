@@ -2,10 +2,11 @@
  * index.js — Cloudflare Worker: routing, validation, rate limiting, streaming.
  *
  * Routes
- *   POST /chat        Streamed chat turn (SSE).
- *   GET  /collateral  The indexed SharePoint document list.
- *   GET  /health      Build + config visibility. No secrets.
- *   OPTIONS *         CORS preflight.
+ *   POST /chat         Streamed chat turn (SSE).
+ *   GET  /collateral   The indexed SharePoint document list.
+ *   GET  /document/:id A document the assistant generated this week.
+ *   GET  /health       Build + config visibility. No secrets.
+ *   OPTIONS *          CORS preflight.
  *
  * AUDIENCE: internal. Every /chat request must carry a verified Vikat identity
  * (see auth.js). The agent answers from material that is not cleared for
@@ -24,6 +25,8 @@ import { loadConfig } from './config.js';
 import { createStorage } from './storage.js';
 import { retrieve, retrievalStatus } from './retrieve.js';
 import { searchCollateral, collateralCount } from './collateral.js';
+import { loadFonts } from './documents/fonts.js';
+import { documentStoreStatus } from './documentStore.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
 import { authenticate } from './auth.js';
@@ -282,7 +285,7 @@ async function handleChat(request, env, ctx, cfg, cors, user) {
 
             const result = await runTool(
               { name: block.name, input: block.input },
-              { sessionId, user, storage, env, cfg },
+              { sessionId, user, storage, env, cfg, fonts: loadFonts() },
             );
 
             results.push({
@@ -379,6 +382,7 @@ export default {
           // Zero here after a sync has supposedly run is the signal that the
           // sync failed silently or wrote nothing.
           collateralDocuments: collateralCount(),
+          documentStore: documentStoreStatus(env, cfg),
           leadSink: cfg.LEAD_SINK,
           authMode: cfg.AUTH_MODE,
           rateLimit: `${cfg.RATE_LIMIT_REQUESTS}/${cfg.RATE_LIMIT_WINDOW_SECONDS}s per user`,
@@ -399,6 +403,7 @@ export default {
       url.pathname === '/chat' ||
       url.pathname === '/whoami' ||
       url.pathname === '/collateral' ||
+      url.pathname.startsWith('/document/') ||
       url.pathname.startsWith('/admin/');
 
     if (isProtected) {
@@ -454,6 +459,44 @@ export default {
           200,
           { ...cors, 'cache-control': 'private, max-age=60' },
         );
+      }
+
+      // A document the assistant generated. Any signed-in rep may fetch any
+      // document: the id is unguessable, they are colleagues, and the
+      // disclosure label is printed on every page of the file itself rather
+      // than enforced by who can download it.
+      if (url.pathname.startsWith('/document/')) {
+        if (request.method !== 'GET') {
+          return json({ error: 'Use GET.', code: 'method_not_allowed' }, 405, cors);
+        }
+
+        const id = url.pathname.slice('/document/'.length);
+        if (!/^doc_[a-f0-9]{16}$/.test(id)) {
+          return json({ error: 'Not found.', code: 'not_found' }, 404, cors);
+        }
+
+        const doc = await storage.getDocument(id);
+        if (!doc) {
+          return json(
+            {
+              error: 'That document has expired. Ask the assistant to build it again — it takes a moment.',
+              code: 'document_expired',
+            },
+            404,
+            cors,
+          );
+        }
+
+        return new Response(doc.bytes, {
+          headers: {
+            ...cors,
+            'content-type': doc.contentType,
+            // attachment, not inline: a .pptx has nothing to render in a tab,
+            // and the filename is what the rep will look for on disk.
+            'content-disposition': `attachment; filename="${doc.fileName.replace(/["\\]/g, '')}"`,
+            'cache-control': 'private, no-store',
+          },
+        });
       }
 
       if (url.pathname.startsWith('/admin/')) {

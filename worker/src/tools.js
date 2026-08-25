@@ -12,6 +12,7 @@
  *   escalate        -> ask_expert         route to a named human owner
  *   (new)              flag_content_gap   the knowledge base is missing or stale
  *   (new)              find_collateral    the SharePoint deck or doc to send
+ *   (new)              create_document    a branded deck or one-pager
  *
  * Every handler persists through storage.js and delivers through leadSink.js.
  * No handler touches KV or an outbound mail API directly.
@@ -19,6 +20,8 @@
 
 import { deliverLead } from './leadSink.js';
 import { searchCollateral } from './collateral.js';
+import { createDocument } from './documents/index.js';
+import { LIMITS } from './documents/spec.js';
 
 const SCORES = ['HOT', 'WARM', 'COLD'];
 
@@ -141,6 +144,69 @@ export const TOOL_DEFINITIONS = [
         },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'create_document',
+    description:
+      "Produce a branded deck (.pptx) or document (.pdf) that the rep can present or send. Call it when a rep asks for a deck, a one-pager, a leave-behind, a summary they can share, or something to take into a meeting — not for an answer they will read on screen. You write the content; the layout, colours, typefaces and disclosure footer are applied for you, so write plain sentence-case prose and no formatting marks. Every claim must come from the knowledge base or from what the rep told you in this conversation: a document outlives the chat, and an invention in one becomes a broken promise in a deal.",
+    strict: true,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['pptx', 'pdf'],
+          description:
+            'pptx for something the rep will present or edit; pdf for something they will send, where the layout must not move.',
+        },
+        title: {
+          type: 'string',
+          description: `What this document is, in sentence case. Under ${LIMITS.titleChars} characters.`,
+        },
+        subtitle: {
+          type: ['string', 'null'],
+          description: 'One sentence on the cover saying what the reader will get from it, or null.',
+        },
+        audience: {
+          type: ['string', 'null'],
+          description:
+            'Who it is for, as it should read on the cover: "Acme security team", "the CISO at Northwind". Null if the rep did not say.',
+        },
+        disclosure: {
+          type: 'string',
+          enum: ['external_ok', 'internal_only', 'needs_approval'],
+          description:
+            'Printed on every page. external_ok only when everything in it is drawn from published material. internal_only when it contains pricing, roadmap, named customers or competitive positioning. needs_approval when it needs sign-off from the owning team first. When unsure, choose internal_only.',
+        },
+        sections: {
+          type: 'array',
+          description: `The body. One section becomes one slide, or one block in a document. Up to ${LIMITS.sections}.`,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              eyebrow: {
+                type: ['string', 'null'],
+                description: 'Two or three words naming what this section is for: "context", "what it does", "next steps".',
+              },
+              title: { type: 'string', description: 'The point of the section, as a sentence-case statement.' },
+              body: {
+                type: ['string', 'null'],
+                description: 'A short paragraph, or null when the points say it. Prose, not a list.',
+              },
+              points: {
+                type: 'array',
+                description: `Up to ${LIMITS.points} short points. One idea each, no trailing full stops, no sub-bullets.`,
+                items: { type: 'string' },
+              },
+            },
+            required: ['eyebrow', 'title', 'body', 'points'],
+          },
+        },
+      },
+      required: ['format', 'title', 'subtitle', 'audience', 'disclosure', 'sections'],
     },
   },
 ];
@@ -297,6 +363,41 @@ export async function runTool(call, ctx) {
         return {
           content: `${found.length} document(s) matched:\n\n${listing}\n\nGive the rep the link as a markdown link on the file name. Quote the summary only as far as it goes — it is the document's own opening text, not a description of everything inside. Say when a document was last updated if it is more than a few months old. Do not claim what a document contains beyond what is shown here.`,
           effect: { query, results: found.length },
+        };
+      }
+
+      case 'create_document': {
+        const result = await createDocument(call.input, {
+          storage,
+          user: ctx.user,
+          env,
+          cfg,
+          fonts: ctx.fonts,
+        });
+
+        if (!result.ok) {
+          return {
+            content: `The document could not be built: ${result.error} Tell the rep plainly and offer to try again with what is missing.`,
+            isError: true,
+          };
+        }
+
+        const filing = result.filed
+          ? `Filed in SharePoint at ${result.sharePointUrl}.`
+          : `NOT filed in SharePoint (${result.filingReason}). Say so — the rep should know this copy is theirs alone and expires.`;
+
+        return {
+          content:
+            `Built ${result.fileName} — ${result.sections} section(s), ${Math.round(result.sizeBytes / 1024)}KB. ` +
+            `Download link: ${result.downloadPath}\n${filing}\n\n` +
+            `Give the rep the download link as a markdown link on the file name, and the SharePoint link too if there is one. ` +
+            `State the disclosure label printed on it: "${result.disclosureLabel}". Do not restate the document's contents — they have it.`,
+          effect: {
+            format: result.format,
+            sections: result.sections,
+            disclosure: result.disclosure,
+            filed: result.filed,
+          },
         };
       }
 

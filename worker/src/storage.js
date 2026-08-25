@@ -63,6 +63,20 @@
  * @property {(email: string) => Promise<boolean>} deleteUser
  * @property {(key: string) => Promise<object|null>} getSetting
  * @property {(key: string, value: object, actor: string) => Promise<object>} saveSetting
+ * @property {(doc: GeneratedDocument) => Promise<string>} saveDocument
+ * @property {(id: string) => Promise<GeneratedDocument|null>} getDocument
+ */
+
+/**
+ * @typedef {object} GeneratedDocument
+ * @property {string} [id]
+ * @property {string} fileName
+ * @property {string} contentType
+ * @property {Uint8Array|ArrayBuffer} bytes
+ * @property {string} title
+ * @property {string} disclosure
+ * @property {string} createdBy
+ * @property {string} [createdAt]
  */
 
 /**
@@ -251,6 +265,51 @@ export function createStorage(env, cfg) {
       const record = { ...value, updatedBy: actor, updatedAt: new Date().toISOString() };
       await kv.put(`setting:${key}`, JSON.stringify(record));
       return record;
+    },
+
+    /**
+     * Keep a generated document so the rep can download it immediately.
+     *
+     * SharePoint is where the file belongs, but a Graph outage must not cost
+     * a rep the deck they are about to present. This copy is the one that is
+     * always there; it expires, because it is a handoff and not an archive.
+     *
+     * Bytes and metadata are separate keys: the metadata is small and JSON,
+     * the body is not, and reading one should not pull the other.
+     */
+    async saveDocument(doc) {
+      const id = newId('doc');
+      const createdAt = doc.createdAt || new Date().toISOString();
+      const ttl = cfg.DOCUMENT_TTL_SECONDS;
+
+      await kv.put(`docbody:${id}`, doc.bytes, { expirationTtl: ttl });
+      await kv.put(
+        `doc:${id}`,
+        JSON.stringify({
+          id,
+          createdAt,
+          fileName: doc.fileName,
+          contentType: doc.contentType,
+          title: doc.title,
+          disclosure: doc.disclosure,
+          createdBy: doc.createdBy,
+        }),
+        { expirationTtl: ttl },
+      );
+
+      return id;
+    },
+
+    async getDocument(id) {
+      const meta = await kv.get(`doc:${id}`, 'json');
+      if (!meta) return null;
+
+      const bytes = await kv.get(`docbody:${id}`, 'arrayBuffer');
+      // Metadata without a body means the body expired first, or the write
+      // was interrupted between the two puts. Either way there is no file.
+      if (!bytes) return null;
+
+      return { ...meta, bytes };
     },
 
     async checkRateLimit(key, limit, windowSeconds) {
