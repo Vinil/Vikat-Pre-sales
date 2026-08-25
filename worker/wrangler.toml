@@ -16,13 +16,29 @@ main = "src/index.js"
 compatibility_date = "2025-05-05"
 compatibility_flags = ["nodejs_compat"]
 
-# Put a Cloudflare Access application in front of this hostname before the
-# first deploy. Without it, AUTH_MODE=cf-access rejects every request (fails
-# closed), so the tool is unusable rather than exposed — but the Access app is
-# what actually authenticates people.
-routes = [
-  { pattern = "sales-assistant.vikat.ai/*", zone_name = "vikat.ai" }
-]
+# Served on the free workers.dev subdomain:
+#   https://vikat-sales-assistant.<your-account>.workers.dev
+#
+# No custom domain and no Cloudflare-managed zone are required. Protect it in
+# Zero Trust > Access > Applications > Add an application > Self-hosted, then
+# "+ Add Workers" and pick this Worker by name. Access attaches to the Worker
+# itself, so the workers.dev URL and any future custom domain are both covered.
+#
+# Without that Access application, AUTH_MODE=cf-access rejects every request
+# (it fails closed), so the tool is unusable rather than exposed.
+workers_dev = true
+
+# If vikat.ai later moves onto Cloudflare, swap the line above for a route and
+# nothing else changes — Access follows the Worker, not the hostname:
+#   routes = [{ pattern = "sales-assistant.vikat.ai/*", zone_name = "vikat.ai" }]
+
+# The admin panel and the assistant page are served by this same Worker, so
+# there is one origin, one Access policy and no cross-origin requests at all.
+[assets]
+directory = "../widget"
+# Static files win for paths that match a file; everything else (/chat,
+# /admin/*, /health, /whoami) falls through to src/index.js.
+not_found_handling = "none"
 
 [observability]
 enabled = true
@@ -56,8 +72,10 @@ BOOTSTRAP_ADMINS = "REPLACE_WITH_YOUR_EMAIL@vikat.ai"
 DEFAULT_ROLE = "rep"
 
 # --- Origins --------------------------------------------------------------
-# Internal hosts only. The public marketing site is deliberately absent.
-ALLOWED_ORIGINS = "https://sales-assistant.vikat.ai"
+# The panel and assistant are same-origin with the API, so a browser sends no
+# Origin header and this list is not consulted. Kept for local dev and for a
+# future separate front end.
+ALLOWED_ORIGINS = "http://localhost:8787"
 
 # --- Notifications --------------------------------------------------------
 # A Teams or Slack incoming webhook is usually the best fit for an internal
@@ -84,6 +102,15 @@ preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
 # `wrangler dev --env dev` bypasses SSO with a fixed identity. Both flags are
 # required, so a stray AUTH_MODE change alone cannot open the door.
 [env.dev]
+# Named environments do NOT inherit kv_namespaces from the top level, so the
+# binding has to be repeated here or `wrangler dev --env dev` fails on the
+# first storage call. `--local` uses an on-disk simulator, so the id below is
+# only a placeholder and never touches the real namespace.
+[[env.dev.kv_namespaces]]
+binding = "VIKAT_KV"
+id = "local-dev-placeholder"
+preview_id = "local-dev-placeholder"
+
 [env.dev.vars]
 AUTH_MODE = "dev"
 ALLOW_DEV_AUTH = "true"

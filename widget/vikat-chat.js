@@ -24,12 +24,16 @@
   if (!script) return;
 
   // --- Config (rule 5: the endpoint is a data attribute, never a literal) ---
-  var ENDPOINT = (script.getAttribute('data-endpoint') || '').replace(/\/+$/, '');
+  // data-endpoint="/" means same-origin, which is how this is deployed: the
+  // Worker serves these files as well as the API. An absolute URL still works
+  // for a separately hosted front end.
+  var RAW_ENDPOINT = script.getAttribute('data-endpoint');
+  var ENDPOINT = (RAW_ENDPOINT || '').replace(/\/+$/, '');
   var MODE = script.getAttribute('data-mode') === 'inline' ? 'inline' : 'float';
   var MOUNT = script.getAttribute('data-mount');
 
-  if (!ENDPOINT) {
-    console.error('[vikat-chat] data-endpoint is required.');
+  if (RAW_ENDPOINT === null) {
+    console.error('[vikat-chat] data-endpoint is required. Use "/" for same-origin.');
     return;
   }
 

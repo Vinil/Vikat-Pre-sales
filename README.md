@@ -74,8 +74,10 @@ npm --prefix worker run dev
 required — a stray `AUTH_MODE` change alone cannot open the door. Send
 `X-Dev-User: you@vikat.ai` to pick an identity.
 
-Serve the widget against it by editing `data-endpoint` in
-`widget/index.html` to `http://localhost:8787`.
+The Worker serves the pages too, so `http://localhost:8787/` is the assistant
+and `http://localhost:8787/admin` is the panel. Send
+`X-Dev-User: you@vikat.ai` to pick an identity (a header extension like
+ModHeader does this in the browser).
 
 ### Tests
 
@@ -114,11 +116,18 @@ hostnames and folder names): `SHAREPOINT_HOSTNAME`, `SHAREPOINT_SITE_PATH`,
 
 ### Cloudflare Access (default)
 
-1. Zero Trust → Access → Applications → add a self-hosted app for
-   `sales-assistant.vikat.ai`.
-2. Policy: allow emails ending in `@vikat.ai`, or a specific group.
-3. Copy the **Application Audience (AUD)** tag and your team domain into
-   `wrangler.toml` as `CF_ACCESS_AUD` and `CF_ACCESS_TEAM_DOMAIN`.
+**No custom domain or Cloudflare-managed zone is required.** Access attaches to
+the Worker itself, which covers its `workers.dev` URL and any custom domain
+added later.
+
+1. Deploy once, so the Worker exists.
+2. Zero Trust → Access → Applications → Add an application → **Self-hosted**.
+3. Under Destinations choose **+ Add Workers** and pick `vikat-sales-assistant`
+   by name — not a public hostname, which would need a zone on this account.
+4. Policy: allow emails ending in `@vikat.ai`, or a specific group.
+5. Copy the **Application Audience (AUD)** tag and your team domain into
+   `wrangler.toml` as `CF_ACCESS_AUD` and `CF_ACCESS_TEAM_DOMAIN`, then deploy
+   again.
 
 The Worker verifies the Access JWT against your team's JWKS — signature,
 expiry, issuer, audience — then checks the email domain as a second gate.
@@ -348,8 +357,16 @@ wrangler kv namespace create VIKAT_KV
 wrangler kv namespace create VIKAT_KV --preview
 ```
 
-Deploy the widget by copying `widget/` to wherever the internal page is hosted,
-and pointing `data-endpoint` at the Worker.
+The pages ship with the Worker — `widget/` is declared as a static-assets
+directory in `wrangler.toml`, so `/` is the assistant and `/admin` is the panel
+on the same origin as the API. One origin means one Access policy and no CORS.
+
+That also removes a failure mode worth naming: with the pages on a separate
+hostname, the Access cookie is never set for the API host, so every request
+401s and reloading does not help.
+
+`data-endpoint="/"` in both pages means same-origin. An absolute URL still
+works if the front end is ever hosted separately.
 
 ### Smoke tests after deploying
 

@@ -12,10 +12,12 @@
   'use strict';
 
   var script = document.currentScript;
-  var ENDPOINT = ((script && script.getAttribute('data-endpoint')) || '').replace(/\/+$/, '');
+  // data-endpoint="/" means same-origin, which is how this is deployed.
+  var RAW_ENDPOINT = script && script.getAttribute('data-endpoint');
+  var ENDPOINT = (RAW_ENDPOINT || '').replace(/\/+$/, '');
 
-  if (!ENDPOINT) {
-    console.error('[vikat-admin] data-endpoint is required.');
+  if (RAW_ENDPOINT === null || RAW_ENDPOINT === undefined) {
+    console.error('[vikat-admin] data-endpoint is required. Use "/" for same-origin.');
     return;
   }
 
