@@ -36,11 +36,26 @@ import { handleAdmin, handleAdminSummary } from './admin.js';
  * Returns `null` when the Origin is present but not allowed, which the caller
  * turns into a 403. A missing Origin (curl, server-to-server) is allowed
  * through without CORS headers — the browser is the thing being protected.
+ *
+ * Same-origin is always allowed, whatever the allowlist says. Browsers send an
+ * Origin header on same-origin POSTs as well as cross-origin ones, so without
+ * this the Worker rejects requests from the very pages it serves. The
+ * allowlist governs genuinely cross-origin callers only.
  */
 function corsHeaders(request, cfg) {
   const origin = request.headers.get('Origin');
   if (!origin) return {};
-  if (!cfg.ALLOWED_ORIGINS.includes(origin)) return null;
+
+  let sameOrigin = false;
+  try {
+    // Full origin, not just host: http:// and https:// on the same host are
+    // different origins, and treating them as one would accept a downgrade.
+    sameOrigin = new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    // Malformed Origin header; fall through to the allowlist, which rejects it.
+  }
+
+  if (!sameOrigin && !cfg.ALLOWED_ORIGINS.includes(origin)) return null;
 
   return {
     'Access-Control-Allow-Origin': origin,

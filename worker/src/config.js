@@ -58,7 +58,9 @@ export const DEFAULTS = {
   RATE_LIMIT_WINDOW_SECONDS: 600, // 10 minutes
 
   // --- CORS --------------------------------------------------------------
-  // Internal hosts only. Comma-separated in wrangler.toml.
+  // Cross-origin callers only. The Worker serves its own pages, and same-origin
+  // is always permitted regardless of this list — see corsHeaders() in index.js.
+  // Comma-separated in wrangler.toml.
   ALLOWED_ORIGINS: [
     'https://sales.vikat.ai',
     'http://localhost:8788',

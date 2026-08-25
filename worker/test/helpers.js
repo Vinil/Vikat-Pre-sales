@@ -68,8 +68,14 @@ export function fakeStorage() {
   };
 }
 
-/** Minimal Request stand-in for corsHeaders tests. */
-export function req(headers = {}) {
+/**
+ * Minimal Request stand-in for corsHeaders tests.
+ *
+ * `url` matters: corsHeaders compares the Origin against the request's own
+ * host to detect same-origin, so a test double without a url cannot exercise
+ * that path.
+ */
+export function req(headers = {}, url = 'https://sales.vikat.ai/chat') {
   const map = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
-  return { headers: { get: (k) => map.get(k.toLowerCase()) ?? null } };
+  return { url, headers: { get: (k) => map.get(k.toLowerCase()) ?? null } };
 }

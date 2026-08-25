@@ -166,6 +166,35 @@ test('corsHeaders returns null for a disallowed origin', () => {
   assert.equal(corsHeaders(req({ Origin: 'https://vikat.ai' }), cfg), null);
 });
 
+test('same-origin is allowed even when the allowlist does not name it', () => {
+  // Browsers send Origin on same-origin POSTs too. The Worker serves its own
+  // pages, so rejecting those breaks the app while the allowlist looks correct.
+  const strict = loadConfig({ ALLOWED_ORIGINS: 'http://localhost:8787' });
+  const h = corsHeaders(
+    req({ Origin: 'https://vikat-sales-assistant.vinilvadi.workers.dev' },
+        'https://vikat-sales-assistant.vinilvadi.workers.dev/chat'),
+    strict,
+  );
+  assert.ok(h, 'the Worker must accept requests from the pages it serves');
+  assert.equal(h['Access-Control-Allow-Origin'], 'https://vikat-sales-assistant.vinilvadi.workers.dev');
+});
+
+test('a different host is still refused when not on the allowlist', () => {
+  const strict = loadConfig({ ALLOWED_ORIGINS: 'http://localhost:8787' });
+  assert.equal(
+    corsHeaders(
+      req({ Origin: 'https://evil.example' },
+          'https://vikat-sales-assistant.vinilvadi.workers.dev/chat'),
+      strict,
+    ),
+    null,
+  );
+});
+
+test('a malformed Origin is refused rather than treated as same-origin', () => {
+  assert.equal(corsHeaders(req({ Origin: 'not a url' }), cfg), null);
+});
+
 test('corsHeaders allows a request with no Origin, without CORS headers', () => {
   const h = corsHeaders(req({}), cfg);
   assert.deepEqual(h, {});
@@ -173,8 +202,11 @@ test('corsHeaders allows a request with no Origin, without CORS headers', () => 
 
 test('corsHeaders honours the ALLOWED_ORIGINS override', () => {
   const custom = loadConfig({ ALLOWED_ORIGINS: 'https://staging.vikat.ai' });
-  assert.ok(corsHeaders(req({ Origin: 'https://staging.vikat.ai' }), custom));
-  assert.equal(corsHeaders(req({ Origin: 'https://sales.vikat.ai' }), custom), null);
+  // Request served from a third host, so neither Origin is same-origin and the
+  // allowlist is what decides.
+  const from = (o) => corsHeaders(req({ Origin: o }, 'https://worker.example/chat'), custom);
+  assert.ok(from('https://staging.vikat.ai'));
+  assert.equal(from('https://sales.vikat.ai'), null);
 });
 
 test('CORS exposes the headers the Access-authenticated widget must send', () => {
