@@ -1,0 +1,94 @@
+# Deploy the sales assistant.
+#
+# Runs from the Actions tab — no terminal needed. Rebuilds the knowledge base
+# from the public site repo, runs the tests, and deploys the Worker.
+#
+# SharePoint material is NOT included here. This repository is public, and this
+# workflow's build output is the same knowledge base that is committed. The
+# nightly sync-knowledge workflow is the one that merges internal material, and
+# it does so without committing anything.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Which wrangler environment to deploy'
+        type: choice
+        options: [production, dev]
+        default: production
+      skip_tests:
+        description: 'Deploy without running tests (not recommended)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the agent
+        uses: actions/checkout@v4
+
+      - name: Check out the site (knowledge source)
+        uses: actions/checkout@v4
+        with:
+          repository: Vinil/vikat-ai-site-v1
+          path: .site
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: |
+          npm --prefix scripts install --no-audit --no-fund
+          npm --prefix worker install --no-audit --no-fund
+
+      - name: Rebuild the knowledge base from the site
+        run: node scripts/build-knowledge.js --pages .site
+
+      # A deploy that fails its own tests is how a broken agent reaches the
+      # sales team. The skip exists for an emergency rollforward, not for haste.
+      - name: Run tests
+        if: ${{ !inputs.skip_tests }}
+        run: |
+          npm --prefix scripts test
+          npm --prefix worker test
+
+      # Catches the most common first-deploy mistake before it becomes a
+      # confusing 500 in production.
+      - name: Check configuration
+        run: |
+          if grep -q "REPLACE_WITH" worker/wrangler.toml; then
+            echo "::error::wrangler.toml still contains REPLACE_WITH placeholders:"
+            grep -n "REPLACE_WITH" worker/wrangler.toml
+            echo "::error::Edit worker/wrangler.toml and fill them in before deploying."
+            exit 1
+          fi
+          echo "No placeholders left in wrangler.toml."
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TARGET: ${{ inputs.environment == 'dev' && 'dev' || '' }}
+        run: npm --prefix worker run deploy -- --env="$TARGET"
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Deployed"
+            echo ""
+            echo "Environment: \`${{ inputs.environment }}\`"
+            echo ""
+            echo "Next: check \`/health\` on the Worker hostname. It should report"
+            echo "\`apiKeyConfigured: true\`, \`kvConfigured: true\` and \`devAuthOpen: false\`."
+          } >> "$GITHUB_STEP_SUMMARY"

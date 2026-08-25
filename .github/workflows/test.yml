@@ -1,0 +1,39 @@
+# Tests, on every push and pull request.
+#
+# Exists so the GitHub UI shows a green check before you merge, rather than
+# requiring a terminal to know whether the branch is sound.
+
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: |
+          npm --prefix scripts install --no-audit --no-fund
+          npm --prefix worker install --no-audit --no-fund
+
+      - name: Worker tests
+        run: npm --prefix worker test
+
+      - name: Script tests
+        run: npm --prefix scripts test
+
+      # The abstraction and public-repo guards live in the worker suite, but
+      # call them out so a failure here is legible in the checks list.
+      - name: Guards
+        run: npm --prefix worker run check:abstractions
