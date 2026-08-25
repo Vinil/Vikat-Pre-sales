@@ -55,9 +55,9 @@ RATE_LIMIT_WINDOW_SECONDS = "600"
 # --- Authentication -------------------------------------------------------
 AUTH_MODE = "cf-access"
 # From Zero Trust > Settings > Custom Pages, or your team domain.
-CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_TEAM.cloudflareaccess.com"
+CF_ACCESS_TEAM_DOMAIN = "pending.cloudflareaccess.com"
 # Application Audience (AUD) tag from the Access application's Overview tab.
-CF_ACCESS_AUD = "REPLACE_WITH_ACCESS_AUD_TAG"
+CF_ACCESS_AUD = "pending"
 ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].
 
@@ -65,7 +65,7 @@ ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Always admin, whatever storage says. Keep at least one: with an empty KV
 # nobody could otherwise reach the admin panel to grant the first role, and a
 # botched grant is recoverable by redeploying rather than by editing KV.
-BOOTSTRAP_ADMINS = "REPLACE_WITH_YOUR_EMAIL@vikat.ai"
+BOOTSTRAP_ADMINS = "vinil@vikat.ai"
 # Role for someone the IdP authenticated but nobody has graded.
 #   rep    — anyone who can sign in can use the assistant (SSO is the gate)
 #   denied — explicit allowlist; every user must be granted a role first
@@ -81,8 +81,8 @@ ALLOWED_ORIGINS = "http://localhost:8787"
 # A Teams or Slack incoming webhook is usually the best fit for an internal
 # tool: logged prospects, expert requests and content gaps land in a channel
 # the team already watches.
-LEAD_SINK = "webhook"
-LEAD_WEBHOOK_URL = "REPLACE_WITH_TEAMS_OR_SLACK_WEBHOOK_URL"
+LEAD_SINK = "none"
+LEAD_WEBHOOK_URL = ""
 LEAD_TO_EMAIL = "sales@vikat.ai"
 LEAD_FROM_EMAIL = "agent@vikat.ai"
 CONTENT_OWNER_EMAIL = "marketing@vikat.ai"
@@ -95,8 +95,8 @@ INTERNAL_HELP_CHANNEL = "#sales-help"
 # then paste the ids below.
 [[kv_namespaces]]
 binding = "VIKAT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+id = "bce1a840e1d348e09c15a00ad28c999d"
+preview_id = "37e406bcaf74401b93274d4dde598aa7"
 
 # --- Local development ----------------------------------------------------
 # `wrangler dev --env dev` bypasses SSO with a fixed identity. Both flags are
