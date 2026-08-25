@@ -55,9 +55,9 @@ RATE_LIMIT_WINDOW_SECONDS = "600"
 # --- Authentication -------------------------------------------------------
 AUTH_MODE = "cf-access"
 # From Zero Trust > Settings > Custom Pages, or your team domain.
-CF_ACCESS_TEAM_DOMAIN = "pending.cloudflareaccess.com"
+CF_ACCESS_TEAM_DOMAIN = "sparkling-hat-8db3.cloudflareaccess.com"
 # Application Audience (AUD) tag from the Access application's Overview tab.
-CF_ACCESS_AUD = "pending"
+CF_ACCESS_AUD = "ac7c78ef971056857ecde19e25763644844741c36cb227ee7dbc85910777c759"
 ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].
 
