@@ -11,12 +11,14 @@
  *   request_meeting -> (dropped)          reps book their own meetings
  *   escalate        -> ask_expert         route to a named human owner
  *   (new)              flag_content_gap   the knowledge base is missing or stale
+ *   (new)              find_collateral    the SharePoint deck or doc to send
  *
  * Every handler persists through storage.js and delivers through leadSink.js.
  * No handler touches KV or an outbound mail API directly.
  */
 
 import { deliverLead } from './leadSink.js';
+import { searchCollateral } from './collateral.js';
 
 const SCORES = ['HOT', 'WARM', 'COLD'];
 
@@ -123,7 +125,28 @@ export const TOOL_DEFINITIONS = [
       required: ['question', 'gap_type', 'details'],
     },
   },
+  {
+    name: 'find_collateral',
+    description:
+      "Find the SharePoint decks and documents behind an answer, so the rep gets a link they can send or open. Call this whenever the rep is preparing for a call, asks what to send, or asks a question a deck would answer — a link to the current file beats a paraphrase that goes stale. Returns nothing if no document matches; say so rather than describing a document you have not seen.",
+    strict: true,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: 'string',
+          description:
+            'What the document is about, in the words it would use: a product name, a solution area, a customer, a topic. Keep it short — three or four words match better than a sentence.',
+        },
+      },
+      required: ['query'],
+    },
+  },
 ];
+
+/** How many documents find_collateral hands back in one call. */
+const COLLATERAL_RESULT_LIMIT = 5;
 
 /** Drop nulls and blanks so records and notifications stay readable. */
 function compact(obj) {
@@ -244,6 +267,36 @@ export async function runTool(call, ctx) {
         return {
           content: `Gap logged for the content owner. Say so in one short sentence and move on — do not apologise again. Then give the rep the best partial answer you have, and name who could answer it properly.`,
           effect: { gapType: input.gap_type, delivered: delivery.delivered },
+        };
+      }
+
+      case 'find_collateral': {
+        const query = String(call.input.query || '').trim();
+        const found = searchCollateral(query, { limit: COLLATERAL_RESULT_LIMIT });
+
+        if (found.length === 0) {
+          return {
+            content:
+              'No indexed document matches that. Tell the rep plainly that there is no deck or doc for it — do not describe one from memory. If they expected one to exist, that is a content gap worth flagging.',
+            effect: { query, results: 0 },
+          };
+        }
+
+        // The link is the deliverable, so the model is given exactly the fields
+        // it needs to reproduce one and nothing it could embellish from.
+        const listing = found
+          .map((d) => {
+            const parts = [`- ${d.name}`, `  link: ${d.webUrl}`];
+            if (d.folder) parts.push(`  folder: ${d.folder}`);
+            if (d.modified) parts.push(`  last updated: ${d.modified.slice(0, 10)}`);
+            if (d.summary) parts.push(`  summary: ${d.summary}`);
+            return parts.join('\n');
+          })
+          .join('\n\n');
+
+        return {
+          content: `${found.length} document(s) matched:\n\n${listing}\n\nGive the rep the link as a markdown link on the file name. Quote the summary only as far as it goes — it is the document's own opening text, not a description of everything inside. Say when a document was last updated if it is more than a few months old. Do not claim what a document contains beyond what is shown here.`,
+          effect: { query, results: found.length },
         };
       }
 

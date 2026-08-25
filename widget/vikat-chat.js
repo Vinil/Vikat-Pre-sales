@@ -268,6 +268,52 @@
     return n;
   }
 
+  // Markdown links and bare URLs, http(s) only. A javascript: or data: URL
+  // never matches, so there is no scheme to sanitise afterwards.
+  var LINK_RE = /\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"')\]]+)/g;
+
+  /**
+   * Render agent text into `node`, turning links into anchors.
+   *
+   * Built from text nodes and elements, never innerHTML: the model's output is
+   * untrusted in the ordinary way — it summarises documents anyone at Vikat can
+   * put in SharePoint — and one document with markup in its title should not
+   * become script in a rep's browser.
+   */
+  function renderBody(node, text) {
+    node.textContent = '';
+    LINK_RE.lastIndex = 0;
+
+    var last = 0;
+    var m;
+
+    while ((m = LINK_RE.exec(text)) !== null) {
+      if (m.index > last) node.appendChild(document.createTextNode(text.slice(last, m.index)));
+
+      var url = m[2] || m[3];
+      var trail = '';
+
+      if (!m[1]) {
+        // Bare URL: trailing punctuation belongs to the sentence, not the link.
+        while (/[.,;:!?]$/.test(url)) {
+          trail = url.slice(-1) + trail;
+          url = url.slice(0, -1);
+        }
+      }
+
+      var a = el('a', 'vk-link', m[1] || url);
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      node.appendChild(a);
+
+      if (trail) node.appendChild(document.createTextNode(trail));
+      last = m.index + m[0].length;
+    }
+
+    if (last < text.length) node.appendChild(document.createTextNode(text.slice(last)));
+  }
+
   /** Agent bubble with an update() that re-splits disclosure tags as it streams. */
   function addAgent() {
     var wrap = el('div', 'vk-msg vk-msg-agent');
@@ -282,7 +328,7 @@
       node: wrap,
       update: function (full) {
         var split = splitTags(full);
-        body.textContent = split.body;
+        renderBody(body, split.body);
 
         // Cheap to rebuild: there are at most a couple of tags.
         tagRow.textContent = '';
@@ -623,8 +669,9 @@
     mount();
   }
 
-  // Test hook. splitTags decides whether a rep sees "Internal only" or nothing
-  // at all, so it is worth asserting on directly rather than through the DOM.
-  // Exposed deliberately; it reads no state and mutates nothing.
-  window.VikatChatInternals = { splitTags: splitTags };
+  // Test hooks. splitTags decides whether a rep sees "Internal only" or nothing
+  // at all, and renderBody turns model output into DOM — both are worth
+  // asserting on directly rather than through a live conversation. Exposed
+  // deliberately; neither reads module state.
+  window.VikatChatInternals = { splitTags: splitTags, renderBody: renderBody };
 })();

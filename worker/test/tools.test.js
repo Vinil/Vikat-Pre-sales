@@ -28,7 +28,7 @@ async function withFetch(stub, fn) {
 test('the internal tool set is defined', () => {
   assert.deepEqual(
     TOOL_DEFINITIONS.map((t) => t.name).sort(),
-    ['ask_expert', 'flag_content_gap', 'log_prospect'],
+    ['ask_expert', 'find_collateral', 'flag_content_gap', 'log_prospect'],
   );
 });
 

@@ -228,6 +228,20 @@
   color: var(--vk-w80);
 }
 
+/* Links to SharePoint collateral. Underlined rather than colour-only, so they
+   read as links in a bubble that is already low-contrast body text. */
+.vk-link {
+  color: var(--vk-cyan);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(0, 212, 255, 0.4);
+  overflow-wrap: anywhere;
+}
+
+.vk-link:hover {
+  text-decoration-color: var(--vk-cyan);
+}
+
 /* ── Disclosure tags ────────────────────────────────────────── */
 /* The reason this tool exists: what the rep may repeat to a customer.
    Rendered as a chip so it cannot be skimmed past. */

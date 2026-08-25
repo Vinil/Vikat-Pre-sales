@@ -67,10 +67,19 @@ test('rule 1: no module outside storage.js calls a KV method directly', () => {
   assert.deepEqual(violations, [], `Namespaced key access belongs in storage.js:\n${violations.join('\n')}`);
 });
 
-test('rule 2: only retrieve.js imports the compiled knowledge base', () => {
+// knowledge.js is generated, and carries two independent corpora: the text
+// chunks the model reads, and the document index the Collateral tab lists.
+// Each has exactly one module allowed to import it, so each stays a single
+// seam Tier B can swap.
+const KNOWLEDGE_OWNERS = {
+  'retrieve.js': /\bKNOWLEDGE(_TOKENS|_META)?\b/,
+  'collateral.js': /\bCOLLATERAL\b/,
+};
+
+test('rule 2: only retrieve.js and collateral.js import the compiled knowledge base', () => {
   const violations = [];
   for (const f of sourceFiles()) {
-    if (f.rel === 'retrieve.js') continue;
+    if (KNOWLEDGE_OWNERS[f.rel]) continue;
     for (const v of offendingLines(f.text, /from\s+['"][./]*knowledge\.js['"]/)) {
       violations.push(`${f.rel}:${v.n}  ${v.line}`);
     }
@@ -78,8 +87,27 @@ test('rule 2: only retrieve.js imports the compiled knowledge base', () => {
   assert.deepEqual(
     violations,
     [],
-    `Knowledge must be reached through retrieve() so Tier B can swap in Vectorize:\n${violations.join('\n')}`,
+    `Knowledge must be reached through retrieve() or searchCollateral() so Tier B can swap in Vectorize:\n${violations.join('\n')}`,
   );
+});
+
+test('rule 2a: neither knowledge owner reaches into the other one\'s corpus', () => {
+  // Widening rule 2 to two modules is only safe while they stay disjoint. If
+  // retrieve.js started reading COLLATERAL, the document index would have two
+  // owners and no seam.
+  const violations = [];
+  for (const [owner, mine] of Object.entries(KNOWLEDGE_OWNERS)) {
+    const file = sourceFiles().find((f) => f.rel === owner);
+    assert.ok(file, `${owner} is missing; rule 2 no longer describes the code`);
+
+    const imports = file.text.match(/import\s*\{([^}]*)\}\s*from\s*['"][./]*knowledge\.js['"]/);
+    if (!imports) continue;
+
+    for (const name of imports[1].split(',').map((n) => n.trim()).filter(Boolean)) {
+      if (!mine.test(name)) violations.push(`${owner} imports ${name}, which it does not own`);
+    }
+  }
+  assert.deepEqual(violations, []);
 });
 
 test('rule 3: only leadSink.js sends mail or posts a lead outbound', () => {

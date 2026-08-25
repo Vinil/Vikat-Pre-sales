@@ -115,3 +115,107 @@ test('an unknown bracketed label is not treated as a tag', async () => {
   const r = await split('Answer.\n[Top Secret] — invented label');
   assert.equal(r.tags.length, 0, 'only the three known tags may render as disclosure chips');
 });
+
+// --- Link rendering -------------------------------------------------------
+// Collateral links are the whole value of find_collateral, and they are also
+// the one place model output becomes DOM. Both halves are tested here.
+
+/** Render `text` into a fresh node and return { html, links }. */
+const render = (text) =>
+  page.evaluate((t) => {
+    var n = document.createElement('div');
+    window.VikatChatInternals.renderBody(n, t);
+    return {
+      html: n.innerHTML,
+      text: n.textContent,
+      links: Array.prototype.map.call(n.querySelectorAll('a'), function (a) {
+        return { href: a.getAttribute('href'), label: a.textContent, rel: a.rel, target: a.target };
+      }),
+    };
+  }, text);
+
+test('a markdown link becomes an anchor', async () => {
+  const r = await render('Send them [the VShield deck](https://vikat.sharepoint.com/x/a.pptx).');
+  assert.equal(r.links.length, 1);
+  assert.equal(r.links[0].href, 'https://vikat.sharepoint.com/x/a.pptx');
+  assert.equal(r.links[0].label, 'the VShield deck');
+});
+
+test('collateral links open in a new tab without handing over the opener', async () => {
+  const r = await render('[deck](https://vikat.sharepoint.com/x/a.pptx)');
+  assert.equal(r.links[0].target, '_blank');
+  assert.match(r.links[0].rel, /noopener/);
+  assert.match(r.links[0].rel, /noreferrer/);
+});
+
+test('a bare URL becomes an anchor', async () => {
+  const r = await render('It is at https://vikat.sharepoint.com/x/a.pptx today.');
+  assert.equal(r.links.length, 1);
+  assert.equal(r.links[0].href, 'https://vikat.sharepoint.com/x/a.pptx');
+});
+
+test('a full stop after a bare URL is not part of the link', async () => {
+  const r = await render('See https://vikat.sharepoint.com/x/a.pptx.');
+  assert.equal(r.links[0].href, 'https://vikat.sharepoint.com/x/a.pptx');
+  assert.match(r.text, /a\.pptx\.$/, 'the sentence keeps its full stop');
+});
+
+test('surrounding prose survives verbatim', async () => {
+  const src = 'Before [x](https://a.test/1) middle [y](https://b.test/2) after';
+  const r = await render(src);
+  assert.equal(r.links.length, 2);
+  assert.equal(r.text, 'Before x middle y after');
+});
+
+test('text with no links is rendered unchanged', async () => {
+  const r = await render('VCommand triages incidents in under 30 seconds.');
+  assert.equal(r.links.length, 0);
+  assert.equal(r.text, 'VCommand triages incidents in under 30 seconds.');
+});
+
+test('markup in model output is escaped, never parsed', async () => {
+  // A document title in SharePoint can contain anything; it must not become
+  // script in a rep's browser.
+  const r = await render('<img src=x onerror=alert(1)> and <b>bold</b>');
+  assert.equal(r.links.length, 0);
+  assert.ok(!/<img/.test(r.html), 'no element may be created from model text');
+  assert.ok(!/<b>/.test(r.html));
+  assert.match(r.text, /^<img src=x onerror=alert\(1\)> and <b>bold<\/b>$/);
+});
+
+test('a javascript: URL is never turned into a link', async () => {
+  for (const src of [
+    '[click](javascript:alert(1))',
+    'javascript:alert(1)',
+    '[click](data:text/html,<script>alert(1)</script>)',
+    '[click](vbscript:msgbox)',
+    '[click](  javascript:alert(1))',
+  ]) {
+    const r = await render(src);
+    assert.equal(r.links.length, 0, `${src} must not produce an anchor`);
+  }
+});
+
+test('a markdown link whose label contains markup stays inert', async () => {
+  const r = await render('[<img src=x onerror=alert(1)>](https://vikat.sharepoint.com/a)');
+  assert.equal(r.links.length, 1);
+  assert.equal(r.links[0].label, '<img src=x onerror=alert(1)>', 'label is text, not markup');
+  assert.ok(!/<img/.test(r.html));
+});
+
+test('a half-arrived link mid-stream does not break the body', async () => {
+  // Streaming means renderBody sees prefixes of the final text.
+  const r = await render('Send them [the deck](https://vikat.share');
+  assert.match(r.text, /^Send them /, 'the prose already streamed must still show');
+});
+
+test('re-rendering replaces the body rather than appending to it', async () => {
+  const r = await page.evaluate(() => {
+    var n = document.createElement('div');
+    window.VikatChatInternals.renderBody(n, 'first [a](https://a.test/1)');
+    window.VikatChatInternals.renderBody(n, 'second [b](https://b.test/2)');
+    return { text: n.textContent, links: n.querySelectorAll('a').length };
+  });
+  assert.equal(r.text, 'second b');
+  assert.equal(r.links, 1);
+});

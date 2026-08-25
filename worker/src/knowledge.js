@@ -1639,6 +1639,18 @@ export const KNOWLEDGE = [
 /** Approximate token count of the compiled knowledge base. */
 export const KNOWLEDGE_TOKENS = 21859;
 
+/**
+ * One entry per SharePoint document the sync indexed, for the Collateral tab
+ * and for citing sources in chat.
+ *
+ * A link here is not a grant: SharePoint still authorises the click, so a rep
+ * who cannot open a document sees the link and gets SharePoint's own refusal.
+ */
+/** @typedef {{ name: string, summary: string, webUrl: string, folder: string, modified: string|null, page: string }} CollateralDocument */
+
+/** @type {CollateralDocument[]} */
+export const COLLATERAL = [];
+
 /** Build metadata, surfaced by GET /health for operational visibility. */
 export const KNOWLEDGE_META = {
   "chunkCount": 270,
@@ -1646,6 +1658,7 @@ export const KNOWLEDGE_META = {
   "pageChunks": 268,
   "faqChunks": 2,
   "sharePointChunks": 0,
+  "collateralDocuments": 0,
   "sharePointSyncedAt": null,
   "skippedFaqEntries": [
     "company-overview",

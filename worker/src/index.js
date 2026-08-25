@@ -2,9 +2,10 @@
  * index.js — Cloudflare Worker: routing, validation, rate limiting, streaming.
  *
  * Routes
- *   POST /chat     Streamed chat turn (SSE).
- *   GET  /health   Build + config visibility. No secrets.
- *   OPTIONS *      CORS preflight.
+ *   POST /chat        Streamed chat turn (SSE).
+ *   GET  /collateral  The indexed SharePoint document list.
+ *   GET  /health      Build + config visibility. No secrets.
+ *   OPTIONS *         CORS preflight.
  *
  * AUDIENCE: internal. Every /chat request must carry a verified Vikat identity
  * (see auth.js). The agent answers from material that is not cleared for
@@ -22,6 +23,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig } from './config.js';
 import { createStorage } from './storage.js';
 import { retrieve, retrievalStatus } from './retrieve.js';
+import { searchCollateral, collateralCount } from './collateral.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
 import { authenticate } from './auth.js';
@@ -374,6 +376,9 @@ export default {
           ok: true,
           model: cfg.MODEL,
           knowledge: retrievalStatus(),
+          // Zero here after a sync has supposedly run is the signal that the
+          // sync failed silently or wrote nothing.
+          collateralDocuments: collateralCount(),
           leadSink: cfg.LEAD_SINK,
           authMode: cfg.AUTH_MODE,
           rateLimit: `${cfg.RATE_LIMIT_REQUESTS}/${cfg.RATE_LIMIT_WINDOW_SECONDS}s per user`,
@@ -393,6 +398,7 @@ export default {
     const isProtected =
       url.pathname === '/chat' ||
       url.pathname === '/whoami' ||
+      url.pathname === '/collateral' ||
       url.pathname.startsWith('/admin/');
 
     if (isProtected) {
@@ -431,6 +437,23 @@ export default {
 
       if (url.pathname === '/whoami') {
         return json({ email: auth.user.email, name: auth.user.name, role, roleSource: source }, 200, cors);
+      }
+
+      // The Collateral tab's index. Reps only — a document title and its own
+      // opening prose are internal material, whatever the link permits.
+      if (url.pathname === '/collateral') {
+        if (request.method !== 'GET') {
+          return json({ error: 'Use GET.', code: 'method_not_allowed' }, 405, cors);
+        }
+        // Served whole: a few hundred documents is small enough that the
+        // browser filters instantly and no keystroke costs a round trip.
+        // Past a few thousand this becomes a server-side search — the
+        // searchCollateral() seam is already where that would go.
+        return json(
+          { documents: searchCollateral(url.searchParams.get('q') || ''), total: collateralCount() },
+          200,
+          { ...cors, 'cache-control': 'private, max-age=60' },
+        );
       }
 
       if (url.pathname.startsWith('/admin/')) {

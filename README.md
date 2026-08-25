@@ -23,7 +23,8 @@ worker/           Cloudflare Worker — the agent backend
     systemPrompt.js Persona, disclosure policy, guardrails
     knowledge.js    GENERATED — compiled knowledge base
     retrieve.js     Knowledge abstraction
-    tools.js        log_prospect, ask_expert, flag_content_gap
+    collateral.js   SharePoint document index — search and links
+    tools.js        log_prospect, ask_expert, flag_content_gap, find_collateral
     storage.js      Storage abstraction (KV)
     leadSink.js     Notification abstraction (webhook / email)
     config.js       Every tunable
@@ -31,8 +32,12 @@ worker/           Cloudflare Worker — the agent backend
       faq.json        Curated entries (compiled only when approved)
       disclosure.json What may be repeated to a customer, and who owns it
       sharepoint.json GENERATED, GITIGNORED — synced internal material
-  test/           158 unit tests
+  test/           197 unit tests
 widget/           Embeddable chat widget, internal page, and admin panel
+  index.html         Full-screen app shell: Chat and Collateral tabs
+  vikat-chat.js      The chat widget
+  vikat-collateral.js Tab routing and the collateral browser
+  admin.html         Admin panel
 scripts/
   build-knowledge.js   Compile site HTML + FAQ + SharePoint into knowledge.js
   sync-sharepoint.js   Pull approved material from SharePoint via Graph
@@ -50,6 +55,7 @@ grep:
 |---|---|---|
 | `storage.js` | KV reads and writes | KV → D1 without touching callers |
 | `retrieve.js` | Knowledge injection | Full-inject → Vectorize behind the same signature |
+| `collateral.js` | Document search | Term match → Vectorize behind the same signature |
 | `leadSink.js` | Outbound notifications | Webhook → CRM without callers knowing |
 | `auth.js` | Identity | Cloudflare Access → Entra ID in one file |
 | `roles.js` | Authorization | Role model changes without touching identity |
@@ -371,7 +377,8 @@ works if the front end is ever hosted separately.
 ### Smoke tests after deploying
 
 - `GET /health` — reports model, knowledge size, auth mode, binding presence.
-  It must show `devAuthOpen: false`.
+  It must show `devAuthOpen: false`. `collateralDocuments: 0` after a sync has
+  run means the sync wrote nothing — check the workflow log.
 - Load the page signed out. It must refuse, not answer.
 - Load it signed in, ask a pricing question, and confirm a disclosure chip
   renders.
@@ -382,6 +389,10 @@ works if the front end is ever hosted separately.
 - Open `/admin.html` as a non-admin. It must refuse.
 - As an admin, add an approved knowledge entry and confirm the assistant uses
   it on the next message without a redeploy.
+- Open the Collateral tab. Documents must list with summaries, search must
+  filter them, and a link must open the file in SharePoint.
+- Ask the chat for a deck on a topic you know is in SharePoint. It must return
+  a clickable link, not a described one.
 
 ---
 

@@ -178,3 +178,12 @@ test('the prompt contains no timestamp or random value', async () => {
   const p = await prompt({ user: REP });
   assert.ok(!/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(p), 'an ISO timestamp would invalidate the cache prefix');
 });
+
+test('the prompt forbids inventing a link, not just inventing a fact', async () => {
+  // find_collateral hands the rep something they will paste to a customer. A
+  // fabricated SharePoint URL fails in the customer's browser, not the rep's.
+  const p = await prompt({ user: REP });
+  assert.match(p, /find_collateral/);
+  assert.match(p, /Never construct a SharePoint URL/i);
+  assert.match(p, /Only link to a document/i);
+});

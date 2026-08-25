@@ -81,6 +81,33 @@ const CONFIG = {
 
 // --- Helpers --------------------------------------------------------------
 
+/**
+ * A one-or-two sentence gist of a document, taken from its own opening prose.
+ *
+ * Skips slide titles and headings (short, no sentence punctuation) because a
+ * list of headings tells a rep nothing they cannot get from the file name.
+ */
+function summarise(chunks) {
+  const MAX = 280;
+  const lines = chunks
+    .flatMap((c) => c.content.split('\n'))
+    .map((l) => l.trim())
+    .filter((l) => l.length > 40 && /[.!?]/.test(l));
+
+  if (lines.length === 0) {
+    // No prose at all — a metrics slide, say. Fall back to the first content.
+    const first = chunks[0]?.content.replace(/\s+/g, ' ').trim() || '';
+    return first.length > MAX ? `${first.slice(0, MAX - 1)}…` : first;
+  }
+
+  let out = '';
+  for (const line of lines) {
+    if (out.length + line.length + 1 > MAX) break;
+    out += (out ? ' ' : '') + line;
+  }
+  return out || `${lines[0].slice(0, MAX - 1)}…`;
+}
+
 function slugify(s) {
   return (
     String(s)
@@ -227,8 +254,16 @@ async function main() {
       files[item.id] = {
         name: item.name,
         page,
+        folder,
+        webUrl: item.webUrl || null,
         modified: item.lastModifiedDateTime || null,
         chunks: chunks.length,
+        // Extractive, not generated: the first substantive prose in the
+        // document. A model-written summary would be better, but it would also
+        // be a per-file API call on every sync and a new thing that can be
+        // wrong. This is cheap, deterministic, and good enough to recognise a
+        // document by.
+        summary: summarise(chunks),
       };
 
       if (isUpdate) stats.updated++;

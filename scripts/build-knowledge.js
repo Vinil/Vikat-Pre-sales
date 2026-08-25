@@ -218,7 +218,7 @@ function chunksFromFaq(faqPath, allowDrafts) {
 }
 
 function chunksFromSharePoint(spPath) {
-  if (!fs.existsSync(spPath)) return { chunks: [], syncedAt: null };
+  if (!fs.existsSync(spPath)) return { chunks: [], documents: [], syncedAt: null };
 
   const data = JSON.parse(fs.readFileSync(spPath, 'utf8'));
 
@@ -232,7 +232,22 @@ function chunksFromSharePoint(spPath) {
     content: c.content,
   }));
 
-  return { chunks, syncedAt: data.syncedAt || null };
+  // The per-file index, separate from the chunks: the Collateral tab lists
+  // documents, not passages, and the chat cites a document by link. Sorted
+  // newest-first so an empty search shows the freshest material.
+  const documents = Object.values(data.files || {})
+    .filter((f) => f && f.webUrl)
+    .map((f) => ({
+      name: f.name,
+      summary: f.summary || '',
+      webUrl: f.webUrl,
+      folder: f.folder || '',
+      modified: f.modified || null,
+      page: f.page,
+    }))
+    .sort((a, b) => String(b.modified || '').localeCompare(String(a.modified || '')));
+
+  return { chunks, documents, syncedAt: data.syncedAt || null };
 }
 
 // --- Emit -----------------------------------------------------------------
@@ -264,6 +279,18 @@ export const KNOWLEDGE = ${JSON.stringify(chunks, null, 2)};
 /** Approximate token count of the compiled knowledge base. */
 export const KNOWLEDGE_TOKENS = ${meta.estimatedTokens};
 
+/**
+ * One entry per SharePoint document the sync indexed, for the Collateral tab
+ * and for citing sources in chat.
+ *
+ * A link here is not a grant: SharePoint still authorises the click, so a rep
+ * who cannot open a document sees the link and gets SharePoint's own refusal.
+ */
+/** @typedef {{ name: string, summary: string, webUrl: string, folder: string, modified: string|null, page: string }} CollateralDocument */
+
+/** @type {CollateralDocument[]} */
+export const COLLATERAL = ${JSON.stringify(meta.documents, null, 2)};
+
 /** Build metadata, surfaced by GET /health for operational visibility. */
 export const KNOWLEDGE_META = ${JSON.stringify(
     {
@@ -272,6 +299,7 @@ export const KNOWLEDGE_META = ${JSON.stringify(
       pageChunks: meta.pageChunks,
       faqChunks: meta.faqChunks,
       sharePointChunks: meta.spChunks,
+      collateralDocuments: meta.documents.length,
       sharePointSyncedAt: meta.syncedAt,
       skippedFaqEntries: meta.skipped.map((s) => s.id),
     },
@@ -322,10 +350,13 @@ function main() {
   console.log(`  faq:   ${faqChunks.length} entr(y|ies) included, ${skipped.length} skipped`);
 
   const spPath = path.resolve(REPO_ROOT, 'worker/src/knowledge/sharepoint.json');
-  const { chunks: spChunks, syncedAt } = chunksFromSharePoint(spPath);
+  const { chunks: spChunks, documents, syncedAt } = chunksFromSharePoint(spPath);
   if (spChunks.length) {
     sourceLabels.push('worker/src/knowledge/sharepoint.json');
-    console.log(`  sharepoint: ${spChunks.length} chunk(s), last synced ${syncedAt || 'unknown'}`);
+    console.log(
+      `  sharepoint: ${spChunks.length} chunk(s) across ${documents.length} document(s), ` +
+        `last synced ${syncedAt || 'unknown'}`,
+    );
   } else {
     console.log('  sharepoint: (none — run `node scripts/sync-sharepoint.js` to pull decks and docs)');
   }
@@ -341,6 +372,7 @@ function main() {
       pageChunks: pageChunks.length,
       faqChunks: faqChunks.length,
       spChunks: spChunks.length,
+      documents,
       syncedAt,
       skipped,
     }),
