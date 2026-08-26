@@ -169,7 +169,26 @@ function sse(event, data) {
 
 // --- Chat -----------------------------------------------------------------
 
-async function handleChat(request, env, ctx, cfg, cors, user) {
+/**
+ * Is this the API refusing our tool definitions, rather than the conversation?
+ *
+ * Matched narrowly on purpose. Widening it would let a genuine request bug
+ * degrade silently into a worse answer instead of failing where someone can
+ * see it.
+ */
+function isToolSchemaRejection(err) {
+  if (err?.status !== 400) return false;
+  const message = String(err?.message || '');
+  return /schema is too complex|tools?\.\d|input_schema|tool schema/i.test(message);
+}
+
+/** The upstream status and message, trimmed for display to an admin. */
+function upstreamDetail(err) {
+  const status = err?.status ? `${err.status} ` : '';
+  return `${status}${String(err?.message || err).slice(0, 300)}`;
+}
+
+async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
   if (!env.ANTHROPIC_API_KEY) {
     console.error('[chat] ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY');
     return json({ error: 'The assistant is not available right now.', code: 'misconfigured' }, 503, cors);
@@ -246,28 +265,78 @@ async function handleChat(request, env, ctx, cfg, cors, user) {
         }
       };
 
+      // Set once, for the rest of this turn, if the tool set is refused.
+      let toolsDisabled = false;
+
+      /**
+       * Start a turn, giving up the tools rather than the conversation.
+       *
+       * A malformed or oversized tool schema is rejected at the request level:
+       * the API returns 400 and NOTHING is answered, including a "hi" that
+       * would never have used a tool. That is a bad trade — a rep with an
+       * assistant that cannot log a prospect is far better off than a rep
+       * with no assistant. So a schema-shaped 400 costs the tools for this
+       * turn and the answer still arrives.
+       *
+       * It is deliberately narrow. Any other 400 is a real bug and must stay
+       * loud rather than being silently degraded into a worse answer.
+       */
+      const startTurn = async (convo) => {
+        const request = {
+          model: cfg.MODEL,
+          max_tokens: cfg.MAX_TOKENS,
+          // No `thinking` parameter: on Sonnet 4.6 that means thinking is off,
+          // which is what the sub-2s first-token target needs. Turning it on
+          // would add seconds before the first visible character.
+          system,
+          messages: convo,
+        };
+
+        if (!toolsDisabled) {
+          try {
+            return client.messages.stream({ ...request, tools: TOOL_DEFINITIONS });
+          } catch (err) {
+            if (!isToolSchemaRejection(err)) throw err;
+            console.error('[chat] tool schema refused, retrying without tools:', err?.message || err);
+            toolsDisabled = true;
+          }
+        }
+
+        return client.messages.stream(request);
+      };
+
       try {
         /** @type {Anthropic.MessageParam[]} */
         const convo = messages.map((m) => ({ role: m.role, content: m.content }));
 
         for (let iteration = 0; iteration < cfg.MAX_TOOL_ITERATIONS; iteration++) {
-          const messageStream = client.messages.stream({
-            model: cfg.MODEL,
-            max_tokens: cfg.MAX_TOKENS,
-            // No `thinking` parameter: on Sonnet 4.6 that means thinking is off,
-            // which is what the sub-2s first-token target needs. Turning it on
-            // would add seconds before the first visible character.
-            system,
-            tools: TOOL_DEFINITIONS,
-            messages: convo,
-          });
+          let messageStream = await startTurn(convo);
 
           messageStream.on('text', (delta) => {
             fullText += delta;
             send('text', { text: delta });
           });
 
-          const final = await messageStream.finalMessage();
+          let final;
+          try {
+            final = await messageStream.finalMessage();
+          } catch (err) {
+            // The SDK surfaces the rejection here rather than at creation when
+            // the request is already in flight, so the same fallback has to
+            // exist on both paths.
+            if (toolsDisabled || !isToolSchemaRejection(err)) throw err;
+
+            console.error('[chat] tool schema refused mid-stream, retrying without tools:', err?.message || err);
+            toolsDisabled = true;
+            fullText = '';
+
+            messageStream = await startTurn(convo);
+            messageStream.on('text', (delta) => {
+              fullText += delta;
+              send('text', { text: delta });
+            });
+            final = await messageStream.finalMessage();
+          }
 
           if (final.stop_reason !== 'tool_use') {
             send('done', { stopReason: final.stop_reason });
@@ -313,6 +382,10 @@ async function handleChat(request, env, ctx, cfg, cors, user) {
             ? 'The assistant is busy right now. Try again in a moment.'
             : `Something went wrong. Retry, and if it persists flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
           code: isOverloaded ? 'upstream_busy' : 'upstream_error',
+          // Admins get the upstream reason. Everyone here is a colleague, and
+          // the alternative is what actually happened the first time this
+          // broke: someone reading Worker logs to recover one line of text.
+          ...(isAdmin ? { detail: upstreamDetail(err) } : {}),
         });
       } finally {
         // Logging must not delay closing the stream for the prospect.
@@ -524,7 +597,7 @@ export default {
       }
 
       try {
-        return await handleChat(request, env, ctx, cfg, cors, auth.user);
+        return await handleChat(request, env, ctx, cfg, cors, auth.user, canAdminister(role));
       } catch (err) {
         console.error('[chat] unhandled:', err?.message || err);
         return json({ error: 'Something went wrong.', code: 'internal_error' }, 500, cors);

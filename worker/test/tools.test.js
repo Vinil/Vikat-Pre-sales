@@ -72,9 +72,13 @@ test('a tool is strict unless its handler validates the input itself', () => {
   }
 });
 
-test('no strict tool nests an object inside an array', () => {
-  // The shape that blew the complexity budget. Cheap to check, and the
-  // failure it prevents is total: not a degraded tool, a dead assistant.
+test('no tool schema nests an object inside an array', () => {
+  // The shape that blew the complexity budget. Checked for EVERY tool, not
+  // just the strict ones: dropping `strict` was my first fix and it did not
+  // help — the API rejected the request either way. The nesting is what costs,
+  // and the failure it causes is total, not degraded: "Schema is too complex"
+  // rejects the whole request, so one over-ambitious tool kills every
+  // conversation including the ones that never touch it.
   const nestsObjects = (node) => {
     if (!node || typeof node !== 'object') return false;
     if (node.type === 'array' && node.items && node.items.type === 'object') return true;
@@ -82,10 +86,39 @@ test('no strict tool nests an object inside an array', () => {
   };
 
   for (const t of TOOL_DEFINITIONS) {
-    if (!t.strict) continue;
     assert.ok(
       !nestsObjects(t.input_schema),
-      `${t.name} is strict and nests objects in an array — the API will reject every request`,
+      `${t.name} nests objects in an array — the API will reject every request`,
+    );
+  }
+});
+
+test('every tool schema stays within a property budget', () => {
+  // A proxy, not the real limit — the real one is enforced server-side and has
+  // no local equivalent. But the outage came from a schema that grew without
+  // anything noticing, so a ceiling that forces a deliberate decision is worth
+  // more than an exact number would be.
+  const MAX_PROPERTIES_PER_TOOL = 12;
+  const MAX_DEPTH = 2;
+
+  const depthOf = (node, depth = 1) => {
+    if (!node || typeof node !== 'object') return depth;
+    return Math.max(
+      depth,
+      ...Object.values(node.properties || {}).map((v) => depthOf(v, depth + 1)),
+      ...(node.items ? [depthOf(node.items, depth + 1)] : []),
+    );
+  };
+
+  for (const t of TOOL_DEFINITIONS) {
+    const count = Object.keys(t.input_schema.properties || {}).length;
+    assert.ok(
+      count <= MAX_PROPERTIES_PER_TOOL,
+      `${t.name} has ${count} properties; keep it under ${MAX_PROPERTIES_PER_TOOL} or move structure into one string field`,
+    );
+    assert.ok(
+      depthOf(t.input_schema) <= MAX_DEPTH + 1,
+      `${t.name} nests ${depthOf(t.input_schema)} levels deep; flatten it`,
     );
   }
 });

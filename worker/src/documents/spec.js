@@ -52,7 +52,14 @@ export function normaliseSpec(input) {
   const title = clean(input.title, LIMITS.titleChars, true);
   if (!title) return { ok: false, error: 'title is required.' };
 
-  const rawSections = Array.isArray(input.sections) ? input.sections : [];
+  // Two accepted shapes. The tool sends `content` as markdown, because a flat
+  // string schema is the only shape that reliably compiles (see tools.js); the
+  // structured `sections` array is the internal form the renderers consume and
+  // what the tests build directly.
+  const rawSections = typeof input.content === 'string'
+    ? parseSections(input.content)
+    : Array.isArray(input.sections) ? input.sections : [];
+
   const sections = rawSections
     .slice(0, LIMITS.sections)
     .map(normaliseSection)
@@ -76,6 +83,58 @@ export function normaliseSpec(input) {
       disclosure: DISCLOSURE_LABELS[input.disclosure] ? input.disclosure : 'internal_only',
     },
   };
+}
+
+/**
+ * Parse the markdown the model writes into sections.
+ *
+ * The format is deliberately the smallest thing that carries the structure,
+ * because every additional rule is one the model can get wrong:
+ *
+ *   ## eyebrow | Section title
+ *   A body paragraph.
+ *   - a point
+ *   - another point
+ *
+ * The eyebrow and the pipe are optional, as are the body and the points.
+ * Anything before the first heading is ignored rather than guessed at — a
+ * model that opens with "Here is your deck:" should not get a section titled
+ * that.
+ */
+export function parseSections(markdown) {
+  const sections = [];
+  let current = null;
+
+  for (const rawLine of String(markdown || '').split('\n')) {
+    const line = rawLine.trim();
+
+    const heading = /^#{1,4}\s+(.*)$/.exec(line);
+    if (heading) {
+      if (current) sections.push(current);
+
+      const [, text] = heading;
+      const pipe = text.indexOf('|');
+      current = pipe === -1
+        ? { eyebrow: '', title: text, body: '', points: [] }
+        : { eyebrow: text.slice(0, pipe), title: text.slice(pipe + 1), body: '', points: [] };
+      continue;
+    }
+
+    if (!current || !line) continue;
+
+    const bullet = /^[-*•]\s+(.*)$/.exec(line);
+    if (bullet) {
+      current.points.push(bullet[1]);
+      continue;
+    }
+
+    // Prose. Successive lines join into one paragraph rather than becoming
+    // separate ones: the renderers lay out a single block per section.
+    current.body = current.body ? `${current.body} ${line}` : line;
+  }
+
+  if (current) sections.push(current);
+  return sections;
 }
 
 function normaliseSection(raw) {

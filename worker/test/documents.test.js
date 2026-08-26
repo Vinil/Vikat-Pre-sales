@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
 import { PDFDocument } from 'pdf-lib';
 
-import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
+import { normaliseSpec, parseSections, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
 import { renderPdf } from '../src/documents/pdf.js';
 import { createDocument } from '../src/documents/index.js';
@@ -517,4 +517,90 @@ test('a document whose body has expired reads as absent, not as a broken file', 
   // Returning metadata with no file would give the rep a link to nothing.
   await kv.delete(`docbody:${result.id}`);
   assert.equal(await storage.getDocument(result.id), null);
+});
+
+// --- Markdown sections ----------------------------------------------------
+// The tool sends structure as markdown in one string, because a nested schema
+// is rejected outright by the API. That makes this parser the seam where a
+// model's output becomes a document, so it is tested on what models actually
+// produce rather than on ideal input.
+
+test('a heading, prose and points become one section', () => {
+  const [section] = parseSections(
+    '## context | Controls lag behind agents\nThe model ships first.\n- Real credentials\n- No owner',
+  );
+  assert.equal(section.eyebrow.trim(), 'context');
+  assert.equal(section.title.trim(), 'Controls lag behind agents');
+  assert.equal(section.body, 'The model ships first.');
+  assert.deepEqual(section.points, ['Real credentials', 'No owner']);
+});
+
+test('the eyebrow and the pipe are optional', () => {
+  const [section] = parseSections('## Just a title\nBody.');
+  assert.equal(section.eyebrow, '');
+  assert.equal(section.title, 'Just a title');
+});
+
+test('preamble before the first heading is dropped, not guessed at', () => {
+  // A model that opens with "Here is your deck:" must not produce a section
+  // titled that.
+  const sections = parseSections('Here is your deck:\n\n## Real section\nBody.');
+  assert.equal(sections.length, 1);
+  assert.equal(sections[0].title, 'Real section');
+});
+
+test('wrapped prose joins into one paragraph', () => {
+  // The renderers lay out a single block per section, so successive lines are
+  // one paragraph rather than several.
+  const [section] = parseSections('## T\nOne line.\nA second line.\n\nA third.');
+  assert.equal(section.body, 'One line. A second line. A third.');
+});
+
+test('any heading level and any bullet character work', () => {
+  // Models are inconsistent about both, and neither carries meaning here.
+  for (const hash of ['#', '##', '###', '####']) {
+    assert.equal(parseSections(`${hash} Title\n- p`).length, 1, `${hash} should open a section`);
+  }
+  for (const bullet of ['-', '*', '•']) {
+    assert.deepEqual(parseSections(`## T\n${bullet} point`)[0].points, ['point']);
+  }
+});
+
+test('empty or headingless markdown yields nothing rather than a broken section', () => {
+  assert.deepEqual(parseSections(''), []);
+  assert.deepEqual(parseSections('Just some prose with no heading at all.'), []);
+  assert.deepEqual(parseSections(null), []);
+});
+
+test('a markdown document renders end to end', async () => {
+  // The path the tool actually takes: markdown in, deck out.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'Call prep for Acme',
+    subtitle: 'What to cover.',
+    audience: 'Acme security team',
+    disclosure: 'internal_only',
+    content: '## context | The gap\nControls lag.\n- One\n- Two\n\n## next | What we need\n- A decision',
+  });
+
+  assert.ok(r.ok, r.error);
+  assert.equal(r.spec.sections.length, 2);
+  assert.equal(r.spec.sections[0].eyebrow, 'context');
+  assert.deepEqual(r.spec.sections[1].points, ['A decision']);
+
+  const parts = unzipSync(renderPptx(r.spec, META, FONTS.metrics));
+  assert.ok(parts['ppt/slides/slide4.xml'], 'cover + 2 sections + close');
+});
+
+test('markdown that parses to nothing is refused, not rendered empty', () => {
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'Empty',
+    subtitle: '',
+    audience: '',
+    disclosure: 'internal_only',
+    content: 'No headings here, so there are no sections.',
+  });
+  assert.ok(!r.ok);
+  assert.match(r.error, /section/i);
 });
