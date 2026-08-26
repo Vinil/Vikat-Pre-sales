@@ -261,3 +261,51 @@ test('an expired secret says so, rather than reading as a wrong one', async () =
     globalThis.fetch = original;
   }
 });
+
+test('a Sites.Selected site with no grant is explained, not blamed on the token', async () => {
+  // SharePoint answers "no permission on this site" with "General exception
+  // while processing", which sends people back to check credentials they have
+  // just fixed. This exact response cost a real run.
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    headers: new Map(),
+    text: async () =>
+      '{"error":{"code":"generalException","message":"General exception while processing","innerError":{"code":"spException"}}}',
+  });
+
+  try {
+    await assert.rejects(
+      getSite('token', 'vikatai.sharepoint.com', '/sites/VikatGTM'),
+      (err) => {
+        assert.match(err.message, /no permission on VikatGTM/);
+        assert.match(err.message, /Sites\.Selected grants nothing on its own/);
+        assert.match(err.message, /spException/, 'the original error survives');
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('an unrelated Graph failure is passed through untranslated', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    headers: new Map(),
+    text: async () => '{"error":{"code":"itemNotFound","message":"The resource could not be found."}}',
+  });
+
+  try {
+    await assert.rejects(getSite('token', 'h', '/sites/x'), (err) => {
+      assert.match(err.message, /itemNotFound/);
+      assert.ok(!/Sites\.Selected/.test(err.message), 'no guess where there is one cause too many');
+      return true;
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+});

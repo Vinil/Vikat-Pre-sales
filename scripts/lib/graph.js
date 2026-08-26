@@ -30,7 +30,10 @@ async function request(url, token, { retries = 4 } = {}) {
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable || attempt >= retries) {
       const body = await res.text().catch(() => '');
-      throw new Error(`Graph ${res.status} ${url}\n${body.slice(0, 400)}`);
+      const hint = explainGraphFailure(res.status, body, url);
+      throw new Error(
+        `Graph ${res.status} ${url}${hint ? `\n\n  ${hint}\n` : '\n'}${body.slice(0, 400)}`,
+      );
     }
 
     // Graph sends Retry-After on 429 and means it. Respect it rather than
@@ -48,6 +51,31 @@ async function request(url, token, { retries = 4 } = {}) {
  * @param {{ tenantId: string, clientId: string, clientSecret: string }} creds
  * @returns {Promise<string>}
  */
+/**
+ * Explain the Graph failures that a Sites.Selected app hits.
+ *
+ * SharePoint answers "no permission on this site" with a 401 or 403 carrying
+ * `generalException` / `spException` and the message "General exception while
+ * processing" — which describes nothing and sends people to check the
+ * credentials they just fixed. The token is fine; the app simply has no grant
+ * on the site.
+ */
+function explainGraphFailure(status, body, url) {
+  if (status !== 401 && status !== 403) return '';
+  if (!/spException|generalException|accessDenied/.test(body)) return '';
+
+  // The URL carries "/sites/" twice — Graph's own path segment and then the
+  // SharePoint site — so take the last one, not the first.
+  const segments = [...String(url).matchAll(/\/sites\/([^/?]+)/g)];
+  const site = segments.at(-1)?.[1]?.replace(/:$/, '') || 'this site';
+  return (
+    `The app authenticated but has no permission on ${site}. Sites.Selected ` +
+    'grants nothing on its own — each site needs its own grant. Check with ' +
+    'GET /sites/{site-id}/permissions in Graph Explorer; an empty list means ' +
+    'the grant never landed. See README "SharePoint sync".'
+  );
+}
+
 /**
  * Translate the Entra error codes that have one cause each.
  *
