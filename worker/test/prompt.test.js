@@ -196,3 +196,17 @@ test('the prompt holds generated documents to a higher bar than chat', async () 
   assert.match(p, /outlives this conversation/i);
   assert.match(p, /more restrictive/i);
 });
+
+test('the prompt knows the Collateral tab exists', async () => {
+  // A rep asked what collateral we had and was told the assistant could not
+  // see SharePoint. It can, and the answer was one tab away.
+  const p = await prompt({ user: REP });
+  assert.match(p, /Collateral tab/);
+  assert.match(p, /empty query/i);
+  assert.match(p, /Never tell a rep you cannot see what/i);
+});
+
+test('the prompt refuses to end a request with nothing offered', async () => {
+  const p = await prompt({ user: REP });
+  assert.match(p, /is not a dead\s*end/i);
+});

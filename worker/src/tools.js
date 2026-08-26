@@ -19,7 +19,7 @@
  */
 
 import { deliverLead } from './leadSink.js';
-import { searchCollateral } from './collateral.js';
+import { searchCollateral, collateralCount } from './collateral.js';
 import { createDocument } from './documents/index.js';
 import { LIMITS } from './documents/spec.js';
 
@@ -131,7 +131,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'find_collateral',
     description:
-      "Find the SharePoint decks and documents behind an answer, so the rep gets a link they can send or open. Call this whenever the rep is preparing for a call, asks what to send, or asks a question a deck would answer — a link to the current file beats a paraphrase that goes stale. Returns nothing if no document matches; say so rather than describing a document you have not seen.",
+      "Find the SharePoint decks and documents behind an answer, so the rep gets a link they can send or open. Call this whenever the rep is preparing for a call, asks what to send, or asks a question a deck would answer — a link to the current file beats a paraphrase that goes stale. Pass an EMPTY query to list the most recent collateral, which is what to do when a rep asks what material exists rather than for something specific. Returns nothing if no document matches; say so rather than describing a document you have not seen.",
     strict: true,
     input_schema: {
       type: 'object',
@@ -140,7 +140,7 @@ export const TOOL_DEFINITIONS = [
         query: {
           type: 'string',
           description:
-            'What the document is about, in the words it would use: a product name, a solution area, a customer, a topic. Keep it short — three or four words match better than a sentence.',
+            'What the document is about, in the words it would use: a product name, a solution area, a customer, a topic. Keep it short — three or four words match better than a sentence. Empty string lists the most recently updated collateral instead of searching.',
         },
       },
       required: ['query'],
@@ -204,8 +204,11 @@ export const TOOL_DEFINITIONS = [
   },
 ];
 
-/** How many documents find_collateral hands back in one call. */
+/** How many documents find_collateral hands back for a search. */
 const COLLATERAL_RESULT_LIMIT = 5;
+
+/** More for a bare "what do we have" listing, which is a browse, not a hit. */
+const COLLATERAL_LISTING_LIMIT = 12;
 
 /** Drop nulls and blanks so records and notifications stay readable. */
 function compact(obj) {
@@ -331,19 +334,31 @@ export async function runTool(call, ctx) {
 
       case 'find_collateral': {
         const query = String(call.input.query || '').trim();
-        const found = searchCollateral(query, { limit: COLLATERAL_RESULT_LIMIT });
+        const listing = query === '';
+        const found = searchCollateral(query, { limit: listing ? COLLATERAL_LISTING_LIMIT : COLLATERAL_RESULT_LIMIT });
+
+        // Nothing indexed at all is a different problem from nothing matching,
+        // and telling a rep "no deck covers that" when the library was never
+        // synced sends them looking for the wrong thing.
+        if (collateralCount() === 0) {
+          return {
+            content:
+              'No SharePoint material has been indexed at all — the library is empty or the nightly sync has not run. Tell the rep this is a setup problem rather than a gap in the collateral, and that an administrator should check the sync. Do not describe documents you have not seen.',
+            effect: { query, results: 0, reason: 'nothing_indexed' },
+          };
+        }
 
         if (found.length === 0) {
           return {
             content:
-              'No indexed document matches that. Tell the rep plainly that there is no deck or doc for it — do not describe one from memory. If they expected one to exist, that is a content gap worth flagging.',
+              'No indexed document matches that. Tell the rep plainly that there is no deck or doc for it — do not describe one from memory. Point them at the Collateral tab to browse everything, and if they expected something to exist, that is a content gap worth flagging.',
             effect: { query, results: 0 },
           };
         }
 
         // The link is the deliverable, so the model is given exactly the fields
         // it needs to reproduce one and nothing it could embellish from.
-        const listing = found
+        const rows = found
           .map((d) => {
             const parts = [`- ${d.name}`, `  link: ${d.webUrl}`];
             if (d.folder) parts.push(`  folder: ${d.folder}`);
@@ -354,7 +369,7 @@ export async function runTool(call, ctx) {
           .join('\n\n');
 
         return {
-          content: `${found.length} document(s) matched:\n\n${listing}\n\nGive the rep the link as a markdown link on the file name. Quote the summary only as far as it goes — it is the document's own opening text, not a description of everything inside. Say when a document was last updated if it is more than a few months old. Do not claim what a document contains beyond what is shown here.`,
+          content: `${found.length} document(s)${listing ? ` of ${collateralCount()} indexed` : ' matched'}:\n\n${rows}\n\nGive the rep the link as a markdown link on the file name. Quote the summary only as far as it goes — it is the document's own opening text, not a description of everything inside. Say when a document was last updated if it is more than a few months old. Do not claim what a document contains beyond what is shown here.`,
           effect: { query, results: found.length },
         };
       }

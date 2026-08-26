@@ -142,14 +142,30 @@ const ctx = {
   cfg: { INTERNAL_HELP_CHANNEL: '#sales-assistant' },
 };
 
-test('find_collateral reports honestly when nothing matches', async () => {
+test('an unsynced library reads as a setup problem, not a gap in the collateral', async () => {
+  // The compiled corpus is empty in tests, which is exactly the state a
+  // deployment is in before the first sync runs. Saying "no deck covers that"
+  // then sends a rep hunting for material that was never indexed, and hides a
+  // broken sync behind what looks like a content gap.
+  assert.equal(collateralCount(), 0, 'this test describes the empty-index case');
+
   const r = await runTool(
     { name: 'find_collateral', input: { query: 'zzzz nonexistent quantum toaster' } },
     ctx,
   );
+
   assert.ok(!r.isError);
-  assert.equal(r.effect.results, 0);
-  assert.match(r.content, /do not describe one from memory/i);
+  assert.equal(r.effect.reason, 'nothing_indexed');
+  assert.match(r.content, /sync/i);
+  assert.match(r.content, /do not describe documents you have not seen/i);
+});
+
+test('an empty query is a browse request, not a malformed search', async () => {
+  // "What collateral do we have?" is a real question, and the answer is a
+  // list. Requiring a search term turned it into a refusal.
+  const r = await runTool({ name: 'find_collateral', input: { query: '   ' } }, ctx);
+  assert.ok(!r.isError, 'a blank query must be answered, not rejected');
+  assert.equal(r.effect.query, '');
 });
 
 test('find_collateral does not need storage, so it cannot fail on a KV outage', async () => {
