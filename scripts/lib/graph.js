@@ -48,6 +48,27 @@ async function request(url, token, { retries = 4 } = {}) {
  * @param {{ tenantId: string, clientId: string, clientSecret: string }} creds
  * @returns {Promise<string>}
  */
+/**
+ * Translate the Entra error codes that have one cause each.
+ *
+ * Azure shows a secret's ID in the list and its Value only once, at creation,
+ * so reaching for the wrong one is the default mistake rather than a careless
+ * one. The raw message does say so — under a trace id, a correlation id and a
+ * timestamp, where nobody reads it.
+ */
+function explainAuthFailure(body) {
+  if (body.includes('AADSTS7000215')) {
+    return 'GRAPH_CLIENT_SECRET holds the secret ID, not the secret VALUE. The Value is shown once when you create the secret; if you cannot see it, create a new one and copy it immediately.';
+  }
+  if (body.includes('AADSTS7000222')) {
+    return 'The client secret has expired. Create a new one in Certificates & secrets and update GRAPH_CLIENT_SECRET.';
+  }
+  if (body.includes('AADSTS700016') || body.includes('AADSTS900023')) {
+    return 'GRAPH_CLIENT_ID or GRAPH_TENANT_ID does not match an app in this tenant. Both are on the app registration Overview page.';
+  }
+  return '';
+}
+
 export async function getToken({ tenantId, clientId, clientSecret }) {
   if (!tenantId || !clientId || !clientSecret) {
     throw new Error(
@@ -69,8 +90,13 @@ export async function getToken({ tenantId, clientId, clientSecret }) {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     // The error body carries the AADSTS code, which is the only thing that
-    // makes an auth failure diagnosable. Keep it.
-    throw new Error(`Token request failed (${res.status}): ${body.slice(0, 400)}`);
+    // makes an auth failure diagnosable. Keep it, but lead with a translation:
+    // the codes that matter here have exactly one cause each, and the raw text
+    // buries it under trace and correlation ids.
+    const hint = explainAuthFailure(body);
+    throw new Error(
+      `Token request failed (${res.status}).${hint ? `\n\n  ${hint}\n` : ' '}${body.slice(0, 400)}`,
+    );
   }
 
   const { access_token: token } = await res.json();

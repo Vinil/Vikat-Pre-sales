@@ -221,3 +221,43 @@ test('folderPathOf URL-decodes folder names with spaces', () => {
 test('folderPathOf tolerates a missing parentReference', () => {
   assert.equal(folderPathOf({}), '');
 });
+
+test('a wrong-secret failure is explained before the trace ids', async () => {
+  // AADSTS7000215 has exactly one cause, and the raw message buries it under a
+  // trace id, a correlation id and a timestamp. This cost a real run.
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    text: async () =>
+      '{"error":"invalid_client","error_description":"AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app \'x\'. Trace ID: 5f508edb Correlation ID: 24723f54 Timestamp: 2026-08-26"}',
+  });
+
+  try {
+    await assert.rejects(
+      getToken({ tenantId: 't', clientId: 'c', clientSecret: 'wrong' }),
+      (err) => {
+        assert.match(err.message, /secret ID, not the secret VALUE/);
+        assert.match(err.message, /AADSTS7000215/, 'the original error is still there');
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('an expired secret says so, rather than reading as a wrong one', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    text: async () => '{"error_description":"AADSTS7000222: The provided client secret keys for app are expired."}',
+  });
+
+  try {
+    await assert.rejects(getToken({ tenantId: 't', clientId: 'c', clientSecret: 'old' }), /expired/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
