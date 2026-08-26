@@ -182,6 +182,19 @@ function isToolSchemaRejection(err) {
   return /schema is too complex|tools?\.\d|input_schema|tool schema/i.test(message);
 }
 
+/**
+ * Is this the API refusing a request parameter it does not support?
+ *
+ * Model families differ on which parameters they accept, and a Worker that
+ * cannot start a conversation because of one optional field is worse than one
+ * that starts without the field.
+ */
+function isUnsupportedParameter(err, name) {
+  if (err?.status !== 400) return false;
+  const message = String(err?.message || '');
+  return message.includes(name) && /unsupported|not supported|unexpected|unrecognized|invalid|does not support/i.test(message);
+}
+
 /** The upstream status and message, trimmed for display to an admin. */
 function upstreamDetail(err) {
   const status = err?.status ? `${err.status} ` : '';
@@ -265,44 +278,62 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         }
       };
 
-      // Set once, for the rest of this turn, if the tool set is refused.
+      // Capabilities given up for this turn if the API refuses them.
       let toolsDisabled = false;
+      let thinkingDisabled = false;
+
+      const buildRequest = (convo) => ({
+        model: cfg.MODEL,
+        max_tokens: cfg.MAX_TOKENS,
+        system,
+        messages: convo,
+        // Adaptive thinking, despite costing a little latency before the first
+        // token. With thinking off, the model intermittently writes a tool
+        // call into its VISIBLE TEXT instead of emitting a tool_use block:
+        // "[Calling find_collateral for X]" followed by an apology that it
+        // cannot run the search. The turn succeeds, the call never happens,
+        // nothing errors, and the rep is told the assistant cannot do
+        // something it can. A slower first character is the better trade.
+        ...(thinkingDisabled ? {} : { thinking: { type: 'adaptive' } }),
+        ...(toolsDisabled ? {} : { tools: TOOL_DEFINITIONS }),
+      });
 
       /**
-       * Start a turn, giving up the tools rather than the conversation.
+       * Give up a capability rather than the conversation.
        *
-       * A malformed or oversized tool schema is rejected at the request level:
-       * the API returns 400 and NOTHING is answered, including a "hi" that
-       * would never have used a tool. That is a bad trade — a rep with an
-       * assistant that cannot log a prospect is far better off than a rep
-       * with no assistant. So a schema-shaped 400 costs the tools for this
-       * turn and the answer still arrives.
+       * A refused tool schema or an unsupported parameter is rejected at the
+       * REQUEST level: the API returns 400 and nothing is answered, including
+       * a "hi" that would never have used a tool. That is a bad trade — a rep
+       * with a diminished assistant is far better off than a rep with none.
        *
-       * It is deliberately narrow. Any other 400 is a real bug and must stay
-       * loud rather than being silently degraded into a worse answer.
+       * Deliberately narrow. Any other 400 is a real bug and must stay loud
+       * rather than being silently degraded into a worse answer.
+       *
+       * @returns {boolean} whether something was turned off and a retry is
+       *          worth attempting.
        */
-      const startTurn = async (convo) => {
-        const request = {
-          model: cfg.MODEL,
-          max_tokens: cfg.MAX_TOKENS,
-          // No `thinking` parameter: on Sonnet 4.6 that means thinking is off,
-          // which is what the sub-2s first-token target needs. Turning it on
-          // would add seconds before the first visible character.
-          system,
-          messages: convo,
-        };
+      const degrade = (err) => {
+        if (!toolsDisabled && isToolSchemaRejection(err)) {
+          console.error('[chat] tool schema refused, retrying without tools:', err?.message || err);
+          toolsDisabled = true;
+          return true;
+        }
+        if (!thinkingDisabled && isUnsupportedParameter(err, 'thinking')) {
+          console.error('[chat] thinking refused by this model, retrying without it:', err?.message || err);
+          thinkingDisabled = true;
+          return true;
+        }
+        return false;
+      };
 
-        if (!toolsDisabled) {
+      const startTurn = async (convo) => {
+        for (;;) {
           try {
-            return client.messages.stream({ ...request, tools: TOOL_DEFINITIONS });
+            return client.messages.stream(buildRequest(convo));
           } catch (err) {
-            if (!isToolSchemaRejection(err)) throw err;
-            console.error('[chat] tool schema refused, retrying without tools:', err?.message || err);
-            toolsDisabled = true;
+            if (!degrade(err)) throw err;
           }
         }
-
-        return client.messages.stream(request);
       };
 
       try {
@@ -324,12 +355,9 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             // The SDK surfaces the rejection here rather than at creation when
             // the request is already in flight, so the same fallback has to
             // exist on both paths.
-            if (toolsDisabled || !isToolSchemaRejection(err)) throw err;
+            if (!degrade(err)) throw err;
 
-            console.error('[chat] tool schema refused mid-stream, retrying without tools:', err?.message || err);
-            toolsDisabled = true;
             fullText = '';
-
             messageStream = await startTurn(convo);
             messageStream.on('text', (delta) => {
               fullText += delta;

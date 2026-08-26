@@ -171,3 +171,86 @@ test('an admin is told the upstream reason; a rep is not', async () => {
   const asRep = await chat(stub, { user: 'rep@vikat.ai' });
   assert.ok(!/at least one message/.test(asRep.text), 'a rep sees the plain message only');
 });
+
+// --- Unsupported parameters -----------------------------------------------
+
+/** Rejects any request carrying `thinking`; accepts one without. */
+function rejectsThinking() {
+  const sent = [];
+  return Object.assign(
+    async (url, init) => {
+      const u = String(url);
+      if (!u.includes('api.anthropic.com')) return { ok: false, status: 404, text: async () => '' };
+
+      const body = JSON.parse(init.body);
+      sent.push({ thinking: Boolean(body.thinking), tools: Boolean(body.tools?.length) });
+
+      if (body.thinking) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: async () =>
+            '{"type":"error","error":{"type":"invalid_request_error","message":"thinking: Unsupported parameter for this model"}}',
+        };
+      }
+      return stubApi({ rejectWithTools: false })(url, init);
+    },
+    { sent },
+  );
+}
+
+test('a model that refuses `thinking` still answers, without it', async () => {
+  // Adaptive thinking is on because turning it off makes the model narrate
+  // tool calls instead of making them. But a model that will not take the
+  // parameter must not cost the conversation.
+  const stub = rejectsThinking();
+  const { status, text } = await chat(stub);
+
+  assert.equal(status, 200);
+  assert.match(text, /Answered without tools\./);
+  assert.deepEqual(
+    stub.sent.map((s) => s.thinking),
+    [true, false],
+    'first attempt with thinking, retry without',
+  );
+});
+
+test('the retry keeps the tools when only thinking was refused', async () => {
+  // Degrading one capability must not quietly cost another.
+  const stub = rejectsThinking();
+  await chat(stub);
+  assert.equal(stub.sent[1].tools, true, 'tools survive a thinking-only rejection');
+});
+
+test('a 400 naming an unrelated parameter is not silently degraded', async () => {
+  const stub = async (url) => {
+    if (!String(url).includes('api.anthropic.com')) return { ok: false, status: 404, text: async () => '' };
+    return {
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () =>
+        '{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: must be greater than 0"}}',
+    };
+  };
+  const { text } = await chat(stub);
+  assert.match(text, /upstream_error/, 'a real request bug must stay loud');
+});
+
+test('adaptive thinking is on by default', async () => {
+  // Regression guard. It was off for latency, and off is what made the model
+  // write "[Calling find_collateral for X]" as prose and then apologise for
+  // not being able to run it.
+  const stub = stubApi({ rejectWithTools: false });
+  const sent = [];
+  const wrapped = async (url, init) => {
+    if (String(url).includes('api.anthropic.com')) sent.push(JSON.parse(init.body));
+    return stub(url, init);
+  };
+
+  await chat(wrapped);
+  assert.deepEqual(sent[0].thinking, { type: 'adaptive' });
+});
