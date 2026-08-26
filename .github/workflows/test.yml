@@ -27,6 +27,13 @@ jobs:
           npm --prefix scripts install --no-audit --no-fund
           npm --prefix worker install --no-audit --no-fund
 
+      # The widget tests need a real browser. They skip cleanly without one, so
+      # installing it here is the difference between covering renderBody's XSS
+      # behaviour and silently not covering it.
+      - name: Install Chromium for the widget tests
+        working-directory: worker
+        run: npx playwright install --with-deps chromium
+
       - name: Worker tests
         run: npm --prefix worker test
 

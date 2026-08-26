@@ -1,11 +1,16 @@
 /**
- * Widget tests — the disclosure-tag split only.
+ * Widget tests — disclosure-tag splitting and link rendering.
  *
- * Run with `npm run test:widget` (needs Playwright + Chromium), not as part of
- * the default suite, which stays fast and dependency-free.
+ * These cover the widget's two safety-critical behaviours: a missed trailing
+ * "[Internal only]" line means the rep sees an answer with no warning attached,
+ * and renderBody is the one place model output becomes DOM.
  *
- * This is the widget's safety-critical logic: if a trailing "[Internal only]"
- * line is missed, the rep sees an answer with no warning attached.
+ * They need a real browser, so they SKIP rather than fail when none is
+ * available — that is the normal state on a deploy runner. `npm test` runs
+ * them wherever Chromium exists; the Tests workflow installs one so they
+ * actually run on every push. To run them locally:
+ *
+ *   npx playwright install chromium && npm run test:widget
  */
 
 import test from 'node:test';
@@ -23,13 +28,33 @@ let chromium;
 try {
   ({ chromium } = await import('playwright'));
 } catch {
-  console.log('# Playwright not installed — skipping widget tests.');
+  console.log('# Playwright is not installed — skipping widget tests.');
   process.exit(0);
 }
 
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium',
-});
+/**
+ * Where the browser lives.
+ *
+ * Some environments pin Chromium at a fixed path; a CI runner and a laptop let
+ * Playwright manage its own. Passing an executablePath that does not exist is
+ * fatal, so only pass one when there is something at the other end of it.
+ */
+const pinned = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium';
+const launchOptions = fs.existsSync(pinned) ? { executablePath: pinned } : {};
+
+let browser;
+try {
+  browser = await chromium.launch(launchOptions);
+} catch (err) {
+  // The package installs without a browser binary, which is the default on a
+  // CI runner. Skipping is correct; failing a deploy over a missing browser is
+  // not — and that is exactly what this guard existed to prevent before
+  // Playwright became a declared dependency and the import stopped throwing.
+  console.log(`# No Chromium available — skipping widget tests. (${String(err.message).split('\n')[0]})`);
+  console.log('# Run `npx playwright install chromium` to enable them.');
+  process.exit(0);
+}
+
 const page = await browser.newPage();
 
 // The widget needs a document.currentScript, so inject it as a real <script>.
