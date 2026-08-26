@@ -150,7 +150,18 @@ export const TOOL_DEFINITIONS = [
     name: 'create_document',
     description:
       "Produce a branded deck (.pptx) or document (.pdf) that the rep can present or send. Call it when a rep asks for a deck, a one-pager, a leave-behind, a summary they can share, or something to take into a meeting — not for an answer they will read on screen. You write the content; the layout, colours, typefaces and disclosure footer are applied for you, so write plain sentence-case prose and no formatting marks. Every claim must come from the knowledge base or from what the rep told you in this conversation: a document outlives the chat, and an invention in one becomes a broken promise in a deal.",
-    strict: true,
+    // NOT strict, unlike every other tool here.
+    //
+    // Strict mode compiles the schema into a decoding grammar, and that
+    // compilation has a complexity budget. This is the only tool with objects
+    // nested inside an array, which is enough to exceed it: the API rejects
+    // the whole request with "Schema is too complex" — every message in every
+    // conversation, not just the ones that would have used the tool.
+    //
+    // Nothing is lost by dropping it. Strict guarantees the input matches the
+    // schema; normaliseSpec() in documents/spec.js already validates, coerces
+    // and truncates every field, because model-authored content needed
+    // normalising regardless.
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -166,13 +177,14 @@ export const TOOL_DEFINITIONS = [
           description: `What this document is, in sentence case. Under ${LIMITS.titleChars} characters.`,
         },
         subtitle: {
-          type: ['string', 'null'],
-          description: 'One sentence on the cover saying what the reader will get from it, or null.',
+          type: 'string',
+          description:
+            'One sentence on the cover saying what the reader will get from it. Empty string if there is nothing worth saying.',
         },
         audience: {
-          type: ['string', 'null'],
+          type: 'string',
           description:
-            'Who it is for, as it should read on the cover: "Acme security team", "the CISO at Northwind". Null if the rep did not say.',
+            'Who it is for, as it should read on the cover: "Acme security team", "the CISO at Northwind". Empty string if the rep did not say.',
         },
         disclosure: {
           type: 'string',
@@ -188,13 +200,13 @@ export const TOOL_DEFINITIONS = [
             additionalProperties: false,
             properties: {
               eyebrow: {
-                type: ['string', 'null'],
+                type: 'string',
                 description: 'Two or three words naming what this section is for: "context", "what it does", "next steps".',
               },
               title: { type: 'string', description: 'The point of the section, as a sentence-case statement.' },
               body: {
-                type: ['string', 'null'],
-                description: 'A short paragraph, or null when the points say it. Prose, not a list.',
+                type: 'string',
+                description: 'A short paragraph, or an empty string when the points say it. Prose, not a list.',
               },
               points: {
                 type: 'array',

@@ -39,17 +39,54 @@ test('the prospect-facing tools are gone', () => {
   }
 });
 
-test('every tool schema is strict and closed', () => {
+test('every tool schema is closed and fully required', () => {
+  // True whether or not a tool is strict: a closed, fully-required schema is
+  // what stops the model inventing fields, and strict mode additionally
+  // guarantees it.
   for (const t of TOOL_DEFINITIONS) {
-    assert.equal(t.strict, true, `${t.name} must set strict`);
     assert.equal(t.input_schema.additionalProperties, false, `${t.name} must be closed`);
     const props = Object.keys(t.input_schema.properties);
     assert.deepEqual(
       [...t.input_schema.required].sort(),
       props.sort(),
-      `${t.name}: strict mode requires every property in \`required\``,
+      `${t.name}: every property belongs in \`required\``,
     );
     assert.ok(t.description.length > 40, `${t.name} needs a usable description`);
+  }
+});
+
+test('a tool is strict unless its handler validates the input itself', () => {
+  // Strict is the default and the safe choice. create_document is the one
+  // exception: its schema nests objects inside an array, which exceeds the
+  // grammar-compilation budget and gets the WHOLE request rejected with
+  // "Schema is too complex" — breaking every conversation, including ones
+  // that never touch the tool. Its handler runs normaliseSpec() instead.
+  const VALIDATES_ITS_OWN_INPUT = new Set(['create_document']);
+
+  for (const t of TOOL_DEFINITIONS) {
+    if (VALIDATES_ITS_OWN_INPUT.has(t.name)) {
+      assert.notEqual(t.strict, true, `${t.name} is exempt and must not re-enable strict`);
+      continue;
+    }
+    assert.equal(t.strict, true, `${t.name} must set strict, or be listed as validating its own input`);
+  }
+});
+
+test('no strict tool nests an object inside an array', () => {
+  // The shape that blew the complexity budget. Cheap to check, and the
+  // failure it prevents is total: not a degraded tool, a dead assistant.
+  const nestsObjects = (node) => {
+    if (!node || typeof node !== 'object') return false;
+    if (node.type === 'array' && node.items && node.items.type === 'object') return true;
+    return Object.values(node).some(nestsObjects);
+  };
+
+  for (const t of TOOL_DEFINITIONS) {
+    if (!t.strict) continue;
+    assert.ok(
+      !nestsObjects(t.input_schema),
+      `${t.name} is strict and nests objects in an array — the API will reject every request`,
+    );
   }
 });
 
