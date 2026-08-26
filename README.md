@@ -121,7 +121,8 @@ For the nightly workflow, as GitHub **secrets**: `GRAPH_TENANT_ID`,
 `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `CLOUDFLARE_API_TOKEN`,
 `CLOUDFLARE_ACCOUNT_ID`. As GitHub **variables** (not secret — they are
 hostnames and folder names): `SHAREPOINT_HOSTNAME`, `SHAREPOINT_SITE_PATH`,
-`SHAREPOINT_FOLDER`, and optionally `SHAREPOINT_LIBRARY`.
+`SHAREPOINT_LIBRARY` and `SHAREPOINT_FOLDER` — set both to `*` to read
+everything.
 
 `SHAREPOINT_LIBRARY` means two different things in two places, which is a trap
 worth knowing about. As a **GitHub variable** it narrows what the sync reads:
@@ -231,6 +232,7 @@ export GRAPH_CLIENT_SECRET=...
 export SHAREPOINT_HOSTNAME=vikatai.sharepoint.com
 export SHAREPOINT_SITE_PATH=/sites/VikatGTM
 export SHAREPOINT_LIBRARY='*'            # every library; or name one, e.g. PPTs
+export SHAREPOINT_FOLDER='*'             # every folder; or name one, e.g. Approved
 export SHAREPOINT_FOLDER=Approved        # optional, recommended
 
 node scripts/sync-sharepoint.js --dry-run   # fetch and report, write nothing

@@ -190,3 +190,26 @@ test('a real library name still narrows, and a wrong one fails loudly', async ()
   const { result } = await runSync({ SHAREPOINT_LIBRARY: 'CISO Briefs' });
   assert.deepEqual(result.source.libraries, ['CISO Briefs']);
 });
+
+test('the folder sentinel means no folder restriction, not a folder named "*"', async () => {
+  // The same "*" that widens the library scope would, read literally, narrow
+  // the folder scope to a folder nobody has — indexing nothing and reporting
+  // success. Both variables have to understand the sentinel or neither should.
+  for (const value of ['*', 'all', 'ALL', ' * ']) {
+    const { result } = await runSync({ SHAREPOINT_LIBRARY: '*', SHAREPOINT_FOLDER: value });
+    assert.equal(
+      Object.keys(result.files).length,
+      4,
+      `SHAREPOINT_FOLDER="${value}" should not restrict anything`,
+    );
+    assert.equal(result.source.folder, null);
+  }
+});
+
+test('a real folder name still restricts', async () => {
+  // Nothing in the stub lives in a folder, so naming one must index nothing —
+  // which is what proves the sentinel above is doing real work.
+  const { result } = await runSync({ SHAREPOINT_LIBRARY: '*', SHAREPOINT_FOLDER: 'Approved' });
+  assert.equal(Object.keys(result.files).length, 0);
+  assert.equal(result.source.folder, 'Approved');
+});

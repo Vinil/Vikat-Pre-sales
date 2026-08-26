@@ -33,7 +33,8 @@
  * Optional:
  *   SHAREPOINT_LIBRARY       read only this library, e.g. "PPTs".
  *                            "*" or "all" — or leaving it off — reads them all.
- *   SHAREPOINT_FOLDER        restrict further, e.g. "Approved"
+ *   SHAREPOINT_FOLDER        restrict to one folder within each library, e.g.
+ *                            "Approved". "*" or "all" means no restriction.
  *   SHAREPOINT_MAX_FILE_MB   skip files larger than this (default 40)
  *   SHAREPOINT_GENERATED_FOLDER
  *                            the folder the assistant files its own output in,
@@ -57,12 +58,19 @@ const MIN_CHUNK_CHARS = 60;
  * form templates — never sales material — and indexing them buries the real
  * collateral in site furniture.
  */
-/** Values that mean "every library" rather than the name of one. */
-const ALL_LIBRARIES = new Set(['', '*', 'all', 'any', '(all)', 'every']);
+/**
+ * Values that mean "do not narrow" rather than naming a library or folder.
+ *
+ * GitHub Actions will not save a variable with an empty value, so there has to
+ * be something writable that means everything. Both scope variables share the
+ * set: a "*" that widens the library scope but silently narrows the folder
+ * scope to a folder nobody has would index nothing and report success.
+ */
+const NO_NARROWING = new Set(['', '*', 'all', 'any', '(all)', 'every', 'none']);
 
-function normaliseLibraryScope(raw) {
+function normaliseScope(raw) {
   const value = String(raw || '').trim();
-  return ALL_LIBRARIES.has(value.toLowerCase()) ? '' : value;
+  return NO_NARROWING.has(value.toLowerCase()) ? '' : value;
 }
 
 const SYSTEM_LIBRARIES = new Set([
@@ -110,8 +118,8 @@ const CONFIG = {
   // entirely. The sentinels exist because GitHub Actions will not save a
   // variable with an empty value, so "unset it" is not always an option —
   // and a setting you can see beats one whose absence you have to infer.
-  library: normaliseLibraryScope(process.env.SHAREPOINT_LIBRARY),
-  folder: (process.env.SHAREPOINT_FOLDER || '').replace(/^\/+|\/+$/g, ''),
+  library: normaliseScope(process.env.SHAREPOINT_LIBRARY),
+  folder: normaliseScope(process.env.SHAREPOINT_FOLDER).replace(/^\/+|\/+$/g, ''),
   // NEVER SYNCED. This is where the assistant files the decks and documents it
   // generates. Reading them back in would close a loop: the assistant would
   // index its own output, then cite it as a source, and a guess it made last
