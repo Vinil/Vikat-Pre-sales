@@ -31,7 +31,8 @@
  *   SHAREPOINT_HOSTNAME      e.g. vikat.sharepoint.com
  *   SHAREPOINT_SITE_PATH     e.g. /sites/VikatGTM
  * Optional:
- *   SHAREPOINT_LIBRARY       read only this library, e.g. "PPTs". Unset = all.
+ *   SHAREPOINT_LIBRARY       read only this library, e.g. "PPTs".
+ *                            "*" or "all" — or leaving it off — reads them all.
  *   SHAREPOINT_FOLDER        restrict further, e.g. "Approved"
  *   SHAREPOINT_MAX_FILE_MB   skip files larger than this (default 40)
  *   SHAREPOINT_GENERATED_FOLDER
@@ -56,6 +57,14 @@ const MIN_CHUNK_CHARS = 60;
  * form templates — never sales material — and indexing them buries the real
  * collateral in site furniture.
  */
+/** Values that mean "every library" rather than the name of one. */
+const ALL_LIBRARIES = new Set(['', '*', 'all', 'any', '(all)', 'every']);
+
+function normaliseLibraryScope(raw) {
+  const value = String(raw || '').trim();
+  return ALL_LIBRARIES.has(value.toLowerCase()) ? '' : value;
+}
+
 const SYSTEM_LIBRARIES = new Set([
   'Site Assets',
   'Site Pages',
@@ -96,8 +105,12 @@ const CONFIG = {
   clientSecret: requireEnv('GRAPH_CLIENT_SECRET'),
   hostname: requireEnv('SHAREPOINT_HOSTNAME'),
   sitePath: requireEnv('SHAREPOINT_SITE_PATH'),
-  // Empty means every library on the site. Naming one narrows to it.
-  library: (process.env.SHAREPOINT_LIBRARY || '').trim(),
+  // Which libraries to read. Naming one narrows to it; "*" or "all" is an
+  // explicit every-library setting, and so is leaving the variable off
+  // entirely. The sentinels exist because GitHub Actions will not save a
+  // variable with an empty value, so "unset it" is not always an option —
+  // and a setting you can see beats one whose absence you have to infer.
+  library: normaliseLibraryScope(process.env.SHAREPOINT_LIBRARY),
   folder: (process.env.SHAREPOINT_FOLDER || '').replace(/^\/+|\/+$/g, ''),
   // NEVER SYNCED. This is where the assistant files the decks and documents it
   // generates. Reading them back in would close a loop: the assistant would

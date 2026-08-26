@@ -124,10 +124,13 @@ hostnames and folder names): `SHAREPOINT_HOSTNAME`, `SHAREPOINT_SITE_PATH`,
 `SHAREPOINT_FOLDER`, and optionally `SHAREPOINT_LIBRARY`.
 
 `SHAREPOINT_LIBRARY` means two different things in two places, which is a trap
-worth knowing about. As a **GitHub variable** it narrows what the sync reads,
-and leaving it unset reads every library — which is what you want. As a
-**Worker var** in `wrangler.toml` it names the single library generated
-documents are filed into, and it must always be set.
+worth knowing about. As a **GitHub variable** it narrows what the sync reads:
+set it to `*` to read every library, or to one library's name to read only
+that. GitHub will not save a variable with an empty value, so `*` is the way to
+say "everything" — deleting the variable does the same thing, but an absent
+setting is one you have to infer. As a **Worker var** in `wrangler.toml` it
+names the single library generated documents are filed into, and it must always
+be a real library name.
 
 ---
 
@@ -227,7 +230,7 @@ export GRAPH_CLIENT_ID=...
 export GRAPH_CLIENT_SECRET=...
 export SHAREPOINT_HOSTNAME=vikatai.sharepoint.com
 export SHAREPOINT_SITE_PATH=/sites/VikatGTM
-# export SHAREPOINT_LIBRARY=PPTs         # optional: narrow to one library
+export SHAREPOINT_LIBRARY='*'            # every library; or name one, e.g. PPTs
 export SHAREPOINT_FOLDER=Approved        # optional, recommended
 
 node scripts/sync-sharepoint.js --dry-run   # fetch and report, write nothing

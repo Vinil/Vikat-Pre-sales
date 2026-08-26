@@ -171,3 +171,22 @@ test('naming a library narrows the sync to it', async () => {
   assert.deepEqual(result.source.libraries, ['PPTs']);
   assert.equal(Object.keys(result.files).length, 2);
 });
+
+test('a sentinel value means every library, since a variable cannot be blank', async () => {
+  // GitHub Actions refuses to save a variable with an empty value, so "unset
+  // it" is not always available. These read as "no narrowing" rather than as
+  // the name of a library nobody has.
+  for (const value of ['*', 'all', 'ALL', ' * ', 'any', '(all)']) {
+    const { result } = await runSync({ SHAREPOINT_LIBRARY: value });
+    assert.deepEqual(
+      result.source.libraries,
+      ['Documents', 'PPTs', 'CISO Briefs'],
+      `"${value}" should read every library`,
+    );
+  }
+});
+
+test('a real library name still narrows, and a wrong one fails loudly', async () => {
+  const { result } = await runSync({ SHAREPOINT_LIBRARY: 'CISO Briefs' });
+  assert.deepEqual(result.source.libraries, ['CISO Briefs']);
+});
