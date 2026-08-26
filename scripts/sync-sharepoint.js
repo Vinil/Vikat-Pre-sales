@@ -14,18 +14,24 @@
  * { id, page, section, content } shape as the site pages, plus the delta token
  * so the next run is incremental. build-knowledge.js merges it.
  *
- * SCOPE IS DELIBERATELY NARROW AND FAILS CLOSED. The sync reads one document
- * library, and optionally one folder within it. That library is the approval
- * boundary: publishing a file there is what makes it visible to the assistant.
- * Widening the scope to a whole site means anything anyone drops anywhere
- * becomes an answer, which is how a roadmap deck ends up quoted on a call.
+ * SCOPE IS THE SITE. Every document library on the named site is read, because
+ * a GTM site keeps its material in several — PPTs, briefs, ICP files — and
+ * indexing one of them silently misses the rest.
+ *
+ * The site is therefore the approval boundary: anything published anywhere on
+ * it becomes something the assistant can quote. That is a deliberate trade,
+ * and it is only safe while the site is a closed group whose members all
+ * understand that. Point this at a site anyone can drop a file into and an
+ * unreleased roadmap deck ends up quoted on a call.
+ *
+ * Narrow it with SHAREPOINT_LIBRARY to read a single library instead.
  *
  * Required environment:
  *   GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
  *   SHAREPOINT_HOSTNAME      e.g. vikat.sharepoint.com
- *   SHAREPOINT_SITE_PATH     e.g. /sites/Sales
- *   SHAREPOINT_LIBRARY       document library (drive) name, e.g. "Sales Enablement"
+ *   SHAREPOINT_SITE_PATH     e.g. /sites/VikatGTM
  * Optional:
+ *   SHAREPOINT_LIBRARY       read only this library, e.g. "PPTs". Unset = all.
  *   SHAREPOINT_FOLDER        restrict further, e.g. "Approved"
  *   SHAREPOINT_MAX_FILE_MB   skip files larger than this (default 40)
  *   SHAREPOINT_GENERATED_FOLDER
@@ -44,6 +50,20 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const OUT_PATH = path.join(REPO_ROOT, 'worker/src/knowledge/sharepoint.json');
 
 const MIN_CHUNK_CHARS = 60;
+
+/**
+ * Libraries SharePoint creates for itself. They hold page assets, themes and
+ * form templates — never sales material — and indexing them buries the real
+ * collateral in site furniture.
+ */
+const SYSTEM_LIBRARIES = new Set([
+  'Site Assets',
+  'Site Pages',
+  'Style Library',
+  'Form Templates',
+  'Preservation Hold Library',
+  'Documents_Archive',
+]);
 
 // --- CLI ------------------------------------------------------------------
 
@@ -76,8 +96,8 @@ const CONFIG = {
   clientSecret: requireEnv('GRAPH_CLIENT_SECRET'),
   hostname: requireEnv('SHAREPOINT_HOSTNAME'),
   sitePath: requireEnv('SHAREPOINT_SITE_PATH'),
-  // Fails closed: without a named library there is no safe default to guess.
-  library: requireEnv('SHAREPOINT_LIBRARY'),
+  // Empty means every library on the site. Naming one narrows to it.
+  library: (process.env.SHAREPOINT_LIBRARY || '').trim(),
   folder: (process.env.SHAREPOINT_FOLDER || '').replace(/^\/+|\/+$/g, ''),
   // NEVER SYNCED. This is where the assistant files the decks and documents it
   // generates. Reading them back in would close a loop: the assistant would
@@ -121,6 +141,16 @@ function summarise(chunks) {
   return out || `${lines[0].slice(0, MAX - 1)}…`;
 }
 
+/**
+ * Identify a file by library and item.
+ *
+ * Item ids are unique within a drive, not across them, so a bare item id would
+ * let a file in one library evict a file in another on a later sync.
+ */
+function fileKey(driveId, itemId) {
+  return `${driveId}:${itemId}`;
+}
+
 function slugify(s) {
   return (
     String(s)
@@ -132,17 +162,22 @@ function slugify(s) {
 }
 
 function loadPrevious() {
-  if (!fs.existsSync(OUT_PATH)) return { deltaLink: null, chunks: [], files: {} };
+  const empty = { deltaLinks: {}, chunks: [], files: {} };
+  if (!fs.existsSync(OUT_PATH)) return empty;
+
   try {
     const prev = JSON.parse(fs.readFileSync(OUT_PATH, 'utf8'));
     return {
-      deltaLink: prev.deltaLink || null,
+      // One cursor per library. A single shared cursor was fine when there was
+      // a single library; across several it would replay one drive's changes
+      // against another and lose everything else.
+      deltaLinks: prev.deltaLinks || {},
       chunks: prev.chunks || [],
       files: prev.files || {},
     };
   } catch (err) {
     console.warn(`  Could not read existing ${path.basename(OUT_PATH)} (${err.message}); doing a full sync.`);
-    return { deltaLink: null, chunks: [], files: {} };
+    return empty;
   }
 }
 
@@ -167,133 +202,167 @@ function isSupported(name) {
 
 async function main() {
   console.log('SharePoint sync');
-  console.log(`  site:    ${CONFIG.hostname}${CONFIG.sitePath}`);
-  console.log(`  library: ${CONFIG.library}${CONFIG.folder ? ` / ${CONFIG.folder}` : ''}`);
+  console.log(`  site:     ${CONFIG.hostname}${CONFIG.sitePath}`);
+  console.log(`  scope:    ${CONFIG.library || 'every document library on the site'}`);
+  if (CONFIG.folder) console.log(`  folder:   ${CONFIG.folder}`);
   console.log(`  skipping: ${CONFIG.generatedFolder}/ (the assistant's own output)`);
-  console.log(`  mode:    ${FULL ? 'full' : 'incremental'}${DRY_RUN ? ' (dry run)' : ''}`);
+  console.log(`  mode:     ${FULL ? 'full' : 'incremental'}${DRY_RUN ? ' (dry run)' : ''}`);
 
   const token = await getToken(CONFIG);
-
   const site = await getSite(token, CONFIG.hostname, CONFIG.sitePath);
-  const drives = await listDrives(token, site.id);
-  const drive = drives.find((d) => d.name === CONFIG.library);
+  const allDrives = await listDrives(token, site.id);
 
-  if (!drive) {
-    console.error(`\nLibrary "${CONFIG.library}" not found on this site.`);
-    console.error(`Available: ${drives.map((d) => d.name).join(', ') || '(none visible to this app)'}`);
-    console.error('If the list is empty, the app registration probably lacks access to this site.');
+  if (allDrives.length === 0) {
+    console.error('\nNo document libraries are visible to this app on that site.');
+    console.error('The app registration probably lacks read access — see README "SharePoint sync".');
     process.exit(1);
   }
 
+  const drives = allDrives.filter((d) => {
+    if (d.driveType && d.driveType !== 'documentLibrary') return false;
+    if (SYSTEM_LIBRARIES.has(d.name)) return false;
+    return CONFIG.library ? d.name === CONFIG.library : true;
+  });
+
+  if (drives.length === 0) {
+    console.error(`\nNothing to read.`);
+    if (CONFIG.library) console.error(`Library "${CONFIG.library}" is not on this site.`);
+    console.error(`Visible: ${allDrives.map((d) => d.name).join(', ')}`);
+    process.exit(1);
+  }
+
+  console.log(`\n  ${drives.length} librar${drives.length === 1 ? 'y' : 'ies'}: ${drives.map((d) => d.name).join(', ')}`);
+
   const previous = loadPrevious();
-  const deltaLink = FULL ? null : previous.deltaLink;
 
-  const { items, deltaLink: nextDelta } = await deltaItems(token, drive.id, deltaLink);
-  console.log(`\n  ${items.length} item(s) changed since the last sync`);
-
-  // Keep chunks from files that did not change, keyed by item id.
+  // Chunks from files that did not change, keyed by drive AND item. Item ids
+  // are only unique within a drive, so keying on the item alone would let a
+  // file in one library evict a file in another.
   /** @type {Map<string, object[]>} */
   const chunksByFile = new Map();
   if (!FULL) {
     for (const c of previous.chunks) {
-      if (!chunksByFile.has(c.itemId)) chunksByFile.set(c.itemId, []);
-      chunksByFile.get(c.itemId).push(c);
+      const key = fileKey(c.driveId, c.itemId);
+      if (!chunksByFile.has(key)) chunksByFile.set(key, []);
+      chunksByFile.get(key).push(c);
     }
   }
 
   const files = FULL ? {} : { ...previous.files };
+  const deltaLinks = FULL ? {} : { ...previous.deltaLinks };
   const stats = { added: 0, updated: 0, deleted: 0, skipped: 0, failed: 0 };
   const warnings = [];
 
-  for (const item of items) {
-    // Deletions arrive as a tombstone; drop the file's chunks.
-    if (item.deleted) {
-      if (chunksByFile.delete(item.id)) {
-        stats.deleted++;
-        console.log(`  - removed ${files[item.id]?.name || item.id}`);
-      }
-      delete files[item.id];
-      continue;
-    }
-
-    // Folders themselves carry no text.
-    if (item.folder) continue;
-    if (!item.file) continue;
-
-    if (!inScope(item)) {
-      stats.skipped++;
-      continue;
-    }
-
-    if (!isSupported(item.name)) {
-      stats.skipped++;
-      continue;
-    }
-
-    if (item.size > CONFIG.maxFileBytes) {
-      stats.skipped++;
-      warnings.push(`${item.name}: ${(item.size / 1024 / 1024).toFixed(1)}MB exceeds the size limit; skipped`);
-      continue;
-    }
-
-    const isUpdate = Boolean(files[item.id]);
-
+  for (const drive of drives) {
+    // One library failing — a permission gap, a throttle — must not cost the
+    // rest. Its cursor is left untouched so the next run retries it.
+    let items;
+    let nextDelta;
     try {
-      const buffer = await downloadItem(token, item);
-      const result = extract(buffer, item.name);
+      const result = await deltaItems(token, drive.id, FULL ? null : deltaLinks[drive.id] || null);
+      items = result.items;
+      nextDelta = result.deltaLink;
+    } catch (err) {
+      stats.failed++;
+      warnings.push(`library "${drive.name}": ${err.message}`);
+      console.warn(`\n  ! ${drive.name}: ${err.message}`);
+      continue;
+    }
 
-      for (const w of result.warnings) warnings.push(`${item.name}: ${w}`);
+    console.log(`\n  ${drive.name}: ${items.length} item(s) changed`);
 
-      const folder = folderPathOf(item);
-      const page = `sharepoint/${folder ? `${folder}/` : ''}${item.name}`;
+    for (const item of items) {
+      const key = fileKey(drive.id, item.id);
 
-      const chunks = result.sections
-        .filter((s) => s.content.trim().length >= MIN_CHUNK_CHARS)
-        .map((s, i) => ({
-          id: `sp:${slugify(item.name)}:${slugify(s.title)}:${i}`,
-          page,
-          section: s.title,
-          content: s.content.trim(),
-          // Retained so an incremental run can drop this file's chunks, and so
-          // a reviewer can trace an answer back to a document.
-          itemId: item.id,
-          webUrl: item.webUrl || null,
-          modified: item.lastModifiedDateTime || null,
-        }));
+      // Deletions arrive as a tombstone; drop the file's chunks.
+      if (item.deleted) {
+        if (chunksByFile.delete(key)) {
+          stats.deleted++;
+          console.log(`    - removed ${files[key]?.name || item.id}`);
+        }
+        delete files[key];
+        continue;
+      }
 
-      if (chunks.length === 0) {
-        warnings.push(`${item.name}: produced no usable text`);
-        chunksByFile.delete(item.id);
-        delete files[item.id];
+      if (item.folder || !item.file) continue;
+
+      if (!inScope(item) || !isSupported(item.name)) {
         stats.skipped++;
         continue;
       }
 
-      chunksByFile.set(item.id, chunks);
-      files[item.id] = {
-        name: item.name,
-        page,
-        folder,
-        webUrl: item.webUrl || null,
-        modified: item.lastModifiedDateTime || null,
-        chunks: chunks.length,
-        // Extractive, not generated: the first substantive prose in the
-        // document. A model-written summary would be better, but it would also
-        // be a per-file API call on every sync and a new thing that can be
-        // wrong. This is cheap, deterministic, and good enough to recognise a
-        // document by.
-        summary: summarise(chunks),
-      };
+      if (item.size > CONFIG.maxFileBytes) {
+        stats.skipped++;
+        warnings.push(`${item.name}: ${(item.size / 1024 / 1024).toFixed(1)}MB exceeds the size limit; skipped`);
+        continue;
+      }
 
-      if (isUpdate) stats.updated++;
-      else stats.added++;
-      console.log(`  ${isUpdate ? '~' : '+'} ${page} (${chunks.length} chunk${chunks.length === 1 ? '' : 's'})`);
-    } catch (err) {
-      // One unreadable file must not abandon the whole sync.
-      stats.failed++;
-      warnings.push(`${item.name}: ${err.message}`);
-      console.warn(`  ! ${item.name}: ${err.message}`);
+      const isUpdate = Boolean(files[key]);
+
+      try {
+        const buffer = await downloadItem(token, item);
+        const result = extract(buffer, item.name);
+
+        for (const w of result.warnings) warnings.push(`${drive.name}/${item.name}: ${w}`);
+
+        const folder = folderPathOf(item);
+        // The library is part of the path, so a reviewer tracing an answer can
+        // see which library it came from — "PPTs" and "CISO Briefs" carry very
+        // different expectations about what may be repeated.
+        const page = `sharepoint/${drive.name}/${folder ? `${folder}/` : ''}${item.name}`;
+
+        const chunks = result.sections
+          .filter((sec) => sec.content.trim().length >= MIN_CHUNK_CHARS)
+          .map((sec, i) => ({
+            id: `sp:${slugify(drive.name)}:${slugify(item.name)}:${slugify(sec.title)}:${i}`,
+            page,
+            section: sec.title,
+            content: sec.content.trim(),
+            // Retained so an incremental run can drop this file's chunks, and
+            // so a reviewer can trace an answer back to a document.
+            driveId: drive.id,
+            itemId: item.id,
+            webUrl: item.webUrl || null,
+            modified: item.lastModifiedDateTime || null,
+          }));
+
+        if (chunks.length === 0) {
+          warnings.push(`${drive.name}/${item.name}: produced no usable text`);
+          chunksByFile.delete(key);
+          delete files[key];
+          stats.skipped++;
+          continue;
+        }
+
+        chunksByFile.set(key, chunks);
+        files[key] = {
+          name: item.name,
+          page,
+          library: drive.name,
+          folder,
+          webUrl: item.webUrl || null,
+          modified: item.lastModifiedDateTime || null,
+          chunks: chunks.length,
+          // Extractive, not generated: the first substantive prose in the
+          // document. A model-written summary would be better, but it would
+          // also be a per-file API call on every sync and a new thing that can
+          // be wrong. This is cheap, deterministic, and good enough to
+          // recognise a document by.
+          summary: summarise(chunks),
+        };
+
+        if (isUpdate) stats.updated++;
+        else stats.added++;
+        console.log(`    ${isUpdate ? '~' : '+'} ${item.name} (${chunks.length} chunk${chunks.length === 1 ? '' : 's'})`);
+      } catch (err) {
+        // One unreadable file must not abandon the whole sync.
+        stats.failed++;
+        warnings.push(`${drive.name}/${item.name}: ${err.message}`);
+        console.warn(`    ! ${item.name}: ${err.message}`);
+      }
     }
+
+    if (nextDelta) deltaLinks[drive.id] = nextDelta;
   }
 
   const allChunks = [...chunksByFile.values()].flat();
@@ -305,12 +374,18 @@ async function main() {
     `\n  ${stats.added} added, ${stats.updated} updated, ${stats.deleted} removed, ` +
       `${stats.skipped} skipped, ${stats.failed} failed`,
   );
-  console.log(`  ${allChunks.length} chunk(s) total, ~${estimatedTokens} tokens`);
+  console.log(`  ${Object.keys(files).length} file(s), ${allChunks.length} chunk(s), ~${estimatedTokens} tokens`);
 
   if (warnings.length) {
     console.log(`\n  ${warnings.length} warning(s):`);
     for (const w of warnings.slice(0, 30)) console.log(`    - ${w}`);
     if (warnings.length > 30) console.log(`    … and ${warnings.length - 30} more`);
+  }
+
+  if (allChunks.length === 0) {
+    console.error('\nNothing was indexed. The assistant will have no SharePoint material to answer from.');
+    console.error('Check the warnings above: a library with no readable files is usually a permission gap');
+    console.error('or a set of documents with no extractable text layer.');
   }
 
   if (DRY_RUN) {
@@ -323,15 +398,15 @@ async function main() {
     `${JSON.stringify(
       {
         $comment:
-          'GENERATED by scripts/sync-sharepoint.js. Do not edit by hand. deltaLink is the incremental-sync cursor; delete this file or run with --full to resync from scratch.',
+          'GENERATED by scripts/sync-sharepoint.js. Do not edit by hand. deltaLinks holds one incremental-sync cursor per library; delete this file or run with --full to resync from scratch.',
         syncedAt: new Date().toISOString(),
         source: {
           hostname: CONFIG.hostname,
           sitePath: CONFIG.sitePath,
-          library: CONFIG.library,
+          libraries: drives.map((d) => d.name),
           folder: CONFIG.folder || null,
         },
-        deltaLink: nextDelta,
+        deltaLinks,
         estimatedTokens,
         files,
         chunks: allChunks,

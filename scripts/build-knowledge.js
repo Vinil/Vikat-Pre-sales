@@ -241,6 +241,9 @@ function chunksFromSharePoint(spPath) {
       name: f.name,
       summary: f.summary || '',
       webUrl: f.webUrl,
+      // Which library it came from. Worth showing: "PPTs" and "CISO Briefs"
+      // carry very different expectations about what may be repeated.
+      library: f.library || '',
       folder: f.folder || '',
       modified: f.modified || null,
       page: f.page,
@@ -286,7 +289,7 @@ export const KNOWLEDGE_TOKENS = ${meta.estimatedTokens};
  * A link here is not a grant: SharePoint still authorises the click, so a rep
  * who cannot open a document sees the link and gets SharePoint's own refusal.
  */
-/** @typedef {{ name: string, summary: string, webUrl: string, folder: string, modified: string|null, page: string }} CollateralDocument */
+/** @typedef {{ name: string, summary: string, webUrl: string, library: string, folder: string, modified: string|null, page: string }} CollateralDocument */
 
 /** @type {CollateralDocument[]} */
 export const COLLATERAL = ${JSON.stringify(meta.documents, null, 2)};

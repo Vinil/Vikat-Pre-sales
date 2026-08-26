@@ -125,6 +125,9 @@
 
       var meta = el('div', 'doc-meta');
       meta.appendChild(el('span', 'kind kind-' + kindOf(d.name), kindOf(d.name)));
+      // Library first, then folder within it: the library is what a rep
+      // recognises, since it is what they see in SharePoint's own nav.
+      if (d.library) meta.appendChild(el('span', null, d.library));
       if (d.folder) meta.appendChild(el('span', null, d.folder));
       if (d.modified) meta.appendChild(el('span', null, 'Updated ' + fmtDate(d.modified)));
       a.appendChild(meta);
@@ -139,7 +142,9 @@
     if (terms.length === 0) return docs;
 
     return docs.filter(function (d) {
-      var hay = ((d.name || '') + ' ' + (d.summary || '') + ' ' + (d.folder || '')).toLowerCase();
+      var hay = (
+        (d.name || '') + ' ' + (d.summary || '') + ' ' + (d.library || '') + ' ' + (d.folder || '')
+      ).toLowerCase();
       return terms.every(function (t) { return hay.indexOf(t) !== -1; });
     });
   }

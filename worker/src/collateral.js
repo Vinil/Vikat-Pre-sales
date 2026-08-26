@@ -26,6 +26,7 @@ const DEFAULT_LIMIT = 25;
 /** Fields searched, and how much a hit in each is worth. */
 const FIELD_WEIGHTS = [
   ['name', 6],
+  ['library', 3],
   ['folder', 3],
   ['summary', 1],
 ];

@@ -1646,7 +1646,7 @@ export const KNOWLEDGE_TOKENS = 21859;
  * A link here is not a grant: SharePoint still authorises the click, so a rep
  * who cannot open a document sees the link and gets SharePoint's own refusal.
  */
-/** @typedef {{ name: string, summary: string, webUrl: string, folder: string, modified: string|null, page: string }} CollateralDocument */
+/** @typedef {{ name: string, summary: string, webUrl: string, library: string, folder: string, modified: string|null, page: string }} CollateralDocument */
 
 /** @type {CollateralDocument[]} */
 export const COLLATERAL = [];

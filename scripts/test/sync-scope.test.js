@@ -1,0 +1,173 @@
+/**
+ * What the sync reads.
+ *
+ * A GTM site keeps material in several libraries — PPTs, CISO briefs, ICP
+ * files — and reading only one silently misses the rest. That is a failure
+ * with no error message: the sync reports success, and a rep is told the deck
+ * they can see in SharePoint does not exist.
+ *
+ * The script is a CLI that runs on import, so it is driven here against a
+ * stubbed Graph and the file it writes is the assertion.
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { zipSync, strToU8 } from 'fflate';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(HERE, '../..');
+const OUT = path.join(REPO, 'worker/src/knowledge/sharepoint.json');
+const SYNC = path.join(REPO, 'scripts/sync-sharepoint.js');
+
+const DRIVES = [
+  { id: 'd1', name: 'Documents', driveType: 'documentLibrary' },
+  { id: 'd2', name: 'PPTs', driveType: 'documentLibrary' },
+  { id: 'd3', name: 'CISO Briefs', driveType: 'documentLibrary' },
+  { id: 'd4', name: 'Site Assets', driveType: 'documentLibrary' },
+  { id: 'd5', name: 'Notebook', driveType: 'notebook' },
+];
+
+/** Every library uses item id "i1", which is the collision this guards. */
+const ITEMS = {
+  d1: [item('i1', 'Overview.pptx')],
+  d2: [item('i1', 'DevSemantic_CTO.pptx'), item('i2', 'SecSemantic_CISO.pptx')],
+  d3: [item('i1', 'CISO_Brief.pptx')],
+  d4: [item('i1', 'Theme.pptx')],
+};
+
+function item(id, name, folder = '') {
+  return {
+    id,
+    name,
+    file: {},
+    size: 500,
+    webUrl: `https://sp.test/${id}`,
+    lastModifiedDateTime: '2026-08-04T00:00:00Z',
+    parentReference: { path: `/drive/root:${folder ? `/${folder}` : ''}` },
+  };
+}
+
+/** A .pptx carrying one slide with enough text to clear the chunk minimum. */
+function deck(name) {
+  const text = `Content of ${name}, long enough to be indexed as a usable chunk of text.`;
+  const slide =
+    '<?xml version="1.0"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+    'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:sp>' +
+    `<p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`;
+  return zipSync({ 'ppt/slides/slide1.xml': strToU8(slide) });
+}
+
+/** Run the sync against a fake Graph and return what it wrote. */
+async function runSync(env = {}) {
+  const originalFetch = globalThis.fetch;
+  const walked = [];
+
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    const json = (o) => ({ ok: true, status: 200, json: async () => o, text: async () => JSON.stringify(o) });
+
+    if (u.includes('login.microsoftonline.com')) return json({ access_token: 't', expires_in: 3600 });
+    if (/\/sites\/[^/]+:/.test(u)) return json({ id: 'site-1' });
+    if (u.endsWith('/drives')) return json({ value: DRIVES });
+
+    const delta = /\/drives\/(\w+)\/root\/delta/.exec(u);
+    if (delta) {
+      walked.push(delta[1]);
+      return json({ value: ITEMS[delta[1]] || [], '@odata.deltaLink': `link-${delta[1]}` });
+    }
+
+    const download = /\/drives\/(\w+)\/items\/(\w+)\/content/.exec(u);
+    if (download) {
+      const name = (ITEMS[download[1]] || []).find((i) => i.id === download[2])?.name || 'x.pptx';
+      return { ok: true, status: 200, arrayBuffer: async () => deck(name) };
+    }
+
+    return { ok: false, status: 404, text: async () => 'not found' };
+  };
+
+  Object.assign(process.env, {
+    GRAPH_TENANT_ID: 't',
+    GRAPH_CLIENT_ID: 'c',
+    GRAPH_CLIENT_SECRET: 's',
+    SHAREPOINT_HOSTNAME: 'vikatai.sharepoint.com',
+    SHAREPOINT_SITE_PATH: '/sites/VikatGTM',
+    ...env,
+  });
+  if (!env.SHAREPOINT_LIBRARY) delete process.env.SHAREPOINT_LIBRARY;
+
+  fs.rmSync(OUT, { force: true });
+
+  try {
+    // Cache-busted so each test re-runs main() rather than reusing the module.
+    await import(`${OUT_URL()}?run=${walked.length}-${Math.round(process.hrtime()[1])}`);
+    for (let i = 0; i < 200 && !fs.existsSync(OUT); i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return { walked, result: JSON.parse(fs.readFileSync(OUT, 'utf8')) };
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(OUT, { force: true });
+  }
+}
+
+const OUT_URL = () => new URL(`file://${SYNC}`).href;
+
+test('every document library on the site is read', async () => {
+  const { walked, result } = await runSync();
+
+  assert.deepEqual(result.source.libraries, ['Documents', 'PPTs', 'CISO Briefs']);
+  assert.deepEqual(walked, ['d1', 'd2', 'd3'], 'each library gets its own delta pass');
+  assert.equal(Object.keys(result.files).length, 4);
+});
+
+test("SharePoint's own libraries are left out", async () => {
+  // Site Assets holds page furniture and themes; a notebook is not a library
+  // at all. Indexing either buries the real collateral.
+  const { walked, result } = await runSync();
+
+  assert.ok(!walked.includes('d4'), 'Site Assets must be skipped');
+  assert.ok(!walked.includes('d5'), 'a notebook is not a document library');
+  assert.ok(!result.source.libraries.includes('Site Assets'));
+});
+
+test('an item id repeated across libraries does not evict its namesake', async () => {
+  // Item ids are unique within a drive, not across them. Keying on the item
+  // alone let a file in one library silently replace a file in another.
+  const { result } = await runSync();
+  const names = Object.values(result.files).map((f) => f.name).sort();
+
+  assert.deepEqual(names, [
+    'CISO_Brief.pptx',
+    'DevSemantic_CTO.pptx',
+    'Overview.pptx',
+    'SecSemantic_CISO.pptx',
+  ]);
+});
+
+test('provenance records which library a document came from', async () => {
+  // "PPTs" and "CISO Briefs" carry different expectations about what may be
+  // repeated to a customer, so the library has to survive into the index.
+  const { result } = await runSync();
+  const deckFile = Object.values(result.files).find((f) => f.name === 'DevSemantic_CTO.pptx');
+
+  assert.equal(deckFile.library, 'PPTs');
+  assert.equal(deckFile.page, 'sharepoint/PPTs/DevSemantic_CTO.pptx');
+});
+
+test('each library keeps its own incremental cursor', async () => {
+  // One shared cursor across several libraries replays one drive's changes
+  // against another and loses everything else.
+  const { result } = await runSync();
+  assert.deepEqual(Object.keys(result.deltaLinks).sort(), ['d1', 'd2', 'd3']);
+});
+
+test('naming a library narrows the sync to it', async () => {
+  const { walked, result } = await runSync({ SHAREPOINT_LIBRARY: 'PPTs' });
+
+  assert.deepEqual(walked, ['d2']);
+  assert.deepEqual(result.source.libraries, ['PPTs']);
+  assert.equal(Object.keys(result.files).length, 2);
+});

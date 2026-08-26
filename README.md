@@ -121,7 +121,13 @@ For the nightly workflow, as GitHub **secrets**: `GRAPH_TENANT_ID`,
 `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `CLOUDFLARE_API_TOKEN`,
 `CLOUDFLARE_ACCOUNT_ID`. As GitHub **variables** (not secret — they are
 hostnames and folder names): `SHAREPOINT_HOSTNAME`, `SHAREPOINT_SITE_PATH`,
-`SHAREPOINT_LIBRARY`, `SHAREPOINT_FOLDER`.
+`SHAREPOINT_FOLDER`, and optionally `SHAREPOINT_LIBRARY`.
+
+`SHAREPOINT_LIBRARY` means two different things in two places, which is a trap
+worth knowing about. As a **GitHub variable** it narrows what the sync reads,
+and leaving it unset reads every library — which is what you want. As a
+**Worker var** in `wrangler.toml` it names the single library generated
+documents are filed into, and it must always be set.
 
 ---
 
@@ -190,13 +196,19 @@ text and the agent will tag it.
 
 ## SharePoint sync
 
-The sync reads **one document library**, optionally **one folder** within it.
-That library is the approval boundary: publishing a file there is what makes it
-visible to the assistant. It fails closed — without `SHAREPOINT_LIBRARY` set,
-it refuses to run rather than guessing a scope.
+The sync reads **every document library on one site**. A GTM site keeps
+material in several — `PPTs`, `CISO Briefs`, `ICP Files` — and reading only one
+misses the rest silently: the run reports success while a rep is told a deck
+they can see in SharePoint does not exist.
 
-Do not point it at a whole site. Anything anyone drops anywhere then becomes an
-answer, which is how an unreleased roadmap deck ends up quoted on a call.
+SharePoint's own libraries (`Site Assets`, `Site Pages`, `Style Library` and
+friends) are skipped, as is anything that is not a document library.
+
+**The site is therefore the approval boundary.** Anything published anywhere on
+it becomes something the assistant can quote. That is only safe while the site
+is a closed group whose members understand it — point this at a site anyone can
+drop a file into and an unreleased roadmap deck ends up quoted on a call. Set
+`SHAREPOINT_LIBRARY` to read a single library instead.
 
 ### Setup
 
@@ -215,7 +227,7 @@ export GRAPH_CLIENT_ID=...
 export GRAPH_CLIENT_SECRET=...
 export SHAREPOINT_HOSTNAME=vikatai.sharepoint.com
 export SHAREPOINT_SITE_PATH=/sites/VikatGTM
-export SHAREPOINT_LIBRARY=Documents      # the DRIVE name, not the URL segment
+# export SHAREPOINT_LIBRARY=PPTs         # optional: narrow to one library
 export SHAREPOINT_FOLDER=Approved        # optional, recommended
 
 node scripts/sync-sharepoint.js --dry-run   # fetch and report, write nothing
