@@ -257,3 +257,77 @@ test('a missing user does not crash tool execution', async () => {
   assert.ok(!result.isError);
   assert.equal(storage.leads[0].loggedBy, 'unknown');
 });
+
+// --- Schema validity ------------------------------------------------------
+// The API validates tool schemas on every request, so one malformed tool
+// breaks every conversation — including "hi", which touches no tool at all.
+// Structure is checked here rather than discovered in production.
+
+/** Walk every object schema, at every depth. */
+function objectSchemas(schema, path = 'input_schema', found = []) {
+  if (!schema || typeof schema !== 'object') return found;
+
+  if (schema.type === 'object' || schema.properties) found.push({ path, schema });
+
+  for (const [key, value] of Object.entries(schema.properties || {})) {
+    objectSchemas(value, `${path}.${key}`, found);
+  }
+  if (schema.items) objectSchemas(schema.items, `${path}[]`, found);
+
+  return found;
+}
+
+test('every object in a strict schema is closed and fully required', () => {
+  // Strict mode requires additionalProperties:false and every property listed
+  // in `required` — at EVERY level, not just the top. A nested object that
+  // misses either is rejected with a 400 that names the tool, not the level.
+  for (const tool of TOOL_DEFINITIONS) {
+    if (!tool.strict) continue;
+
+    for (const { path, schema } of objectSchemas(tool.input_schema)) {
+      assert.equal(
+        schema.additionalProperties,
+        false,
+        `${tool.name} ${path} must set additionalProperties: false`,
+      );
+
+      const properties = Object.keys(schema.properties || {});
+      assert.deepEqual(
+        [...(schema.required || [])].sort(),
+        properties.sort(),
+        `${tool.name} ${path}: strict mode requires every property in \`required\``,
+      );
+    }
+  }
+});
+
+test('no tool schema uses a keyword the Messages API will not accept', () => {
+  // JSON Schema is larger than what the API takes. These are the ones a model
+  // reaches for by habit and which fail validation.
+  const REJECTED = ['$ref', '$defs', 'definitions', 'allOf', 'anyOf', 'oneOf', 'not', 'patternProperties'];
+
+  const walk = (node, path) => {
+    if (!node || typeof node !== 'object') return;
+    for (const keyword of REJECTED) {
+      assert.ok(!(keyword in node), `${path} uses unsupported keyword "${keyword}"`);
+    }
+    for (const [key, value] of Object.entries(node)) walk(value, `${path}.${key}`);
+  };
+
+  for (const tool of TOOL_DEFINITIONS) walk(tool.input_schema, tool.name);
+});
+
+test('every enum value is a plain string the model can emit', () => {
+  const walk = (node, path) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node.enum)) {
+      assert.ok(node.enum.length > 0, `${path} has an empty enum`);
+      for (const value of node.enum) {
+        assert.equal(typeof value, 'string', `${path} enum contains a non-string`);
+      }
+    }
+    for (const [key, value] of Object.entries(node)) walk(value, `${path}.${key}`);
+  };
+
+  for (const tool of TOOL_DEFINITIONS) walk(tool.input_schema, tool.name);
+});
