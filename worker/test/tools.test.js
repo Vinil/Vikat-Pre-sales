@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { schemaCost } from '../src/toolHealth.js';
 import assert from 'node:assert/strict';
 
 import { TOOL_DEFINITIONS, runTool } from '../src/tools.js';
@@ -400,4 +401,44 @@ test('every enum value is a plain string the model can emit', () => {
   };
 
   for (const tool of TOOL_DEFINITIONS) walk(tool.input_schema, tool.name);
+});
+
+test('no strict tool schema uses a union type', () => {
+  // The bug that took every conversation down for days, twice misdiagnosed.
+  //
+  // `strict` compiles the schema into a constrained-decoding grammar, where the
+  // expensive thing is branching rather than size. log_prospect carried six
+  // `type: ['string', 'null']` properties — 64 admissible shapes in one tool —
+  // and the API answered "Schema is too complex." on EVERY request, including
+  // ones that never touched a tool. The schemas looked innocent by every
+  // measure I checked first: depth 1, 23 properties, 5KB.
+  //
+  // Express "unknown" as an empty string instead. compact() drops blanks, so
+  // the record is identical.
+  for (const tool of TOOL_DEFINITIONS) {
+    if (!tool.strict) continue;
+    for (const [name, prop] of Object.entries(tool.input_schema.properties || {})) {
+      assert.ok(
+        !Array.isArray(prop.type),
+        `${tool.name}.${name} is a union type (${JSON.stringify(prop.type)}) in a strict schema — ` +
+          'use a single type and treat an empty string as absent',
+      );
+    }
+  }
+});
+
+test('the shed order puts the most expensive schema first', () => {
+  // Not a style preference: shedding cheap tools first means several more
+  // round trips before the offending one goes, and each round trip is a failed
+  // request a rep is waiting on.
+  const costs = TOOL_DEFINITIONS.map((t) => ({ name: t.name, cost: schemaCost(t) }));
+  for (const { name, cost } of costs) {
+    assert.ok(Number.isFinite(cost) && cost > 0, `${name} should have a measurable cost`);
+  }
+
+  // A union type must dominate a plain property, or the heuristic would not
+  // have found the tool that actually broke production.
+  const plain = { input_schema: { properties: { a: { type: 'string' } } } };
+  const union = { input_schema: { properties: { a: { type: ['string', 'null'] } } } };
+  assert.ok(schemaCost(union) > schemaCost(plain), 'a union must cost more than a plain string');
 });

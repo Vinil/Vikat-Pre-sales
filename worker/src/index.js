@@ -28,6 +28,8 @@ import { searchCollateral, collateralCount } from './collateral.js';
 import { loadFonts } from './documents/fonts.js';
 import { documentStoreStatus } from './documentStore.js';
 import { buildSystemPrompt } from './systemPrompt.js';
+import { refusedTools, noteRefusal, schemaCost } from './toolHealth.js';
+
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
 import { authenticate } from './auth.js';
 import { resolveRole, canUseAssistant, canAdminister } from './roles.js';
@@ -291,13 +293,15 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
       };
 
       // Capabilities given up for this turn if the API refuses them.
-      let toolsDisabled = false;
+      const dropped = new Set(refusedTools());
       let thinkingDisabled = false;
+
+      const activeTools = () => TOOL_DEFINITIONS.filter((d) => !dropped.has(d.name));
 
       const buildRequest = (convo) => ({
         model: cfg.MODEL,
         max_tokens: cfg.MAX_TOKENS,
-        system: systemFor(!toolsDisabled),
+        system: systemFor(activeTools().length > 0),
         messages: convo,
         // Adaptive thinking, despite costing a little latency before the first
         // token. With thinking off, the model intermittently writes a tool
@@ -307,7 +311,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         // nothing errors, and the rep is told the assistant cannot do
         // something it can. A slower first character is the better trade.
         ...(thinkingDisabled ? {} : { thinking: { type: 'adaptive' } }),
-        ...(toolsDisabled ? {} : { tools: TOOL_DEFINITIONS }),
+        ...(activeTools().length ? { tools: activeTools() } : {}),
       });
 
       /**
@@ -325,9 +329,25 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
        *          worth attempting.
        */
       const degrade = (err) => {
-        if (!toolsDisabled && isToolSchemaRejection(err)) {
-          console.error('[chat] tool schema refused, retrying without tools:', err?.message || err);
-          toolsDisabled = true;
+        if (isToolSchemaRejection(err)) {
+          // Drop ONE tool and retry, not the whole set.
+          //
+          // "Schema is too complex." is a request-level 400: it names nothing,
+          // and it kills conversations that never touch a tool. Dropping all
+          // five made every rep toolless and told us nothing about which one
+          // was at fault — twice I fixed the wrong tool from a guess. Shedding
+          // the most expensive schema first keeps the other four working and
+          // puts the culprit's name in the log the first time it happens.
+          const remaining = activeTools();
+          if (!remaining.length) return false;
+
+          const victim = remaining.reduce((a, b) => (schemaCost(b) > schemaCost(a) ? b : a));
+          dropped.add(victim.name);
+          noteRefusal(victim.name);
+          console.error(
+            `[chat] tool schema refused; dropping ${victim.name} (cost ${schemaCost(victim)}), ` +
+              `${remaining.length - 1} tool(s) still offered: ${err?.message || err}`,
+          );
           return true;
         }
         if (!thinkingDisabled && isUnsupportedParameter(err, 'thinking')) {
@@ -338,10 +358,30 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         return false;
       };
 
-      const startTurn = async (convo) => {
+      /**
+       * One model turn, retried until the request stops being refused.
+       *
+       * A rejection surfaces at two different points — synchronously when the
+       * stream is created, or later from finalMessage() once the request is
+       * already in flight — so both have to feed the same ladder. They used to
+       * be handled separately, and the finalMessage() path retried exactly
+       * once. That was enough only while a single degrade step turned
+       * everything off at once; now that tools are shed one at a time, a
+       * one-shot retry gives up with four tools still attached and the rep
+       * gets "Something went wrong" instead of an answer. One loop, both paths.
+       */
+      const runTurn = async (convo) => {
         for (;;) {
           try {
-            return client.messages.stream(buildRequest(convo));
+            const stream = client.messages.stream(buildRequest(convo));
+            // Deltas already sent cannot be unsent, but a refusal lands before
+            // any text arrives, so resetting here keeps the accumulator honest.
+            fullText = '';
+            stream.on('text', (delta) => {
+              fullText += delta;
+              send('text', { text: delta });
+            });
+            return await stream.finalMessage();
           } catch (err) {
             if (!degrade(err)) throw err;
           }
@@ -353,30 +393,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         const convo = messages.map((m) => ({ role: m.role, content: m.content }));
 
         for (let iteration = 0; iteration < cfg.MAX_TOOL_ITERATIONS; iteration++) {
-          let messageStream = await startTurn(convo);
-
-          messageStream.on('text', (delta) => {
-            fullText += delta;
-            send('text', { text: delta });
-          });
-
-          let final;
-          try {
-            final = await messageStream.finalMessage();
-          } catch (err) {
-            // The SDK surfaces the rejection here rather than at creation when
-            // the request is already in flight, so the same fallback has to
-            // exist on both paths.
-            if (!degrade(err)) throw err;
-
-            fullText = '';
-            messageStream = await startTurn(convo);
-            messageStream.on('text', (delta) => {
-              fullText += delta;
-              send('text', { text: delta });
-            });
-            final = await messageStream.finalMessage();
-          }
+          const final = await runTurn(convo);
 
           if (final.stop_reason !== 'tool_use') {
             send('done', { stopReason: final.stop_reason });

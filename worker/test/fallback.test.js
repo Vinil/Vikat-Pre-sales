@@ -10,8 +10,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { TOOL_DEFINITIONS } from '../src/tools.js';
 import worker from '../src/index.js';
+import { forgetRefusals } from '../src/toolHealth.js';
 import { fakeKV } from './helpers.js';
+
+// The refusal memo is isolate-scoped by design, which in one test process means
+// it is shared. Clear it so each case starts from a healthy tool set.
+test.beforeEach(() => forgetRefusals());
 
 const ENV = {
   AUTH_MODE: 'dev',
@@ -36,7 +42,7 @@ function schemaError() {
  * Rejects any request carrying tools, accepts one without — which is exactly
  * the condition that broke production.
  */
-function stubApi({ rejectWithTools = true, onRequest } = {}) {
+function stubApi({ rejectWithTools = true, rejectWhen, onRequest } = {}) {
   const calls = [];
 
   return async (url, init) => {
@@ -47,7 +53,8 @@ function stubApi({ rejectWithTools = true, onRequest } = {}) {
     calls.push({ hadTools: Array.isArray(body.tools) && body.tools.length > 0 });
     if (onRequest) onRequest(body);
 
-    if (rejectWithTools && body.tools?.length) {
+    const refuse = rejectWhen ? rejectWhen(body) : rejectWithTools && body.tools?.length;
+    if (refuse) {
       const err = schemaError();
       return {
         ok: false,
@@ -127,12 +134,42 @@ test('a refused tool schema costs the tools, not the answer', async () => {
   assert.ok(!/upstream_error/.test(text), 'this must not surface as a failure');
 });
 
-test('the retry actually drops the tools rather than resending them', async () => {
-  const sent = [];
-  const stub = stubApi({ onRequest: (body) => sent.push(Boolean(body.tools?.length)) });
+test('a refusal sheds one tool at a time, not the whole set', async () => {
+  // This stub refuses ANY request carrying tools, so the ladder walks all the
+  // way down — five tools, five refusals, then an answer with none. What
+  // matters is the shape: each retry offers strictly fewer tools than the last,
+  // rather than jumping straight to zero. Against a real API refusing ONE bad
+  // schema, that difference is four working tools instead of none.
+  const counts = [];
+  const stub = stubApi({ onRequest: (body) => counts.push(body.tools?.length ?? 0) });
   await chat(stub);
 
-  assert.deepEqual(sent, [true, false], 'first attempt with tools, retry without');
+  assert.equal(counts[0], TOOL_DEFINITIONS.length, 'the first attempt offers everything');
+  assert.equal(counts.at(-1), 0, 'the last attempt offers nothing and is answered');
+  for (let i = 1; i < counts.length; i += 1) {
+    assert.equal(counts[i], counts[i - 1] - 1, `attempt ${i + 1} should shed exactly one tool`);
+  }
+});
+
+test('one bad schema costs one tool, not the other four', async () => {
+  // The case the ladder exists for. Only log_prospect is refused; every other
+  // tool is fine. Dropping all five on the first 400 is what left reps with an
+  // assistant that could not search collateral, log a prospect or build a deck
+  // — and, being told in its prompt that it could, invented the results.
+  const offered = [];
+  const stub = stubApi({
+    rejectWithTools: false,
+    rejectWhen: (body) => body.tools?.some((d) => d.name === 'log_prospect'),
+    onRequest: (body) => offered.push((body.tools || []).map((d) => d.name)),
+  });
+  const { status, text } = await chat(stub);
+
+  assert.equal(status, 200);
+  assert.match(text, /Answered without tools\./, 'the rep still gets an answer');
+  assert.equal(offered.length, 2, 'one refusal, one retry');
+  assert.ok(!offered[1].includes('log_prospect'), 'the refused tool is gone');
+  assert.equal(offered[1].length, TOOL_DEFINITIONS.length - 1, 'and nothing else went with it');
+  assert.ok(offered[1].includes('find_collateral'), 'find_collateral survives, which is the point');
 });
 
 test('a 400 that is not about the schema still fails loudly', async () => {
@@ -271,7 +308,7 @@ test('the retry stops advertising tools the request no longer carries', async ()
   const stub = stubApi({ onRequest: (body) => sent.push(body.system) });
   await chat(stub);
 
-  assert.equal(sent.length, 2, 'one attempt with tools, one without');
+  assert.ok(sent.length >= 2, 'at least one retry');
 
   // Matched against the ROSTER's own formatting — backtick-quoted identifiers —
   // rather than the whole prompt. The knowledge block is part of the system
@@ -285,12 +322,12 @@ test('the retry stops advertising tools the request no longer carries', async ()
   assert.match(sent[0], /^# Tools$/m, 'and should carry the roster heading');
 
   assert.doesNotMatch(
-    sent[1],
+    sent.at(-1),
     ROSTER,
     'the retry carries no tools, so the prompt must not offer any — a model told it ' +
       'has a tool it was not given imitates the call and then invents the result',
   );
-  assert.match(sent[1], /# Tools — UNAVAILABLE THIS TURN/, 'the roster must be replaced, not merely dropped');
+  assert.match(sent.at(-1), /# Tools — UNAVAILABLE THIS TURN/, 'the roster must be replaced, not merely dropped');
 });
 
 test('the toolless prompt says the capability is down, not absent', async () => {
@@ -301,10 +338,10 @@ test('the toolless prompt says the capability is down, not absent', async () => 
   const stub = stubApi({ onRequest: (body) => sent.push(body.system) });
   await chat(stub);
 
-  assert.match(sent[1], /UNAVAILABLE THIS TURN/, 'the outage must be stated plainly');
-  assert.match(sent[1], /Collateral/, 'the tab needs no tool and must survive the cut');
+  assert.match(sent.at(-1), /UNAVAILABLE THIS TURN/, 'the outage must be stated plainly');
+  assert.match(sent.at(-1), /Collateral/, 'the tab needs no tool and must survive the cut');
   assert.match(
-    sent[1],
+    sent.at(-1),
     /Never invent a value, a filename, a link, or a product capability/,
     'the specific failure mode must be named, not implied',
   );

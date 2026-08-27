@@ -43,20 +43,31 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        prospect_name: { type: ['string', 'null'], description: 'Prospect contact name, or null.' },
-        prospect_email: { type: ['string', 'null'], description: 'Prospect email, or null.' },
-        company: { type: ['string', 'null'], description: 'Prospect company, or null.' },
-        role: { type: ['string', 'null'], description: 'Prospect job title or role, or null.' },
+        // Unknown fields travel as an EMPTY STRING, not null.
+        //
+        // These were type: ['string', 'null']. Under `strict` a union is a
+        // branch in the constrained-decoding grammar, and six of them in one
+        // tool is 64 shapes the grammar has to express — which is what the API
+        // was rejecting with "Schema is too complex." on every request in every
+        // conversation, tools that were never called included. Flattening
+        // create_document did not fix it because the unions were never there.
+        //
+        // compact() below already drops blanks as well as nulls, so nothing
+        // downstream changes: an unknown field is still absent from the record.
+        prospect_name: { type: 'string', description: 'Prospect contact name. Empty string if not given.' },
+        prospect_email: { type: 'string', description: 'Prospect email. Empty string if not given.' },
+        company: { type: 'string', description: 'Prospect company. Empty string if not given.' },
+        role: { type: 'string', description: 'Prospect job title or role. Empty string if not given.' },
         use_case: {
           type: 'string',
           description: 'What the prospect is trying to solve, as the rep described it.',
         },
         environment: {
-          type: ['string', 'null'],
+          type: 'string',
           description:
-            'Cloud provider, security tooling, AI/agent adoption stage — whatever the rep mentioned. Null if not discussed.',
+            'Cloud provider, security tooling, AI/agent adoption stage — whatever the rep mentioned. Empty string if not discussed.',
         },
-        timeline: { type: ['string', 'null'], description: 'Timeline or deadline, or null.' },
+        timeline: { type: 'string', description: 'Timeline or deadline. Empty string if not given.' },
         qualification_score: {
           type: 'string',
           enum: SCORES,

@@ -210,3 +210,22 @@ test('the prompt refuses to end a request with nothing offered', async () => {
   const p = await prompt({ user: REP });
   assert.match(p, /is not a dead\s*end/i);
 });
+
+test('the invention rules survive losing the tools', () => {
+  // These landed after a transcript where the assistant correctly reported its
+  // tools were down, then answered anyway: "I don't need to search — I already
+  // have DevSemantic content in my knowledge base", naming a file no sync has
+  // returned and describing an architecture no source states. Obeying the
+  // outage notice and then routing around it is not a partial fix.
+  const cfg = { INTERNAL_HELP_CHANNEL: '#sales-help', CONTACT_EMAIL: 'sales@vikat.ai' };
+
+  for (const toolsAvailable of [true, false]) {
+    const prompt = buildSystemPrompt(cfg, '<knowledge_base></knowledge_base>', {}, { toolsAvailable });
+    const label = toolsAvailable ? 'with tools' : 'without tools';
+
+    assert.match(prompt, /Never name a document that is not in front of you/, label);
+    assert.match(prompt, /Never describe a product's architecture, integrations or partnerships/, label);
+    assert.match(prompt, /Never state how many documents exist/, label);
+    assert.match(prompt, /I do not need to search, I already know this/, label);
+  }
+});
