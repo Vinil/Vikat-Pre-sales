@@ -303,10 +303,39 @@ test('an unrelated Graph failure is passed through untranslated', async () => {
 
   try {
     await assert.rejects(getSite('token', 'h', '/sites/x'), (err) => {
+      /* eslint-disable-next-line no-unused-expressions */
       assert.match(err.message, /itemNotFound/);
       assert.ok(!/Sites\.Selected/.test(err.message), 'no guess where there is one cause too many');
       return true;
     });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('a site addressed by id names the causes above the per-site grant', async () => {
+  // Addressed by composite id, so the lookup is not the problem. The message
+  // must lead with the two things that leave a token carrying no role at all —
+  // a Delegated permission, or one never consented — because both fail exactly
+  // like a missing grant and neither is visible from Graph.
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    headers: new Map(),
+    text: async () => '{"error":{"code":"generalException","innerError":{"code":"spException"}}}',
+  });
+
+  try {
+    await assert.rejects(
+      listDrives('token', 'vikatai.sharepoint.com,aaaa,bbbb'),
+      (err) => {
+        assert.match(err.message, /Application", not "Delegated/);
+        assert.match(err.message, /Granted for/);
+        assert.ok(!/SHAREPOINT_SITE_ID/.test(err.message), 'the lookup is not at fault here');
+        return true;
+      },
+    );
   } finally {
     globalThis.fetch = original;
   }

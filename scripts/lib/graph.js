@@ -80,12 +80,19 @@ function explainGraphFailure(status, body, url) {
     );
   }
 
+  // Three causes, in the order worth checking. The per-site grant is the one
+  // people reach for, and the two above it are invisible from Graph: a token
+  // with no Sites.Selected role at all fails identically to one whose site
+  // grant is missing.
   return (
-    `The app has no permission on ${site}. Sites.Selected grants nothing on ` +
-    'its own — each site needs its own grant. Check with ' +
-    'GET /sites/{site-id}/permissions in Graph Explorer; an empty list means ' +
-    'the grant never landed. Note that roles are cumulative, so ["write"] ' +
-    'alone is correct and includes read.'
+    `The app has no effective permission on ${site}. Check, in this order:\n` +
+    '  1. Azure > App registrations > your app > API permissions. Sites.Selected ' +
+    'must be listed with Type "Application", not "Delegated" — a delegated ' +
+    'permission puts no role in a client-credentials token.\n' +
+    '  2. On the same page, Status must read "Granted for <tenant>". Adding the ' +
+    'permission does nothing until an admin consents to it.\n' +
+    '  3. GET /sites/{site-id}/permissions must list a grant to this app. Roles ' +
+    'are cumulative, so ["write"] alone is correct and includes read.'
   );
 }
 
