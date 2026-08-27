@@ -57,12 +57,15 @@ test('every tool schema is closed and fully required', () => {
 });
 
 test('a tool is strict unless its handler validates the input itself', () => {
-  // Strict is the default and the safe choice. create_document is the one
-  // exception: its schema nests objects inside an array, which exceeds the
-  // grammar-compilation budget and gets the WHOLE request rejected with
-  // "Schema is too complex" — breaking every conversation, including ones
-  // that never touch the tool. Its handler runs normaliseSpec() instead.
-  const VALIDATES_ITS_OWN_INPUT = new Set(['create_document']);
+  // Strict is the default and the safe choice. Two tools are exempt, both
+  // because `strict` put them over the grammar-compilation budget and got the
+  // WHOLE request rejected with "Schema is too complex" — breaking every
+  // conversation, including ones that never touched the tool.
+  //
+  // create_document runs normaliseSpec(); log_prospect runs
+  // normaliseProspect(). An exemption is a debt, not a shortcut: whatever
+  // strict would have guaranteed, the handler now owes.
+  const VALIDATES_ITS_OWN_INPUT = new Set(['create_document', 'log_prospect']);
 
   for (const t of TOOL_DEFINITIONS) {
     if (VALIDATES_ITS_OWN_INPUT.has(t.name)) {
@@ -74,9 +77,11 @@ test('a tool is strict unless its handler validates the input itself', () => {
 });
 
 test('no tool schema nests an object inside an array', () => {
-  // The shape that blew the complexity budget. Checked for EVERY tool, not
-  // just the strict ones: dropping `strict` was my first fix and it did not
-  // help — the API rejected the request either way. The nesting is what costs,
+  // A shape that blew the complexity budget. Checked for EVERY tool, not just
+  // the strict ones, because nesting is expensive on its own — though the
+  // claim once written here, that dropping `strict` does not help, turned out
+  // to be wrong: create_document is the largest schema in the file and passes
+  // precisely because it is not strict. The nesting still costs,
   // and the failure it causes is total, not degraded: "Schema is too complex"
   // rejects the whole request, so one over-ambitious tool kills every
   // conversation including the ones that never touch it.
@@ -441,4 +446,115 @@ test('the shed order puts the most expensive schema first', () => {
   const plain = { input_schema: { properties: { a: { type: 'string' } } } };
   const union = { input_schema: { properties: { a: { type: ['string', 'null'] } } } };
   assert.ok(schemaCost(union) > schemaCost(plain), 'a union must cost more than a plain string');
+});
+
+test('a strict schema stays inside the budget that production actually accepts', () => {
+  // The tripwire that would have saved three deploys.
+  //
+  // "Schema is too complex." names nothing and rejects the entire request, so
+  // it cannot be diagnosed from the error. What it CAN be measured against is
+  // the deployed Worker's own behaviour, which gave a clean natural experiment:
+  //
+  //   create_document  NOT strict  6 props  1755 bytes  accepted
+  //   log_prospect     strict      9 props  1472 bytes  REFUSED
+  //   ask_expert       strict      4 props   757 bytes  accepted
+  //
+  // The largest schema in the file passes and a smaller one fails, so size is
+  // not the axis — `strict` is the multiplier, and the budget for a strict
+  // schema sits somewhere above 4 properties and below 9.
+  //
+  // These bounds are empirical, not documented, and they are a floor rather
+  // than a guarantee: the API may move them. If this test fails on a schema
+  // that production accepts, re-measure and raise it. If production refuses a
+  // schema this test passed, lower it — and trust the deployment, not the
+  // number.
+  const MAX_STRICT_PROPS = 6;
+  const MAX_STRICT_BYTES = 1000;
+
+  for (const tool of TOOL_DEFINITIONS) {
+    if (!tool.strict) continue;
+    const props = Object.keys(tool.input_schema.properties || {}).length;
+    const bytes = JSON.stringify(tool.input_schema).length;
+
+    assert.ok(
+      props <= MAX_STRICT_PROPS,
+      `${tool.name} is strict with ${props} properties (budget ${MAX_STRICT_PROPS}). ` +
+        'Either drop strict and validate in the handler, or split the tool.',
+    );
+    assert.ok(
+      bytes <= MAX_STRICT_BYTES,
+      `${tool.name} is strict with a ${bytes}-byte schema (budget ${MAX_STRICT_BYTES}). ` +
+        'Either drop strict and validate in the handler, or shorten the descriptions.',
+    );
+  }
+});
+
+// --- log_prospect without strict ------------------------------------------
+
+test('an unknown key from the model never reaches the pipeline record', async () => {
+  // strict used to guarantee this. Dropping it moved the obligation to the
+  // handler, and a record is not a chat message — it is read later by someone
+  // deciding what to do about a deal.
+  const storage = fakeStorage();
+  const r = await runTool(
+    {
+      name: 'log_prospect',
+      input: {
+        company: 'Acme',
+        use_case: 'agent security',
+        qualification_score: 'HOT',
+        qualification_notes: 'Named a budget.',
+        // None of these are in the schema.
+        internal_note: 'ignore me',
+        __proto__: 'nope',
+        loggedBy: 'attacker@evil.test',
+      },
+    },
+    ctx(storage),
+  );
+
+  assert.ok(!r.isError);
+  const saved = storage.leads[0];
+  assert.equal(saved.company, 'Acme');
+  assert.ok(!('internal_note' in saved), 'an unknown key must be dropped');
+  assert.equal(
+    saved.loggedBy,
+    'rep@vikat.ai',
+    'the rep is the owner of the record and the model must not be able to set it',
+  );
+});
+
+test('a junk qualification_score is corrected, not stored', async () => {
+  const storage = fakeStorage();
+  const r = await runTool(
+    {
+      name: 'log_prospect',
+      input: { use_case: 'x', qualification_score: 'SCORCHING', qualification_notes: 'Keen.' },
+    },
+    ctx(storage),
+  );
+
+  assert.ok(!r.isError);
+  const saved = storage.leads[0];
+  assert.equal(saved.qualification_score, 'WARM', 'an unrecognised score falls back to the middle');
+  assert.match(
+    saved.qualification_notes,
+    /SCORCHING/,
+    'and the original is kept in the notes rather than silently discarded',
+  );
+});
+
+test('a lowercase score is accepted rather than downgraded', async () => {
+  // Without strict the model is no longer constrained to the enum's casing,
+  // and treating "hot" as junk would quietly cool every lead it scored.
+  const storage = fakeStorage();
+  await runTool(
+    {
+      name: 'log_prospect',
+      input: { use_case: 'x', qualification_score: '  hot ', qualification_notes: 'n' },
+    },
+    ctx(storage),
+  );
+
+  assert.equal(storage.leads[0].qualification_score, 'HOT');
 });

@@ -38,7 +38,20 @@ export const TOOL_DEFINITIONS = [
     name: 'log_prospect',
     description:
       'Record a prospect conversation the rep has had, so it reaches the pipeline. Call this when the rep describes a customer or prospect interaction and wants it captured. Record what the rep tells you — do not interrogate them for missing fields, and never ask for the rep\'s own details.',
-    strict: true,
+    // NOT strict, and the reason is measured rather than guessed.
+    //
+    // Live evidence from the deployed Worker: create_document, the LARGEST
+    // schema in this file (1755 bytes, 6 properties), is accepted — it is not
+    // strict. log_prospect, smaller at 1472 bytes, was refused with "Schema is
+    // too complex." on every request in every conversation. `strict` is the
+    // multiplier: it compiles the schema into a constrained-decoding grammar,
+    // and this tool's nine properties are over whatever that budget is.
+    //
+    // Two wrong fixes preceded this one — flattening a nested array, then
+    // removing six union types — both aimed at shapes that looked expensive.
+    // What actually found it was the degradation ladder naming the tool in a
+    // production log. normaliseProspect() below does the validating strict
+    // would have done.
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -221,6 +234,52 @@ const COLLATERAL_RESULT_LIMIT = 5;
 /** More for a bare "what do we have" listing, which is a browse, not a hit. */
 const COLLATERAL_LISTING_LIMIT = 12;
 
+/**
+ * What log_prospect accepts, now that the schema is not enforced for us.
+ *
+ * The handler used to spread the model's input straight into the pipeline
+ * record, which was safe only because `strict` guaranteed the shape. Without
+ * it, an unexpected key would reach storage and a junk qualification_score
+ * would reach a sales manager's queue.
+ */
+const PROSPECT_FIELDS = [
+  'prospect_name',
+  'prospect_email',
+  'company',
+  'role',
+  'use_case',
+  'environment',
+  'timeline',
+  'qualification_notes',
+];
+
+function normaliseProspect(input) {
+  const raw = input && typeof input === 'object' ? input : {};
+  const out = {};
+
+  for (const field of PROSPECT_FIELDS) {
+    const v = raw[field];
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s) out[field] = s;
+  }
+
+  // The score drives how a lead is triaged, so it is never passed through
+  // unchecked. An unrecognised one becomes WARM — the middle, which neither
+  // invents urgency nor buries a real lead — and the original is kept in the
+  // notes rather than dropped, so nothing is lost silently.
+  const score = String(raw.qualification_score ?? '').trim().toUpperCase();
+  if (SCORES.includes(score)) {
+    out.qualification_score = score;
+  } else {
+    out.qualification_score = 'WARM';
+    const note = `[scored WARM by default; the assistant returned ${score || 'no score'}]`;
+    out.qualification_notes = out.qualification_notes ? `${out.qualification_notes} ${note}` : note;
+  }
+
+  return out;
+}
+
 /** Drop nulls and blanks so records and notifications stay readable. */
 function compact(obj) {
   return Object.fromEntries(
@@ -246,7 +305,7 @@ export async function runTool(call, ctx) {
   try {
     switch (call.name) {
       case 'log_prospect': {
-        const input = compact(call.input);
+        const input = normaliseProspect(call.input);
 
         const record = compact({
           ...input,
