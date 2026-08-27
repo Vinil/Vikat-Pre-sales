@@ -254,3 +254,70 @@ test('adaptive thinking is on by default', async () => {
   await chat(wrapped);
   assert.deepEqual(sent[0].thinking, { type: 'adaptive' });
 });
+
+// --- the prompt has to lose the tools at the same moment the request does ---
+
+test('the retry stops advertising tools the request no longer carries', async () => {
+  // The bug this pins down produced a real answer with an invented product
+  // architecture in it. Tools were dropped from the REQUEST and left in the
+  // SYSTEM PROMPT, so the model still believed it had find_collateral: it
+  // wrote an imitation of a call into its visible text, got nothing back, and
+  // answered anyway from background knowledge — naming a SharePoint file that
+  // does not exist and describing a product plane that was never built.
+  //
+  // The prompt's own "never name a file you have not seen in a tool result"
+  // cannot catch that, because the model believed it had seen one.
+  const sent = [];
+  const stub = stubApi({ onRequest: (body) => sent.push(body.system) });
+  await chat(stub);
+
+  assert.equal(sent.length, 2, 'one attempt with tools, one without');
+
+  // Matched against the ROSTER's own formatting — backtick-quoted identifiers —
+  // rather than the whole prompt. The knowledge block is part of the system
+  // prompt too, and a curated FAQ entry legitimately describes the tools in
+  // prose ("routes with the ask_expert tool"). That is retrieved content, not
+  // an instruction, and the banner below tells the model they are unavailable
+  // regardless. What must not survive is the roster telling it to call them.
+  const ROSTER = new RegExp('\`(?:log_prospect|ask_expert|flag_content_gap|find_collateral|create_document)\`');
+
+  assert.match(sent[0], ROSTER, 'the first attempt has tools and should describe them');
+  assert.match(sent[0], /^# Tools$/m, 'and should carry the roster heading');
+
+  assert.doesNotMatch(
+    sent[1],
+    ROSTER,
+    'the retry carries no tools, so the prompt must not offer any — a model told it ' +
+      'has a tool it was not given imitates the call and then invents the result',
+  );
+  assert.match(sent[1], /# Tools — UNAVAILABLE THIS TURN/, 'the roster must be replaced, not merely dropped');
+});
+
+test('the toolless prompt says the capability is down, not absent', async () => {
+  // "I cannot search SharePoint" is false and sends a rep away. "I cannot
+  // search it right now, and the Collateral tab lists everything" is true and
+  // still gets them the document.
+  const sent = [];
+  const stub = stubApi({ onRequest: (body) => sent.push(body.system) });
+  await chat(stub);
+
+  assert.match(sent[1], /UNAVAILABLE THIS TURN/, 'the outage must be stated plainly');
+  assert.match(sent[1], /Collateral/, 'the tab needs no tool and must survive the cut');
+  assert.match(
+    sent[1],
+    /Never invent a value, a filename, a link, or a product capability/,
+    'the specific failure mode must be named, not implied',
+  );
+});
+
+test('the prompt is rebuilt only when the tools are actually dropped', async () => {
+  // A model that refuses `thinking` keeps its tools, so it must keep the
+  // prompt that describes them.
+  const sent = [];
+  const stub = stubApi({ rejectWithTools: false, onRequest: (body) => sent.push(body.system) });
+  await chat(stub);
+
+  for (const [i, system] of sent.entries()) {
+    assert.match(system, /find_collateral/, `attempt ${i + 1} kept its tools and must keep the roster`);
+  }
+});

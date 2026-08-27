@@ -14,12 +14,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { zipSync, strToU8 } from 'fflate';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
-const OUT = path.join(REPO, 'worker/src/knowledge/sharepoint.json');
+// NOT the real worker/src/knowledge/sharepoint.json. This suite runs the sync
+// for real, so pointing it at the production path meant every case overwrote
+// the live index with stubs and then deleted it — including in CI, mid-run,
+// where it destroyed the delta cursor the next sync depends on.
+const OUT = path.join(os.tmpdir(), `vikat-sync-test-${process.pid}.json`);
 const SYNC = path.join(REPO, 'scripts/sync-sharepoint.js');
 
 const DRIVES = [
@@ -94,6 +99,7 @@ async function runSync(env = {}) {
     GRAPH_CLIENT_SECRET: 's',
     SHAREPOINT_HOSTNAME: 'vikatai.sharepoint.com',
     SHAREPOINT_SITE_PATH: '/sites/VikatGTM',
+    SHAREPOINT_OUT_PATH: OUT,
     ...env,
   });
   if (!env.SHAREPOINT_LIBRARY) delete process.env.SHAREPOINT_LIBRARY;
@@ -281,6 +287,9 @@ test('the workflow passes every variable the sync reads', () => {
   ]);
   // Set by the workflow's own step, not by configuration.
   read.delete('FULL');
+  // A test seam, not configuration: it exists so this suite does not write to
+  // the real output path. CI must NOT set it.
+  read.delete('SHAREPOINT_OUT_PATH');
 
   assert.ok(read.size >= 9, `expected the script's full config surface, found ${read.size}`);
 
@@ -292,5 +301,20 @@ test('the workflow passes every variable the sync reads', () => {
     missing,
     [],
     `sync-knowledge.yml does not pass: ${missing.join(', ')} — the variable would be silently empty`,
+  );
+});
+
+test('this suite never writes to the real sync output path', () => {
+  // It used to. Every case here ran the sync for real against the production
+  // path, overwriting the live index with stubs and deleting it afterwards. In
+  // CI that landed between "Compile the knowledge base" and "Save sync cursor",
+  // so the deploy was correct and the delta cursor was gone — the cache step
+  // logged "Path(s) specified in the action for caching do(es) not exist" and
+  // every nightly run quietly became a full resync.
+  const production = path.join(REPO, 'worker/src/knowledge/sharepoint.json');
+  assert.notEqual(OUT, production, 'the fixture path must not be the production path');
+  assert.ok(
+    !OUT.startsWith(REPO),
+    `the fixture must live outside the repo entirely, not at ${OUT}`,
   );
 });

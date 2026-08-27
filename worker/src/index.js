@@ -259,6 +259,18 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
   const knowledge = await retrieve(userMessage, sessionContext);
   const system = buildSystemPrompt(cfg, knowledge, sessionContext);
 
+  // Built lazily, and only if the tools are ever dropped. Dropping them from
+  // the REQUEST while the prompt still describes them is what produced an
+  // answer with an invented product architecture in it: the model imitated a
+  // tool call in visible text, got nothing back, and answered from priors
+  // anyway. The prompt has to lose them at the same moment the request does.
+  let systemNoTools = null;
+  const systemFor = (toolsOn) => {
+    if (toolsOn) return system;
+    systemNoTools ??= buildSystemPrompt(cfg, knowledge, sessionContext, { toolsAvailable: false });
+    return systemNoTools;
+  };
+
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
   const stream = new ReadableStream({
@@ -285,7 +297,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
       const buildRequest = (convo) => ({
         model: cfg.MODEL,
         max_tokens: cfg.MAX_TOKENS,
-        system,
+        system: systemFor(!toolsDisabled),
         messages: convo,
         // Adaptive thinking, despite costing a little latency before the first
         // token. With thinking off, the model intermittently writes a tool

@@ -52,7 +52,14 @@ import { getToken, getSite, listDrives, deltaItems, downloadItem, folderPathOf }
 import { extract, SUPPORTED_EXTENSIONS } from './lib/extract.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT_PATH = path.join(REPO_ROOT, 'worker/src/knowledge/sharepoint.json');
+// Overridable so a test never writes to the real one. Not a deployment knob:
+// sync-scope.test.js drives this script for real, and with a fixed path it wrote
+// stub data over the live sharepoint.json and then deleted it. In CI that ran
+// after the compile step, so the deploy was fine and the DELTA CURSOR was gone
+// before it could be cached — every nightly run silently became a full resync.
+const OUT_PATH = process.env.SHAREPOINT_OUT_PATH
+  ? path.resolve(process.env.SHAREPOINT_OUT_PATH)
+  : path.join(REPO_ROOT, 'worker/src/knowledge/sharepoint.json');
 
 const MIN_CHUNK_CHARS = 60;
 
