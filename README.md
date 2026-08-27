@@ -208,6 +208,12 @@ they can see in SharePoint does not exist.
 SharePoint's own libraries (`Site Assets`, `Site Pages`, `Style Library` and
 friends) are skipped, as is anything that is not a document library.
 
+A `Sites.Selected` grant must include **`read`**. A grant of `["write"]` alone
+looks correct in the permissions list and fails every call the sync makes, with
+a 401 that reads like a server fault. Check with
+`GET /sites/{site-id}/permissions`; fix in place with a `PATCH` to that
+permission's id rather than deleting and recreating it.
+
 **The site is therefore the approval boundary.** Anything published anywhere on
 it becomes something the assistant can quote. That is only safe while the site
 is a closed group whose members understand it — point this at a site anyone can
@@ -231,6 +237,11 @@ export GRAPH_CLIENT_ID=...
 export GRAPH_CLIENT_SECRET=...
 export SHAREPOINT_HOSTNAME=vikatai.sharepoint.com
 export SHAREPOINT_SITE_PATH=/sites/VikatGTM
+# Optional but recommended. Resolving a site by hostname:path is a separate
+# Graph operation from reading it, and a Sites.Selected app is not always
+# permitted the former — a 401 that looks exactly like a missing grant.
+# Get it from GET /sites/{hostname}:{path} and the resolution is skipped.
+export SHAREPOINT_SITE_ID='vikatai.sharepoint.com,<guid>,<guid>'
 export SHAREPOINT_LIBRARY='*'            # every library; or name one, e.g. PPTs
 export SHAREPOINT_FOLDER='*'             # every folder; or name one, e.g. Approved
 export SHAREPOINT_FOLDER=Approved        # optional, recommended

@@ -213,3 +213,53 @@ test('a real folder name still restricts', async () => {
   assert.equal(Object.keys(result.files).length, 0);
   assert.equal(result.source.folder, 'Approved');
 });
+
+test('a supplied site id skips path resolution entirely', async () => {
+  // Resolving a site by hostname:path is a separate Graph operation from
+  // reading it, and a Sites.Selected app is not always permitted the former.
+  // The resulting 401 is indistinguishable from a missing grant, so being able
+  // to skip the step removes a whole class of misdiagnosis.
+  const seen = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    seen.push(u);
+    const json = (o) => ({ ok: true, status: 200, json: async () => o, text: async () => JSON.stringify(o) });
+
+    if (u.includes('login.microsoftonline.com')) return json({ access_token: 't', expires_in: 3600 });
+    // One empty library: enough for the script to run to completion, so the
+    // assertion is about which calls it made rather than how it gave up.
+    if (u.endsWith('/drives')) return json({ value: [{ id: 'd1', name: 'Documents', driveType: 'documentLibrary' }] });
+    if (u.includes('/root/delta')) return json({ value: [], '@odata.deltaLink': 'link-d1' });
+    return { ok: false, status: 404, text: async () => 'not found' };
+  };
+
+  Object.assign(process.env, {
+    GRAPH_TENANT_ID: 't',
+    GRAPH_CLIENT_ID: 'c',
+    GRAPH_CLIENT_SECRET: 's',
+    SHAREPOINT_HOSTNAME: 'vikatai.sharepoint.com',
+    SHAREPOINT_SITE_PATH: '/sites/VikatGTM',
+    SHAREPOINT_SITE_ID: 'vikatai.sharepoint.com,aaaa,bbbb',
+  });
+
+  try {
+    fs.rmSync(OUT, { force: true });
+    await import(`${OUT_URL()}?siteid=${process.hrtime.bigint()}`);
+    for (let i = 0; i < 200 && !fs.existsSync(OUT); i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    const resolved = seen.filter((u) => /\/sites\/[^,]+:/.test(u));
+    assert.deepEqual(resolved, [], 'no hostname:path resolution should be attempted');
+    assert.ok(
+      seen.some((u) => u.includes('vikatai.sharepoint.com,aaaa,bbbb/drives')),
+      'the supplied id should be used directly',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.SHAREPOINT_SITE_ID;
+    fs.rmSync(OUT, { force: true });
+  }
+});

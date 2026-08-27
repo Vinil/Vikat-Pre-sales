@@ -31,6 +31,9 @@
  *   SHAREPOINT_HOSTNAME      e.g. vikat.sharepoint.com
  *   SHAREPOINT_SITE_PATH     e.g. /sites/VikatGTM
  * Optional:
+ *   SHAREPOINT_SITE_ID       the composite site id, e.g.
+ *                            "host,guid,guid". Skips path resolution, which
+ *                            a Sites.Selected app is not always allowed.
  *   SHAREPOINT_LIBRARY       read only this library, e.g. "PPTs".
  *                            "*" or "all" — or leaving it off — reads them all.
  *   SHAREPOINT_FOLDER        restrict to one folder within each library, e.g.
@@ -118,6 +121,12 @@ const CONFIG = {
   // entirely. The sentinels exist because GitHub Actions will not save a
   // variable with an empty value, so "unset it" is not always an option —
   // and a setting you can see beats one whose absence you have to infer.
+  // Optional, and worth setting. Resolving a site by hostname:path is a
+  // separate Graph operation from reading the site, and a Sites.Selected app
+  // is not always permitted the former even when it is granted the latter —
+  // which surfaces as a 401 that looks exactly like a missing grant. Given
+  // the id, the sync skips the resolution entirely.
+  siteId: (process.env.SHAREPOINT_SITE_ID || '').trim(),
   library: normaliseScope(process.env.SHAREPOINT_LIBRARY),
   folder: normaliseScope(process.env.SHAREPOINT_FOLDER).replace(/^\/+|\/+$/g, ''),
   // NEVER SYNCED. This is where the assistant files the decks and documents it
@@ -230,8 +239,9 @@ async function main() {
   console.log(`  mode:     ${FULL ? 'full' : 'incremental'}${DRY_RUN ? ' (dry run)' : ''}`);
 
   const token = await getToken(CONFIG);
-  const site = await getSite(token, CONFIG.hostname, CONFIG.sitePath);
-  const allDrives = await listDrives(token, site.id);
+
+  const siteId = CONFIG.siteId || (await getSite(token, CONFIG.hostname, CONFIG.sitePath)).id;
+  const allDrives = await listDrives(token, siteId);
 
   if (allDrives.length === 0) {
     console.error('\nNo document libraries are visible to this app on that site.');
