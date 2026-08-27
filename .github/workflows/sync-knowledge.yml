@@ -68,8 +68,15 @@ jobs:
           GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
           SHAREPOINT_HOSTNAME: ${{ vars.SHAREPOINT_HOSTNAME }}
           SHAREPOINT_SITE_PATH: ${{ vars.SHAREPOINT_SITE_PATH }}
+          SHAREPOINT_SITE_ID: ${{ vars.SHAREPOINT_SITE_ID }}
           SHAREPOINT_LIBRARY: ${{ vars.SHAREPOINT_LIBRARY }}
           SHAREPOINT_FOLDER: ${{ vars.SHAREPOINT_FOLDER }}
+          # Optional overrides. Unset expands to empty and the script's own
+          # default applies, but they are wired through so the configuration
+          # surface here matches the one the script documents — a variable
+          # someone sets and that never arrives is the worst kind of silent.
+          SHAREPOINT_GENERATED_FOLDER: ${{ vars.SHAREPOINT_GENERATED_FOLDER }}
+          SHAREPOINT_MAX_FILE_MB: ${{ vars.SHAREPOINT_MAX_FILE_MB }}
           FULL: ${{ inputs.full && '--full' || '' }}
         run: node scripts/sync-sharepoint.js $FULL
 

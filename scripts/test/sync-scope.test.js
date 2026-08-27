@@ -263,3 +263,34 @@ test('a supplied site id skips path resolution entirely', async () => {
     fs.rmSync(OUT, { force: true });
   }
 });
+
+test('the workflow passes every variable the sync reads', () => {
+  // Twice now a config option has been added to the script and not to the
+  // workflow, so the variable someone dutifully set never reached the process
+  // and the run failed exactly as it had before. The script's own env reads
+  // are the source of truth; the workflow has to keep up with them.
+  const script = fs.readFileSync(SYNC, 'utf8');
+  const workflow = fs.readFileSync(path.join(REPO, '.github/workflows/sync-knowledge.yml'), 'utf8');
+
+  // Two forms: direct reads, and the requireEnv() helper that the mandatory
+  // ones go through. Missing the second is how this check first passed while
+  // proving nothing — every required variable was invisible to it.
+  const read = new Set([
+    ...[...script.matchAll(/process\.env\.([A-Z][A-Z0-9_]+)/g)].map((m) => m[1]),
+    ...[...script.matchAll(/requireEnv\(['"]([A-Z][A-Z0-9_]+)['"]\)/g)].map((m) => m[1]),
+  ]);
+  // Set by the workflow's own step, not by configuration.
+  read.delete('FULL');
+
+  assert.ok(read.size >= 9, `expected the script's full config surface, found ${read.size}`);
+
+  // A plain substring: the env block writes each as "NAME: ${{ vars.NAME }}",
+  // and a regex here has its own escaping to get wrong.
+  const missing = [...read].filter((name) => !workflow.includes(`${name}:`));
+
+  assert.deepEqual(
+    missing,
+    [],
+    `sync-knowledge.yml does not pass: ${missing.join(', ')} — the variable would be silently empty`,
+  );
+});
