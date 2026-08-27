@@ -208,11 +208,16 @@ they can see in SharePoint does not exist.
 SharePoint's own libraries (`Site Assets`, `Site Pages`, `Style Library` and
 friends) are skipped, as is anything that is not a document library.
 
-A `Sites.Selected` grant must include **`read`**. A grant of `["write"]` alone
-looks correct in the permissions list and fails every call the sync makes, with
-a 401 that reads like a server fault. Check with
-`GET /sites/{site-id}/permissions`; fix in place with a `PATCH` to that
-permission's id rather than deleting and recreating it.
+**Set `SHAREPOINT_SITE_ID`.** A `Sites.Selected` app is granted a specific
+site, and addressing that site by `hostname:/path` is a *different* Graph
+operation from reading it — one the grant does not cover. The result is a 401
+carrying `generalException` on the very first call, which reads like a server
+fault and is indistinguishable from having no grant at all. Given the composite
+id, the sync addresses the site directly and the resolution never happens.
+
+The roles on the grant are cumulative, so `["write"]` alone is correct and
+includes read — Graph normalises `["read","write"]` back down to `["write"]`.
+A grant that looks like that is not your problem.
 
 **The site is therefore the approval boundary.** Anything published anywhere on
 it becomes something the assistant can quote. That is only safe while the site

@@ -68,11 +68,24 @@ function explainGraphFailure(status, body, url) {
   // SharePoint site — so take the last one, not the first.
   const segments = [...String(url).matchAll(/\/sites\/([^/?]+)/g)];
   const site = segments.at(-1)?.[1]?.replace(/:$/, '') || 'this site';
+  // Two causes, and the second is the one that looks like the first. Name it
+  // in order of likelihood for someone who has already checked the obvious.
+  if (/\/sites\/[^/,]+:/.test(url)) {
+    return (
+      `Addressing ${site} by hostname and path, which a Sites.Selected app is ` +
+      'granted the site but not the lookup. Set SHAREPOINT_SITE_ID to the ' +
+      'composite id ("host,guid,guid") and this call goes away. If that is ' +
+      'already set, check GET /sites/{site-id}/permissions for a grant to ' +
+      'this app. See README "SharePoint sync".'
+    );
+  }
+
   return (
-    `The app authenticated but has no permission on ${site}. Sites.Selected ` +
-    'grants nothing on its own — each site needs its own grant. Check with ' +
+    `The app has no permission on ${site}. Sites.Selected grants nothing on ` +
+    'its own — each site needs its own grant. Check with ' +
     'GET /sites/{site-id}/permissions in Graph Explorer; an empty list means ' +
-    'the grant never landed. See README "SharePoint sync".'
+    'the grant never landed. Note that roles are cumulative, so ["write"] ' +
+    'alone is correct and includes read.'
   );
 }
 

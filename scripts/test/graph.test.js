@@ -279,8 +279,10 @@ test('a Sites.Selected site with no grant is explained, not blamed on the token'
     await assert.rejects(
       getSite('token', 'vikatai.sharepoint.com', '/sites/VikatGTM'),
       (err) => {
-        assert.match(err.message, /no permission on VikatGTM/);
-        assert.match(err.message, /Sites\.Selected grants nothing on its own/);
+        // Addressed by hostname:path, so the message must name the lookup
+        // rather than sending someone back to a grant that is already correct.
+        assert.match(err.message, /SHAREPOINT_SITE_ID/);
+        assert.match(err.message, /VikatGTM/);
         assert.match(err.message, /spException/, 'the original error survives');
         return true;
       },
