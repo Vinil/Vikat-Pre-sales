@@ -110,6 +110,11 @@ INTERNAL_HELP_CHANNEL = "#sales-help"
 # SHAREPOINT_GENERATED_FOLDER must stay OUTSIDE the sync's scope — see the
 # note in src/config.js. scripts/sync-sharepoint.js skips the same folder, and
 # a test fails if the two defaults drift apart.
+# The composite site id, so filing never has to look the site up by path —
+# a Sites.Selected grant does not cover that lookup. An identifier, not a
+# credential: useless without the Graph secrets, and the hostname and path
+# below are already here.
+SHAREPOINT_SITE_ID = "vikatai.sharepoint.com,47a8760a-abf7-4720-a1f0-cc069fd56f9e,1b306289-c9cc-49f9-8056-c497c59d1bf5"
 SHAREPOINT_HOSTNAME = "vikatai.sharepoint.com"
 SHAREPOINT_SITE_PATH = "/sites/VikatGTM"
 SHAREPOINT_LIBRARY = "Documents"

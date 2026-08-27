@@ -33,8 +33,8 @@ function graphConfigured(env, cfg) {
     env.GRAPH_TENANT_ID &&
       env.GRAPH_CLIENT_ID &&
       env.GRAPH_CLIENT_SECRET &&
-      cfg.SHAREPOINT_HOSTNAME &&
-      cfg.SHAREPOINT_SITE_PATH,
+      // Either way of naming the site will do.
+      (cfg.SHAREPOINT_SITE_ID || (cfg.SHAREPOINT_HOSTNAME && cfg.SHAREPOINT_SITE_PATH)),
   );
 }
 
@@ -85,11 +85,15 @@ async function graph(token, path) {
 let driveCache = null;
 
 async function resolveDrive(token, cfg) {
-  const key = `${cfg.SHAREPOINT_HOSTNAME}${cfg.SHAREPOINT_SITE_PATH}/${cfg.SHAREPOINT_LIBRARY}`;
+  const key = `${cfg.SHAREPOINT_SITE_ID || `${cfg.SHAREPOINT_HOSTNAME}${cfg.SHAREPOINT_SITE_PATH}`}/${cfg.SHAREPOINT_LIBRARY}`;
   if (driveCache && driveCache.key === key) return driveCache.id;
 
-  const site = await graph(token, `/sites/${cfg.SHAREPOINT_HOSTNAME}:${cfg.SHAREPOINT_SITE_PATH}`);
-  const drives = await graph(token, `/sites/${site.id}/drives`);
+  // A configured id skips the lookup entirely — see SHAREPOINT_SITE_ID in
+  // config.js for why that is not merely an optimisation.
+  const siteId =
+    cfg.SHAREPOINT_SITE_ID ||
+    (await graph(token, `/sites/${cfg.SHAREPOINT_HOSTNAME}:${cfg.SHAREPOINT_SITE_PATH}`)).id;
+  const drives = await graph(token, `/sites/${siteId}/drives`);
 
   const drive = (drives.value || []).find((d) => d.name === cfg.SHAREPOINT_LIBRARY);
   if (!drive) {
@@ -172,6 +176,7 @@ export function documentStoreStatus(env, cfg) {
   return {
     configured: graphConfigured(env, cfg),
     site: cfg.SHAREPOINT_HOSTNAME ? `${cfg.SHAREPOINT_HOSTNAME}${cfg.SHAREPOINT_SITE_PATH}` : null,
+    addressedById: Boolean(cfg.SHAREPOINT_SITE_ID),
     library: cfg.SHAREPOINT_LIBRARY,
     folder: cfg.SHAREPOINT_GENERATED_FOLDER,
   };

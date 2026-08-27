@@ -604,3 +604,62 @@ test('markdown that parses to nothing is refused, not rendered empty', () => {
   assert.ok(!r.ok);
   assert.match(r.error, /section/i);
 });
+
+test('a configured site id means filing never looks the site up by path', async () => {
+  // The call that would have broken this on day one. GET /sites/{host}:/{path}
+  // is a separate operation a Sites.Selected grant does not cover, so it
+  // answers 401 generalException — indistinguishable from having no grant, and
+  // it cost four rounds of wrong diagnosis when the SYNC hit it. documentStore
+  // carried the identical call, so filing would have failed the moment the
+  // Graph secrets were set. And it fails soft: the rep still gets their
+  // download and nothing anywhere says why nothing was archived.
+  resetCaches();
+  const { cfg } = setup();
+  cfg.SHAREPOINT_SITE_ID = 'vikatai.sharepoint.com,site-guid,web-guid';
+
+  const stub = graphStub();
+  const r = await withFetch(stub, () => deliverDocument(FILE, GRAPH_ENV, cfg));
+
+  assert.equal(r.delivered, true);
+
+  const byPath = stub.calls.filter((c) => /\/sites\/[^/]+:/.test(c.url));
+  assert.deepEqual(
+    byPath.map((c) => c.url),
+    [],
+    'filing must not resolve the site by path when an id is configured',
+  );
+  assert.ok(
+    stub.calls.some((c) => c.url.includes(`/sites/${cfg.SHAREPOINT_SITE_ID}/drives`)),
+    'it should go straight to the drives on the configured id',
+  );
+});
+
+test('without a site id it still works, by path', async () => {
+  // The fallback has to keep working: a tenant that grants Sites.ReadWrite.All
+  // needs no id, and demanding one would be a setup step for nothing.
+  resetCaches();
+  const { cfg } = setup();
+  cfg.SHAREPOINT_SITE_ID = '';
+
+  const stub = graphStub();
+  const r = await withFetch(stub, () => deliverDocument(FILE, GRAPH_ENV, cfg));
+
+  assert.equal(r.delivered, true);
+  assert.ok(
+    stub.calls.some((c) => c.url.includes('/sites/vikatai.sharepoint.com:')),
+    'the path lookup is the documented fallback',
+  );
+});
+
+test('a site id alone is enough to count as configured', async () => {
+  // graphConfigured used to require hostname AND path. An id names the site on
+  // its own, and refusing to file because a redundant field is blank would be
+  // the panel's old "not configured" lie in a new place.
+  const { cfg } = setup();
+  cfg.SHAREPOINT_SITE_ID = 'host,site,web';
+  cfg.SHAREPOINT_HOSTNAME = '';
+  cfg.SHAREPOINT_SITE_PATH = '';
+
+  assert.equal(documentStoreStatus(GRAPH_ENV, cfg).configured, true);
+  assert.equal(documentStoreStatus({}, cfg).configured, false, 'credentials are still required');
+});
