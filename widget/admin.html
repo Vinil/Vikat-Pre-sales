@@ -169,6 +169,13 @@
   .sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
   @media (prefers-reduced-motion: reduce) { * { transition-duration: .001ms !important; } }
+  /* Read-only configuration, shown as facts rather than editable fields. */
+  dl.kv { margin: 4px 0 0; display: grid; gap: 1px; background: var(--w08); border: 1px solid var(--w08); border-radius: 9px; overflow: hidden; }
+  dl.kv > div { display: grid; grid-template-columns: minmax(140px, 34%) 1fr; gap: 12px; background: var(--bg); padding: 10px 12px; }
+  dl.kv dt { margin: 0; font-size: 12px; color: var(--w40); }
+  dl.kv dd { margin: 0; font-size: 13px; word-break: break-word; }
+  dl.kv dd.unset { color: var(--w40); font-style: italic; }
+  @media (max-width: 560px) { dl.kv > div { grid-template-columns: 1fr; gap: 2px; } }
 </style>
 </head>
 <body>
@@ -255,43 +262,29 @@
     <div class="card">
       <h2>Sync scope</h2>
       <p class="sub">
-        Where the nightly sync reads from. The document library is the approval boundary —
-        publishing a file there is what makes it visible to the assistant. Changes apply on the next sync.
+        Where the nightly sync reads from. This is read-only here: the sync runs in GitHub Actions,
+        not in this Worker, so it reads its scope from repository variables. What is shown below is
+        the scope this deployment is actually running with.
       </p>
 
-      <form id="sp-form">
-        <div class="row row-2">
-          <div>
-            <label for="sp-hostname">SharePoint hostname</label>
-            <input type="text" id="sp-hostname" placeholder="vikat.sharepoint.com">
-          </div>
-          <div>
-            <label for="sp-sitepath">Site path</label>
-            <input type="text" id="sp-sitepath" placeholder="/sites/Sales">
-          </div>
-        </div>
-        <div class="row row-2">
-          <div>
-            <label for="sp-library">Document library <span aria-hidden="true" style="color:var(--red)">*</span></label>
-            <input type="text" id="sp-library" required placeholder="Sales Enablement">
-            <p class="hint">Required. Without it the sync refuses to run rather than guessing a scope.</p>
-          </div>
-          <div>
-            <label for="sp-folder">Folder (optional)</label>
-            <input type="text" id="sp-folder" placeholder="Approved">
-            <p class="hint">Narrows further. Recommended.</p>
-          </div>
-        </div>
-        <div class="actions">
-          <button type="submit" class="primary">Save scope</button>
-          <span id="sp-meta" class="hint" style="margin:0"></span>
-        </div>
-      </form>
+      <dl class="kv" id="sp-scope">
+        <div><dt>SharePoint hostname</dt><dd id="sp-hostname">—</dd></div>
+        <div><dt>Site path</dt><dd id="sp-sitepath">—</dd></div>
+        <div><dt>Document library</dt><dd id="sp-library">—</dd></div>
+        <div><dt>Generated files go to</dt><dd id="sp-genfolder">—</dd></div>
+      </dl>
+
+      <p class="hint" id="sp-scope-note"></p>
+      <p class="hint" id="sp-scope-where"></p>
     </div>
 
     <div class="card">
-      <h2>Last sync</h2>
-      <div id="sp-status" class="empty">No sync has reported yet.</div>
+      <h2>Indexed knowledge</h2>
+      <p class="sub">
+        What this deployment actually knows. Compiled into the Worker when the sync last ran and
+        deployed — which is a more useful answer than whether a job elsewhere reported success.
+      </p>
+      <div id="sp-status" class="empty">Loading…</div>
     </div>
   </section>
 

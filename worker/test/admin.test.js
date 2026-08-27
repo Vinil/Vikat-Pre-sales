@@ -213,23 +213,75 @@ test('deleting a missing entry is a 404, not a silent success', async () => {
 
 // --- SharePoint settings --------------------------------------------------
 
-test('SharePoint scope round-trips', async () => {
+test('the scope is reported from the running config, not from KV', async () => {
+  // It used to round-trip through KV, which read back convincingly and did
+  // nothing: the sync runs in GitHub Actions off SHAREPOINT_* environment
+  // variables and has never read that key. What the panel must show is the
+  // scope the deployment is ACTUALLY running with.
+  const { cfg, storage } = setup();
+  cfg.SHAREPOINT_HOSTNAME = 'vikatai.sharepoint.com';
+  cfg.SHAREPOINT_SITE_PATH = '/sites/VikatGTM';
+  cfg.SHAREPOINT_LIBRARY = '';
+  const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
+
+  const read = await (await call('/admin/sharepoint', 'GET', ctx)).json();
+
+  assert.equal(read.scope.hostname, 'vikatai.sharepoint.com');
+  assert.equal(read.scope.sitePath, '/sites/VikatGTM');
+  assert.match(read.scope.managedBy, /GitHub Actions/i, 'and say where it is actually set');
+  assert.match(
+    read.scope.note,
+    /every document library/i,
+    'an unset library crawls the whole site now; the panel must not still call it required',
+  );
+});
+
+test('saving a scope is refused rather than silently ignored', async () => {
+  // The failure mode being closed: an admin corrects the library here, gets
+  // "Applies on the next sync run", and watches the next sync ignore them.
   const { cfg, storage } = setup();
   const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
 
-  const saved = await (await call('/admin/sharepoint', 'PUT', ctx, {
+  const res = await call('/admin/sharepoint', 'PUT', ctx, {
     hostname: 'vikat.sharepoint.com',
     sitePath: '/sites/Sales',
     library: 'Sales Enablement',
-    folder: '/Approved/',
-  })).json();
+  });
 
-  assert.equal(saved.settings.library, 'Sales Enablement');
-  assert.equal(saved.settings.folder, 'Approved', 'surrounding slashes are trimmed');
-  assert.equal(saved.settings.updatedBy, ADMIN.email);
+  assert.equal(res.status, 409, 'well-formed, but impossible in this deployment');
+  const body = await res.json();
+  assert.match(body.error, /not editable here/i);
+  assert.match(body.detail, /SHAREPOINT_LIBRARY/, 'and name the variable to change');
+  assert.match(body.detail, /Sync knowledge base/, 'and the workflow to re-run');
+});
+
+test('last sync reports what this bundle knows, not a job status', async () => {
+  // The old panel read a KV key nothing writes, so "No sync has reported yet"
+  // was permanent — shown while the sync was working perfectly.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
 
   const read = await (await call('/admin/sharepoint', 'GET', ctx)).json();
-  assert.equal(read.settings.sitePath, '/sites/Sales');
+
+  assert.ok(read.lastSync, 'there is always something to report');
+  assert.equal(typeof read.lastSync.totalChunks, 'number');
+  assert.ok(read.lastSync.totalChunks > 0, 'the deployed bundle always has a knowledge base');
+  assert.equal(typeof read.lastSync.collateralDocuments, 'number');
+});
+
+test('the two credential sets are reported separately', async () => {
+  // One banner used to cover both and got it backwards: it read a config key
+  // that exists nowhere, so it always said "not configured", and then blamed
+  // the sync — which runs in CI on different secrets entirely and was fine.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
+
+  const read = await (await call('/admin/sharepoint', 'GET', ctx)).json();
+
+  assert.equal(typeof read.credentials.documentFiling.configured, 'boolean', 'the Worker can see its own');
+  assert.equal(read.credentials.sync.configured, null, 'and must not guess at the ones it cannot see');
+  assert.match(read.credentials.documentFiling.affects, /generated/i);
+  assert.match(read.credentials.sync.affects, /CI/);
 });
 
 test('the SharePoint credential is never returned, only its status', async () => {
@@ -239,21 +291,6 @@ test('the SharePoint credential is never returned, only its status', async () =>
   const body = await (await call('/admin/sharepoint', 'GET', ctx)).text();
   assert.ok(!body.includes('super-secret-value'), 'a secret must never cross this boundary');
   assert.match(body, /configured/);
-});
-
-test('SharePoint scope is validated', async () => {
-  const { cfg, storage } = setup();
-  const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
-
-  for (const [body, pattern] of [
-    [{ hostname: 'evil.example.com', library: 'L' }, /sharepoint\.com/i],
-    [{ sitePath: 'sites/Sales', library: 'L' }, /start with a slash/i],
-    [{ hostname: 'vikat.sharepoint.com' }, /document library is required/i],
-  ]) {
-    const res = await call('/admin/sharepoint', 'PUT', ctx, body);
-    assert.equal(res.status, 400, JSON.stringify(body));
-    assert.match((await res.json()).error, pattern);
-  }
 });
 
 // --- Users ----------------------------------------------------------------

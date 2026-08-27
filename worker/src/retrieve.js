@@ -12,7 +12,7 @@
  * the Tier B swap a single-file change.
  */
 
-import { KNOWLEDGE, KNOWLEDGE_TOKENS } from './knowledge.js';
+import { KNOWLEDGE, KNOWLEDGE_TOKENS, KNOWLEDGE_META } from './knowledge.js';
 
 /**
  * @typedef {object} SessionContext
@@ -93,12 +93,21 @@ export async function retrieve(query, sessionContext = {}) {
  * Whether the compiled knowledge base has outgrown full injection.
  * Surfaced by GET /health so the B4 trigger is observable, not guesswork.
  *
- * @returns {{ tokens: number, chunks: number, shouldUseVectorSearch: boolean }}
+ * The SharePoint fields describe the corpus this bundle was BUILT with, which
+ * is the only honest answer to "when did the sync last run" that the Worker
+ * can give: the sync runs in CI and cannot reach back here. It is also the
+ * more useful one — it reports what the assistant actually knows, rather than
+ * what a job elsewhere claimed to have done.
+ *
+ * @returns {{ tokens: number, chunks: number, shouldUseVectorSearch: boolean,
+ *             sharePointChunks: number, sharePointSyncedAt: string|null }}
  */
 export function retrievalStatus() {
   return {
     tokens: KNOWLEDGE_TOKENS,
     chunks: KNOWLEDGE.length,
     shouldUseVectorSearch: KNOWLEDGE_TOKENS > 50000,
+    sharePointChunks: KNOWLEDGE_META.sharePointChunks || 0,
+    sharePointSyncedAt: KNOWLEDGE_META.sharePointSyncedAt || null,
   };
 }

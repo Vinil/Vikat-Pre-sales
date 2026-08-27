@@ -14,6 +14,9 @@
  */
 
 import { ROLES, resolveRole, wouldLeaveNoAdmin } from './roles.js';
+import { documentStoreStatus } from './documentStore.js';
+import { retrievalStatus } from './retrieve.js';
+import { collateralCount } from './collateral.js';
 
 const MAX_SECTION_CHARS = 200;
 const MAX_CONTENT_CHARS = 20000;
@@ -123,28 +126,66 @@ async function handleKnowledge(request, url, ctx) {
  * editable here, and takes effect on the next sync.
  */
 async function handleSharePoint(request, url, ctx) {
-  const { storage, user, cors, cfg } = ctx;
+  const { storage, user, cors, cfg, env } = ctx;
 
   if (request.method === 'GET') {
-    const settings = (await storage.getSetting('sharepoint')) || {};
+    // Everything below is reported from something that is actually true.
+    //
+    // What this endpoint used to return was, on three counts, false by
+    // construction. It read cfg.SHAREPOINT_CREDENTIALS_CONFIGURED, which is
+    // defined in no config file and is therefore always undefined, so the
+    // panel showed "not configured" no matter what was deployed. It read a KV
+    // key, sharepoint_status, that nothing has ever written, so "no sync has
+    // reported yet" was permanent. And it offered an editable scope that the
+    // sync cannot read: the sync runs in CI from environment variables, so a
+    // value saved here changed nothing while looking like it had.
+    //
+    // A dashboard that is confidently wrong is worse than no dashboard. It was
+    // read while the sync was working perfectly and said the sync would not
+    // run.
+    const store = documentStoreStatus(env, cfg);
+    const knowledge = retrievalStatus();
+
     return json(
       {
-        settings: {
-          hostname: settings.hostname || '',
-          sitePath: settings.sitePath || '',
-          library: settings.library || '',
-          folder: settings.folder || '',
-          updatedBy: settings.updatedBy || null,
-          updatedAt: settings.updatedAt || null,
+        // The scope the DEPLOYED WORKER is running with, which is the same
+        // configuration the sync workflow passes. Not editable, because the
+        // process that reads it does not run here.
+        scope: {
+          hostname: cfg.SHAREPOINT_HOSTNAME || '',
+          sitePath: cfg.SHAREPOINT_SITE_PATH || '',
+          library: cfg.SHAREPOINT_LIBRARY || '',
+          generatedFolder: cfg.SHAREPOINT_GENERATED_FOLDER || '',
+          managedBy: 'GitHub Actions repository variables (SHAREPOINT_*)',
+          note: 'An unset library means every document library on the site is crawled.',
         },
-        // Reported, never returned. The panel shows whether the credential is
-        // configured; it cannot display or exfiltrate it.
+        // Two different credential sets, which the old banner conflated into
+        // one sentence and then got backwards.
         credentials: {
-          configured: Boolean(cfg.SHAREPOINT_CREDENTIALS_CONFIGURED),
-          managedBy: 'GitHub Actions secrets (GRAPH_CLIENT_SECRET)',
-          note: 'Credentials are intentionally not editable here. See README, "SharePoint sync".',
+          // The Worker's own Graph credentials, used to file a generated deck
+          // back into SharePoint. This one the Worker can actually see.
+          documentFiling: {
+            configured: store.configured,
+            managedBy: 'Worker secrets (wrangler secret put GRAPH_CLIENT_SECRET)',
+            affects: 'Filing generated decks and PDFs back into SharePoint. The rep still gets the download either way.',
+          },
+          // The sync's credentials live in CI and are invisible from here, so
+          // the honest report is "cannot tell", not "not configured".
+          sync: {
+            configured: null,
+            managedBy: 'GitHub Actions secrets (GRAPH_CLIENT_SECRET)',
+            affects: 'The nightly knowledge sync, which runs in CI. This Worker cannot see those secrets, so their state is reported by the workflow run, not here.',
+          },
         },
-        lastSync: (await storage.getSetting('sharepoint_status')) || null,
+        // What the deployed bundle actually knows — compiled in at build time
+        // by scripts/build-knowledge.js. This is a better answer than a CI job
+        // status: it describes the knowledge this Worker is serving right now.
+        lastSync: {
+          syncedAt: knowledge.sharePointSyncedAt,
+          sharePointChunks: knowledge.sharePointChunks,
+          collateralDocuments: collateralCount(),
+          totalChunks: knowledge.chunks,
+        },
       },
       200,
       cors,
@@ -152,38 +193,28 @@ async function handleSharePoint(request, url, ctx) {
   }
 
   if (request.method === 'PUT') {
-    let body;
-    try {
-      body = await request.json();
-    } catch {
-      return json({ error: 'Invalid JSON.' }, 400, cors);
-    }
-
-    const hostname = clean(body.hostname).toLowerCase();
-    const sitePath = clean(body.sitePath);
-    const library = clean(body.library);
-    const folder = clean(body.folder);
-
-    if (hostname && !/^[a-z0-9.-]+\.sharepoint\.com$/.test(hostname)) {
-      return json({ error: 'Hostname should look like yourtenant.sharepoint.com.' }, 400, cors);
-    }
-    if (sitePath && !sitePath.startsWith('/')) {
-      return json({ error: 'Site path should start with a slash, e.g. /sites/Sales.' }, 400, cors);
-    }
-    if (!library) {
-      // The library is the approval boundary. Without one, the sync has no
-      // safe default and refuses to run — so an empty value here is a
-      // misconfiguration, not a "sync everything" instruction.
-      return json({ error: 'A document library is required. It is the approval boundary for what the agent can read.' }, 400, cors);
-    }
-
-    const settings = await storage.saveSetting(
-      'sharepoint',
-      { hostname, sitePath, library, folder: folder.replace(/^\/+|\/+$/g, '') },
-      user.email,
+    // The scope is not editable here, and pretending otherwise was the bug.
+    //
+    // This used to validate a hostname, a site path and a library, save them
+    // to KV, and answer "Applies on the next sync run." It does not: the sync
+    // runs in GitHub Actions and reads SHAREPOINT_* environment variables, so
+    // nothing has ever read that KV key. Someone correcting a scope here would
+    // have watched the next sync ignore them, with no error to explain it.
+    //
+    // 409 rather than 405: the request is well-formed and the route exists,
+    // it is the state of the world that makes it impossible.
+    return json(
+      {
+        error: 'The sync scope is not editable here.',
+        detail:
+          'The nightly sync runs in GitHub Actions and reads SHAREPOINT_HOSTNAME, ' +
+          'SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY and SHAREPOINT_FOLDER from the ' +
+          'repository variables. Change them there (Settings → Secrets and variables → ' +
+          'Actions → Variables) and re-run the "Sync knowledge base" workflow.',
+      },
+      409,
+      cors,
     );
-
-    return json({ settings, note: 'Applies on the next sync run.' }, 200, cors);
   }
 
   return json({ error: 'Method not allowed.' }, 405, cors);

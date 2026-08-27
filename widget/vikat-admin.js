@@ -242,70 +242,70 @@
   // --- SharePoint ----------------------------------------------------------
 
   function renderSharePoint(data) {
-    var s = data.settings || {};
-    $('#sp-hostname').value = s.hostname || '';
-    $('#sp-sitepath').value = s.sitePath || '';
-    $('#sp-library').value = s.library || '';
-    $('#sp-folder').value = s.folder || '';
+    var scope = data.scope || {};
 
-    $('#sp-meta').textContent = s.updatedAt
-      ? 'Last changed ' + fmtDate(s.updatedAt) + ' by ' + s.updatedBy
-      : 'Never configured.';
-
-    var cred = data.credentials || {};
-    var banner = $('#sp-credentials');
-    banner.textContent = '';
-    banner.className = 'banner ' + (cred.configured ? 'banner-ok' : 'banner-warn');
-
-    var strong = el('strong', null, cred.configured
-      ? 'Graph credentials are configured.'
-      : 'Graph credentials are not configured — the sync will not run.');
-    banner.appendChild(strong);
-    banner.appendChild(document.createTextNode(' They are held in ' + (cred.managedBy || 'secret storage') + ' and cannot be viewed or changed here. '));
-    banner.appendChild(document.createTextNode(
-      'That is deliberate: a client secret stored where a web form can read it back is a credential worth stealing, ' +
-      'and the sync runs in CI rather than in this Worker, so a value typed here would never reach it.',
-    ));
-
-    var last = data.lastSync;
-    var status = $('#sp-status');
-    status.textContent = '';
-
-    if (!last) {
-      status.className = 'empty';
-      status.textContent = 'No sync has reported yet.';
-      return;
+    function put(id, value) {
+      var node = $(id);
+      node.textContent = value || 'not set';
+      node.className = value ? '' : 'unset';
     }
 
+    put('#sp-hostname', scope.hostname);
+    put('#sp-sitepath', scope.sitePath);
+    put('#sp-library', scope.library);
+    put('#sp-genfolder', scope.generatedFolder);
+
+    $('#sp-scope-note').textContent = scope.note || '';
+    $('#sp-scope-where').textContent = scope.managedBy
+      ? 'Configured in ' + scope.managedBy + '. Change it there, then re-run the "Sync knowledge base" workflow.'
+      : '';
+
+    // Two credential sets, reported separately. Conflating them is how this
+    // banner came to announce "the sync will not run" while the sync ran fine.
+    var cred = data.credentials || {};
+    var filing = cred.documentFiling || {};
+    var banner = $('#sp-credentials');
+    banner.textContent = '';
+    banner.className = 'banner ' + (filing.configured ? 'banner-ok' : 'banner-warn');
+
+    banner.appendChild(el('strong', null, filing.configured
+      ? 'Document filing is configured.'
+      : 'Document filing is not configured.'));
+    banner.appendChild(document.createTextNode(' ' + (filing.affects || '') + ' '));
+    banner.appendChild(document.createTextNode(
+      'The credential lives in ' + (filing.managedBy || 'secret storage') +
+      ' and cannot be viewed or changed here: a client secret stored where a web form can read it ' +
+      'back is a credential worth stealing.'));
+
+    var sync = cred.sync || {};
+    if (sync.affects) {
+      var note = el('p', 'hint', 'Separately: ' + sync.affects);
+      note.style.marginTop = '8px';
+      banner.appendChild(note);
+    }
+
+    var last = data.lastSync || {};
+    var status = $('#sp-status');
+    status.textContent = '';
     status.className = '';
-    status.appendChild(el('div', 'item-title', last.ok ? 'Succeeded' : 'Failed'));
-    status.appendChild(el('div', 'item-meta',
-      fmtDate(last.updatedAt) + ' · ' + (last.chunks != null ? last.chunks + ' chunks' : 'no chunk count')));
-    if (last.message) status.appendChild(el('div', 'item-body', last.message));
+
+    var headline = last.sharePointChunks
+      ? last.collateralDocuments + ' document(s) indexed from SharePoint'
+      : 'No SharePoint material in this build';
+    status.appendChild(el('div', 'item-title', headline));
+
+    var parts = [];
+    if (last.syncedAt) parts.push('synced ' + fmtDate(last.syncedAt));
+    parts.push(last.totalChunks + ' chunks total');
+    if (last.sharePointChunks) parts.push(last.sharePointChunks + ' from SharePoint');
+    status.appendChild(el('div', 'item-meta', parts.join(' · ')));
+
+    if (!last.sharePointChunks) {
+      status.appendChild(el('div', 'item-body',
+        'The assistant is answering from the public site pages and the curated FAQ only. ' +
+        'If that is unexpected, check the most recent "Sync knowledge base" workflow run.'));
+    }
   }
-
-  $('#sp-form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    api('/admin/sharepoint', {
-      method: 'PUT',
-      body: {
-        hostname: $('#sp-hostname').value,
-        sitePath: $('#sp-sitepath').value,
-        library: $('#sp-library').value,
-        folder: $('#sp-folder').value,
-      },
-    })
-      .then(function (r) {
-        toast(r.note || 'Saved.');
-        loadSharePoint();
-      })
-      .catch(function () {});
-  });
-
-  function loadSharePoint() {
-    return api('/admin/sharepoint').then(renderSharePoint).catch(function () {});
-  }
-
   // --- Users ---------------------------------------------------------------
 
   var ROLE_LABEL = { admin: 'Admin', rep: 'Rep', denied: 'Denied' };
