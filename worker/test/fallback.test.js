@@ -42,7 +42,13 @@ function schemaError() {
  * Rejects any request carrying tools, accepts one without — which is exactly
  * the condition that broke production.
  */
-function stubApi({ rejectWithTools = true, rejectWhen, onRequest } = {}) {
+function stubApi({
+  rejectWithTools = true,
+  rejectWhen,
+  onRequest,
+  stopReason = 'end_turn',
+  text = 'Answered without tools.',
+} = {}) {
   const calls = [];
 
   return async (url, init) => {
@@ -66,7 +72,8 @@ function stubApi({ rejectWithTools = true, rejectWhen, onRequest } = {}) {
       };
     }
 
-    // A minimal SSE stream carrying one sentence.
+    // A minimal SSE stream. `text: ''` emits no delta at all, which is the
+    // real shape of a turn that hit max_tokens while still thinking.
     const sse = [
       'event: message_start',
       'data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}',
@@ -74,14 +81,18 @@ function stubApi({ rejectWithTools = true, rejectWhen, onRequest } = {}) {
       'event: content_block_start',
       'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
       '',
-      'event: content_block_delta',
-      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Answered without tools."}}',
-      '',
+      ...(text
+        ? [
+            'event: content_block_delta',
+            `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":${JSON.stringify(text)}}}`,
+            '',
+          ]
+        : []),
       'event: content_block_stop',
       'data: {"type":"content_block_stop","index":0}',
       '',
       'event: message_delta',
-      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":4}}',
+      `data: {"type":"message_delta","delta":{"stop_reason":${JSON.stringify(stopReason)},"stop_sequence":null},"usage":{"output_tokens":4}}`,
       '',
       'event: message_stop',
       'data: {"type":"message_stop"}',
@@ -357,4 +368,39 @@ test('the prompt is rebuilt only when the tools are actually dropped', async () 
   for (const [i, system] of sent.entries()) {
     assert.match(system, /find_collateral/, `attempt ${i + 1} kept its tools and must keep the roster`);
   }
+});
+
+// --- a turn must never end in silence -------------------------------------
+
+test('a truncated turn says so instead of rendering nothing', async () => {
+  // What the rep actually saw: they asked for a deck, and got their own
+  // message followed by nothing. The model had spent the whole token budget
+  // thinking, stopped at max_tokens before emitting a character, and the
+  // widget drops its typing indicator on 'done' and renders no bubble. Silence
+  // is indistinguishable from a hang, so they asked again — and the second
+  // turn promised "On it — building it now" and also stopped.
+  const stub = stubApi({ rejectWithTools: false, stopReason: 'max_tokens', text: '' });
+  const { status, text } = await chat(stub);
+
+  assert.equal(status, 200);
+  assert.match(text, /output_truncated/, 'the truncation must reach the client');
+  assert.match(text, /smaller pieces/, 'and tell the rep what to do about it');
+});
+
+test('a truncated turn that DID produce text warns the text is partial', async () => {
+  // A half-written answer that stops mid-sentence reads as a complete one to
+  // someone scanning it between calls, which is worse than no answer.
+  const stub = stubApi({ rejectWithTools: false, stopReason: 'max_tokens', text: 'The three things to say are' });
+  const { text } = await chat(stub);
+
+  assert.match(text, /The three things to say are/, 'the partial answer is still shown');
+  assert.match(text, /cut off at the length limit/, 'and flagged as incomplete');
+});
+
+test('an empty turn that was not truncated still says something', async () => {
+  const stub = stubApi({ rejectWithTools: false, text: '' });
+  const { text } = await chat(stub);
+
+  assert.match(text, /empty_response/);
+  assert.match(text, /returned nothing/);
 });

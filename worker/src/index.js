@@ -371,12 +371,10 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
        * gets "Something went wrong" instead of an answer. One loop, both paths.
        */
       const runTurn = async (convo) => {
+        const textBefore = fullText;
         for (;;) {
           try {
             const stream = client.messages.stream(buildRequest(convo));
-            // Deltas already sent cannot be unsent, but a refusal lands before
-            // any text arrives, so resetting here keeps the accumulator honest.
-            fullText = '';
             stream.on('text', (delta) => {
               fullText += delta;
               send('text', { text: delta });
@@ -384,6 +382,12 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             return await stream.finalMessage();
           } catch (err) {
             if (!degrade(err)) throw err;
+            // Rewind to where this ATTEMPT started, not to empty. runTurn is
+            // called once per tool-loop iteration, so clearing outright threw
+            // away the text of every earlier iteration — the "let me look"
+            // before a tool call vanished from the conversation log, which is
+            // the record the whole thing is supposed to be reviewable from.
+            fullText = textBefore;
           }
         }
       };
@@ -392,8 +396,11 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         /** @type {Anthropic.MessageParam[]} */
         const convo = messages.map((m) => ({ role: m.role, content: m.content }));
 
+        let lastStop = null;
+
         for (let iteration = 0; iteration < cfg.MAX_TOOL_ITERATIONS; iteration++) {
           const final = await runTurn(convo);
+          lastStop = final.stop_reason;
 
           if (final.stop_reason !== 'tool_use') {
             send('done', { stopReason: final.stop_reason });
@@ -429,6 +436,32 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             console.warn(`[chat] session ${sessionId} hit MAX_TOOL_ITERATIONS`);
             send('done', { stopReason: 'max_tool_iterations' });
           }
+        }
+
+        // A turn that ends with nothing to show is indistinguishable from a
+        // hang. The widget drops its typing indicator on 'done' and renders
+        // no bubble, so the rep sees their own message and silence — which is
+        // exactly what happened: a deck request spent the whole token budget
+        // on thinking, stopped at max_tokens before emitting a character, and
+        // looked like the assistant had ignored them.
+        //
+        // Truncation is worth saying out loud even when there IS text, because
+        // a half-written answer that stops mid-sentence reads as a complete
+        // one to someone scanning it between calls.
+        if (lastStop === 'max_tokens') {
+          console.warn(`[chat] session ${sessionId} truncated at max_tokens (${cfg.MAX_TOKENS})`);
+          send('error', {
+            message: fullText.trim()
+              ? 'That answer was cut off at the length limit — what you can see above is incomplete. Ask for a narrower piece of it and it will finish.'
+              : 'That request needed more room than one reply allows, so nothing came back. Ask for it in smaller pieces — one section, or one document at a time.',
+            code: 'output_truncated',
+          });
+        } else if (!fullText.trim()) {
+          console.warn(`[chat] session ${sessionId} produced no text (stop_reason ${lastStop})`);
+          send('error', {
+            message: `The assistant returned nothing that time. Retry, and if it keeps happening flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
+            code: 'empty_response',
+          });
         }
       } catch (err) {
         console.error('[chat] stream failed:', err?.status || '', err?.message || err);

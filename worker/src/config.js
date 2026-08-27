@@ -19,9 +19,19 @@
 export const DEFAULTS = {
   // --- Model -------------------------------------------------------------
   MODEL: 'claude-sonnet-4-6',
-  // Reps ask for briefs and objection handling, which need more room than a
-  // two-sentence answer to a prospect did.
-  MAX_TOKENS: 2048,
+  // A CEILING, not a spend: only tokens actually generated are billed, so a
+  // one-line answer costs the same at 16000 as it did at 2048.
+  //
+  // 2048 was set before adaptive thinking was turned on, and thinking is drawn
+  // from this same budget BEFORE any visible text. A deck request then spent
+  // the whole allowance reasoning, stopped at max_tokens having emitted
+  // nothing, and the rep saw silence. create_document makes it worse: its
+  // input is a document's entire markdown, so the model has to emit ~1000+
+  // tokens of tool call on top of whatever it thought.
+  //
+  // The response is streamed, so a larger ceiling costs no latency and risks
+  // no HTTP timeout.
+  MAX_TOKENS: 16000,
 
   // --- Authentication ----------------------------------------------------
   // 'cf-access' | 'entra' | 'dev'
