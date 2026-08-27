@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -239,20 +240,60 @@ test('dev auth cannot be enabled by a bare AUTH_MODE change', () => {
   );
 });
 
-test('the committed knowledge base contains no SharePoint material', async () => {
+test('the committed knowledge base contains no SharePoint material', () => {
   // This repository is PUBLIC. Site pages and the curated FAQ are already
   // public; SharePoint chunks are internal sales material (pricing bands,
   // battlecards, customer names). The nightly workflow merges them inside CI
   // and deploys without committing, so a SharePoint chunk reaching a commit
   // means that separation has broken.
-  const { KNOWLEDGE } = await import('../src/knowledge.js');
-  const leaked = KNOWLEDGE.filter((c) => c.page.startsWith('sharepoint/') || c.id.startsWith('sp:'));
+  //
+  // Read the COMMITTED blob, not the working tree. In a developer checkout the
+  // two are the same file. On the sync runner they are not: that job compiles
+  // SharePoint into knowledge.js on purpose, then runs these tests before
+  // deploying, so a working-tree assertion failed the one build the rule is
+  // designed to allow — and, worse, invited someone to weaken the rule to get
+  // the deploy through. HEAD is what "committed" means, in both places.
+  const ROOT = path.resolve(SRC, '../..');
+  const REL = 'worker/src/knowledge.js';
+
+  let committed;
+  try {
+    committed = execFileSync('git', ['show', `HEAD:${REL}`], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    committed = null;
+  }
+
+  if (committed === null) {
+    // No git history to read (a tarball, a vendored copy). The working tree is
+    // then the only evidence available, and it is equivalent to the commit
+    // only when this is not a sync build — sharepoint.json exists solely
+    // between the sync step and the deploy, and is itself gitignored.
+    assert.ok(
+      !fs.existsSync(path.resolve(SRC, 'knowledge/sharepoint.json')),
+      'Cannot read git history to check what is committed, and a SharePoint sync has run ' +
+        'in this tree. Verify by hand that knowledge.js is not committed with SharePoint content.',
+    );
+    committed = fs.readFileSync(path.resolve(SRC, 'knowledge.js'), 'utf8');
+  }
+
+  assert.match(committed, /export const KNOWLEDGE/, 'the committed knowledge base should be readable');
+
+  const leaked = [
+    ...[...committed.matchAll(/"page":\s*"(sharepoint\/[^"]*)"/g)].map((m) => m[1]),
+    ...[...committed.matchAll(/"id":\s*"(sp:[^"]*)"/g)].map((m) => m[1]),
+  ];
 
   assert.deepEqual(
-    leaked.map((c) => c.page),
+    leaked,
     [],
-    'Internal SharePoint content is in the committed knowledge base. Rebuild without it ' +
-      '(`node scripts/build-knowledge.js --pages <site>`) and confirm sharepoint.json is gitignored.',
+    'Internal SharePoint content is in the COMMITTED knowledge base. Rebuild without it ' +
+      '(`node scripts/build-knowledge.js --pages <site>`), commit that, and confirm ' +
+      'sharepoint.json is gitignored.',
   );
 });
 

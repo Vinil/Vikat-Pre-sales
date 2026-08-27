@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import { rankDocuments, searchCollateral, collateralCount } from '../src/collateral.js';
 import { runTool } from '../src/tools.js';
@@ -143,21 +144,52 @@ const ctx = {
 };
 
 test('an unsynced library reads as a setup problem, not a gap in the collateral', async () => {
-  // The compiled corpus is empty in tests, which is exactly the state a
-  // deployment is in before the first sync runs. Saying "no deck covers that"
-  // then sends a rep hunting for material that was never indexed, and hides a
-  // broken sync behind what looks like a content gap.
-  assert.equal(collateralCount(), 0, 'this test describes the empty-index case');
-
+  // Two different silences, and the difference matters. "Nothing is indexed"
+  // means the sync never ran; saying "no deck covers that" then sends a rep
+  // hunting for material that was never there, and hides a broken sync behind
+  // what looks like a content gap.
+  //
+  // Which of the two applies depends on where this runs. A developer checkout
+  // has an empty corpus, which is also the state a fresh deployment is in. The
+  // nightly sync runner compiles real documents in before it runs the tests,
+  // so there the corpus is populated and the SAME query must not claim a setup
+  // problem. Asserting a corpus size here only ever described the first case,
+  // and failed the build in the second. Assert the distinction instead.
   const r = await runTool(
     { name: 'find_collateral', input: { query: 'zzzz nonexistent quantum toaster' } },
     ctx,
   );
 
   assert.ok(!r.isError);
-  assert.equal(r.effect.reason, 'nothing_indexed');
-  assert.match(r.content, /sync/i);
-  assert.match(r.content, /do not describe documents you have not seen/i);
+  assert.equal(r.effect.results, 0, 'the query is nonsense; it must match nothing either way');
+
+  if (collateralCount() === 0) {
+    assert.equal(r.effect.reason, 'nothing_indexed');
+    assert.match(r.content, /sync/i);
+    assert.match(r.content, /do not describe documents you have not seen/i);
+  } else {
+    assert.notEqual(
+      r.effect.reason,
+      'nothing_indexed',
+      'the corpus is populated, so a miss is a content gap and must not be reported as a broken sync',
+    );
+    assert.match(r.content, /no indexed document matches/i);
+  }
+});
+
+test('the empty-index branch is checked before the no-match branch', () => {
+  // The behavioural test above can only exercise whichever branch this run's
+  // corpus puts it in. This one holds the other end down in both: the order of
+  // the two guards is the whole distinction, and reversing them would make
+  // every unsynced deployment answer "no deck covers that".
+  const tools = fs.readFileSync(new URL('../src/tools.js', import.meta.url), 'utf8');
+  const handler = tools.slice(tools.indexOf("case 'find_collateral'"));
+  const emptyIndex = handler.indexOf('collateralCount() === 0');
+  const noMatch = handler.indexOf('found.length === 0');
+
+  assert.ok(emptyIndex > 0, 'find_collateral must special-case an empty index');
+  assert.ok(noMatch > 0, 'find_collateral must handle a query that matches nothing');
+  assert.ok(emptyIndex < noMatch, 'the empty-index guard must run first, or it never runs at all');
 });
 
 test('an empty query is a browse request, not a malformed search', async () => {
