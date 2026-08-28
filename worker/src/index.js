@@ -101,6 +101,19 @@ function sanitize(text) {
 }
 
 /** Session ids come from the client; keep them to a safe, bounded shape. */
+/**
+ * A conversation's name: the first thing the rep asked, trimmed to a label.
+ *
+ * Deliberately not model-generated. A title is worth one KV write, not a
+ * round trip to an LLM, and a rep scanning a sidebar recognises their own
+ * words faster than a summary of them.
+ */
+function firstUserMessage(messages) {
+  const first = (messages || []).find((m) => m.role === 'user');
+  const text = String(first?.content || '').trim().replace(/\s+/g, ' ');
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text || 'New chat';
+}
+
 function validSessionId(id) {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(id);
 }
@@ -492,6 +505,18 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             .catch((e) => console.error('[chat] appendLog failed:', e?.message || e)),
         );
 
+        // Index the conversation under its owner, so it appears in their list
+        // and so /chats/:id has an ownership record to check against.
+        //
+        // The title is the FIRST message, not this one. A conversation is
+        // named by what it was opened about; naming it after the latest turn
+        // would rewrite the sidebar under the rep every time they typed.
+        ctx.waitUntil(
+          storage
+            .touchChat(user.email, sessionId, firstUserMessage(messages))
+            .catch((e) => console.error('[chat] touchChat failed:', e?.message || e)),
+        );
+
         closed = true;
         try {
           controller.close();
@@ -566,6 +591,8 @@ export default {
       url.pathname === '/chat' ||
       url.pathname === '/whoami' ||
       url.pathname === '/collateral' ||
+      url.pathname === '/chats' ||
+      url.pathname.startsWith('/chats/') ||
       url.pathname.startsWith('/document/') ||
       url.pathname.startsWith('/admin/');
 
@@ -605,6 +632,61 @@ export default {
 
       if (url.pathname === '/whoami') {
         return json({ email: auth.user.email, name: auth.user.name, role, roleSource: source }, 200, cors);
+      }
+
+      // The rep's own conversations.
+      //
+      // Every one of these answers from the caller's identity, never from a
+      // parameter. There is no route here that takes an email: the only way to
+      // read a conversation is to be the person who had it, which is why the
+      // index is keyed by owner rather than filtered by one.
+      if (url.pathname === '/chats') {
+        if (request.method !== 'GET') {
+          return json({ error: 'Use GET.', code: 'method_not_allowed' }, 405, cors);
+        }
+        return json({ chats: await storage.listChats(auth.user.email) }, 200, cors);
+      }
+
+      if (url.pathname.startsWith('/chats/')) {
+        const chatId = decodeURIComponent(url.pathname.slice('/chats/'.length));
+
+        if (!validSessionId(chatId)) {
+          return json({ error: 'Bad conversation id.', code: 'bad_request' }, 400, cors);
+        }
+
+        // Ownership first, and the SAME answer either way. A 403 on someone
+        // else's conversation and a 404 on one that never existed would let a
+        // rep probe which session ids belong to colleagues.
+        if (!(await storage.ownsChat(auth.user.email, chatId))) {
+          return json({ error: 'No such conversation.', code: 'not_found' }, 404, cors);
+        }
+
+        if (request.method === 'DELETE') {
+          await storage.forgetChat(auth.user.email, chatId);
+          // The transcript stays. See forgetChat() in storage.js.
+          return json({ ok: true, note: 'Removed from your list. The transcript is retained for review.' }, 200, cors);
+        }
+
+        if (request.method !== 'GET') {
+          return json({ error: 'Use GET or DELETE.', code: 'method_not_allowed' }, 405, cors);
+        }
+
+        const logs = await storage.getLogs(chatId);
+        logs.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+
+        return json(
+          {
+            sessionId: chatId,
+            turns: logs.map((l) => ({
+              timestamp: l.timestamp,
+              userMessage: l.userMessage,
+              agentResponse: l.agentResponse,
+              toolCalls: (l.toolCalls || []).map((c) => c.name),
+            })),
+          },
+          200,
+          cors,
+        );
       }
 
       // The Collateral tab's index. Reps only — a document title and its own

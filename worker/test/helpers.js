@@ -2,16 +2,32 @@
 
 /** In-memory KV stand-in covering the surface storage.js uses. */
 export function fakeKV() {
+  // { value, metadata } per key. Workers KV returns metadata from list()
+  // WITHOUT a read per key, which is the whole reason the chat index can be
+  // listed cheaply — a fake that dropped it would have made the index look
+  // affordable here and cost one KV read per chat in production.
   const store = new Map();
   return {
     _store: store,
+    /** Seed a raw stored value, without going through put(). */
+    _seed(key, raw) { store.set(key, { value: raw, metadata: null }); },
+    /** The raw stored string, so a test need not know the record shape. */
+    _raw(key) { return store.has(key) ? store.get(key).value : undefined; },
     async get(key, type) {
       if (!store.has(key)) return null;
-      const raw = store.get(key);
+      const raw = store.get(key).value;
       return type === 'json' ? JSON.parse(raw) : raw;
     },
-    async put(key, value) {
-      store.set(key, value);
+    async getWithMetadata(key, type) {
+      if (!store.has(key)) return { value: null, metadata: null };
+      const entry = store.get(key);
+      return {
+        value: type === 'json' ? JSON.parse(entry.value) : entry.value,
+        metadata: entry.metadata || null,
+      };
+    },
+    async put(key, value, options = {}) {
+      store.set(key, { value, metadata: options.metadata || null });
     },
     async delete(key) {
       store.delete(key);
@@ -21,7 +37,7 @@ export function fakeKV() {
         .filter((k) => k.startsWith(prefix))
         .sort()
         .slice(0, limit)
-        .map((name) => ({ name }));
+        .map((name) => ({ name, metadata: store.get(name).metadata || undefined }));
       return { keys, list_complete: true };
     },
   };

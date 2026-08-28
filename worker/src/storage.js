@@ -147,6 +147,61 @@ export function createStorage(env, cfg) {
       });
     },
 
+    /**
+     * Record that a conversation exists and belongs to someone.
+     *
+     * Keyed by owner, which is what makes authorization a lookup rather than a
+     * judgement: `chat:{email}:{id}` either exists for you or it does not, so
+     * "is this my conversation" needs no comparison a later edit could get
+     * backwards.
+     *
+     * Title and timestamp go in KV METADATA, not just the value, because
+     * list() returns metadata without a read per key. A rep with forty chats
+     * is one list call, not forty.
+     *
+     * Called on every turn with the title derived from the FIRST message, so
+     * it stays the name of the conversation rather than drifting to whatever
+     * was said last.
+     */
+    async touchChat(userEmail, sessionId, title) {
+      const meta = { title: String(title || 'Untitled').slice(0, 80), updatedAt: new Date().toISOString() };
+      await kv.put(`chat:${String(userEmail).toLowerCase()}:${sessionId}`, JSON.stringify(meta), {
+        expirationTtl: cfg.LOG_TTL_SECONDS,
+        metadata: meta,
+      });
+      return meta;
+    },
+
+    /** A rep's conversations, newest first. */
+    async listChats(userEmail, limit = 50) {
+      const prefix = `chat:${String(userEmail).toLowerCase()}:`;
+      const { keys } = await kv.list({ prefix });
+
+      return keys
+        .map((k) => ({ sessionId: k.name.slice(prefix.length), ...(k.metadata || {}) }))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+        .slice(0, limit);
+    },
+
+    /** Whether this conversation is this rep's. The whole authorization check. */
+    async ownsChat(userEmail, sessionId) {
+      const key = `chat:${String(userEmail).toLowerCase()}:${sessionId}`;
+      return (await kv.get(key)) !== null;
+    },
+
+    /**
+     * Remove a conversation from a rep's list.
+     *
+     * The transcript is NOT deleted. Every conversation is logged and
+     * reviewable — that is a standing rule of this system, not a default — so
+     * this hides a chat from its author's sidebar and leaves the audit trail
+     * where it was. A rep tidying up must not be able to erase what the
+     * assistant told them.
+     */
+    async forgetChat(userEmail, sessionId) {
+      await kv.delete(`chat:${String(userEmail).toLowerCase()}:${sessionId}`);
+    },
+
     async appendLog(entry) {
       const timestamp = entry.timestamp || new Date().toISOString();
       await kv.put(

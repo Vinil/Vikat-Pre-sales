@@ -28,7 +28,7 @@ test('saveLead persists under a timestamped key and returns an id', async () => 
   assert.ok(keys[0].startsWith('lead:'));
   assert.ok(keys[0].endsWith(id));
 
-  const stored = JSON.parse(kv._store.get(keys[0]));
+  const stored = JSON.parse(kv._raw(keys[0]));
   assert.equal(stored.name, 'Ada');
   assert.equal(stored.id, id);
   assert.ok(stored.createdAt);
@@ -128,14 +128,14 @@ test('checkRateLimit starts a fresh window once the old one expires', async () =
   assert.equal((await storage.checkRateLimit('1.2.3.4', 1, 600)).allowed, false);
 
   // Simulate the window having elapsed.
-  kv._store.set('rate:1.2.3.4', JSON.stringify({ count: 1, resetAt: Date.now() - 1000 }));
+  kv._seed('rate:1.2.3.4', JSON.stringify({ count: 1, resetAt: Date.now() - 1000 }));
   const r = await storage.checkRateLimit('1.2.3.4', 1, 600);
   assert.equal(r.allowed, true, 'expired window resets the counter');
 });
 
 test('checkRateLimit tolerates a corrupt counter record', async () => {
   const { kv, storage } = setup();
-  kv._store.set('rate:1.2.3.4', JSON.stringify({ nonsense: true }));
+  kv._seed('rate:1.2.3.4', JSON.stringify({ nonsense: true }));
   const r = await storage.checkRateLimit('1.2.3.4', 5, 600);
   assert.equal(r.allowed, true);
   assert.equal(r.remaining, 4);
