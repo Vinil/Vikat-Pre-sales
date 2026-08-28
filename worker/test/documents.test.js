@@ -663,3 +663,132 @@ test('a site id alone is enough to count as configured', async () => {
   assert.equal(documentStoreStatus(GRAPH_ENV, cfg).configured, true);
   assert.equal(documentStoreStatus({}, cfg).configured, false, 'credentials are still required');
 });
+
+// --- drawn slides ---------------------------------------------------------
+
+const DRAWN_CONTENT = [
+  '## stat | 265 | attacks on food and agriculture in 2025',
+  'Harvest windows are the target.',
+  '',
+  '## timeline | Plant | Grow | Harvest | Ship | Dormant',
+  'Severity scoring is calendar-blind',
+  '- A medium CVE in March is a medium CVE in October',
+  '',
+  '## split | Ranked by CVSS alone | Ranked by what the season costs',
+  'The gap',
+  '',
+  '## chain | VSentinel > VInsight > VCommand > VShield',
+  'Four planes',
+  '',
+  '## bars | MTTR 71 | Alert noise 90 | Triage 64',
+  'Measured',
+  '',
+  '## quote | A harvest does not wait for your patch window.',
+].join('\n');
+
+const drawnSpec = (overrides = {}) => {
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'SecSemantic for agriculture',
+    subtitle: 'Defend what the harvest depends on.',
+    audience: 'Agricultural producer security leadership',
+    disclosure: 'external_ok',
+    content: DRAWN_CONTENT,
+    ...overrides,
+  });
+  assert.ok(r.ok, r.error);
+  return r.spec;
+};
+
+test('each layout directive parses into the data its drawing needs', () => {
+  const sections = drawnSpec().sections;
+  assert.deepEqual(sections.map((s) => s.layout), ['stat', 'timeline', 'split', 'chain', 'bars', 'quote']);
+
+  assert.equal(sections[0].value, '265');
+  assert.deepEqual(sections[1].stops, ['Plant', 'Grow', 'Harvest', 'Ship', 'Dormant']);
+  assert.deepEqual(sections[3].steps, ['VSentinel', 'VInsight', 'VCommand', 'VShield']);
+  assert.deepEqual(sections[4].bars, [
+    { label: 'MTTR', value: 71 },
+    { label: 'Alert noise', value: 90 },
+    { label: 'Triage', value: 64 },
+  ]);
+});
+
+test('a bullet after a timeline does not become a sixth stop', () => {
+  // It did. asText() handed the fallback the SAME array as the layout, so the
+  // bullet parsed on the next line was pushed into the stops too and the
+  // timeline grew a stop reading "A medium CVE in…".
+  const timeline = drawnSpec().sections[1];
+  assert.equal(timeline.stops.length, 5);
+  assert.ok(!timeline.stops.some((s) => /medium CVE/.test(s)));
+});
+
+test('every layout still carries its content as text, for renderers that cannot draw', () => {
+  // pdf.js reads title, body and points and knows nothing about layouts.
+  // Without this a stat section would render as an empty heading and the
+  // number would vanish — the worst way for a feature to be missing.
+  for (const section of drawnSpec().sections) {
+    const asText = [section.title, section.body, ...section.points].join(' ');
+    assert.ok(asText.trim(), `${section.layout} has no textual form`);
+  }
+
+  const [stat, , , chain, bars] = drawnSpec().sections;
+  assert.match(stat.title, /265/, 'the number survives into text');
+  assert.match(chain.title, /VSentinel/);
+  assert.ok(bars.points.some((p) => /71/.test(p)), 'the figures survive into text');
+});
+
+test('a pdf of drawn sections loses nothing', async () => {
+  const spec = drawnSpec({ format: 'pdf' });
+  const bytes = await renderPdf(spec, META, FONTS);
+  const doc = await PDFDocument.load(bytes);
+  assert.ok(doc.getPageCount() >= 1);
+});
+
+test('drawn slides obey the palette and the two typefaces', () => {
+  // The same rule the prose slides live under: a layout that reached for a
+  // colour outside the brand would look designed and be wrong.
+  const parts = pptxParts(renderPptx(drawnSpec(), META, FONTS.metrics));
+  const slides = Object.entries(parts).filter(([name]) => /slide\d+\.xml$/.test(name));
+  assert.equal(slides.length, 8, 'cover, six drawn slides, closing');
+
+  const allowed = new Set(PALETTE.map((c) => c.replace('#', '').toUpperCase()));
+  for (const [name, xml] of slides) {
+    for (const [, value] of xml.matchAll(/<a:srgbClr val="([0-9A-Fa-f]{6})"\/>/g)) {
+      assert.ok(allowed.has(value.toUpperCase()), `${name} uses ${value}, which is not in the palette`);
+    }
+    for (const [, face] of xml.matchAll(/typeface="([^"]+)"/g)) {
+      assert.ok(/^(Inter|JetBrains Mono)$/.test(face), `${name} uses ${face}`);
+    }
+  }
+});
+
+test('every drawn slide still carries its disclosure label', () => {
+  // Drawn by the renderer, not the model, so there is no layout that can omit
+  // it — including the full-bleed quote slide, which has the least room.
+  const parts = pptxParts(renderPptx(drawnSpec(), META, FONTS.metrics));
+  // Eyebrow-cased, as the renderer draws it.
+  const label = eyebrowCase(DISCLOSURE_LABELS.external_ok);
+
+  for (const [name, xml] of Object.entries(parts)) {
+    if (!/^ppt\/slides\/slide\d+\.xml$/.test(name)) continue;
+    assert.ok(xml.includes(label), `${name} has no disclosure label`);
+  }
+});
+
+test('a malformed directive stays a plain heading rather than drawing nothing', () => {
+  // An empty chart is worse than the paragraph it replaced, so a layout that
+  // cannot be satisfied is not a layout.
+  for (const heading of ['## bars | nothing numeric here', '## chain | OnlyOneStep', '## stat |']) {
+    const r = normaliseSpec({ format: 'pptx', title: 'T', content: `${heading}\nBody text.` });
+    assert.ok(r.ok, r.error);
+    assert.ok(!r.spec.sections[0].layout, `${heading} should not have produced a drawing`);
+  }
+});
+
+test('an unknown directive is a title, not a silent drop', () => {
+  const r = normaliseSpec({ format: 'pptx', title: 'T', content: '## sankey | a | b\nBody.' });
+  assert.ok(r.ok);
+  assert.equal(r.spec.sections[0].layout, undefined);
+  assert.match(r.spec.sections[0].title, /a \| b/i, 'the words still reach the slide');
+});

@@ -63,7 +63,7 @@ export function normaliseSpec(input) {
   const sections = rawSections
     .slice(0, LIMITS.sections)
     .map(normaliseSection)
-    .filter((s) => s.title || s.body || s.points.length);
+    .filter((s) => s.layout || s.title || s.body || s.points.length);
 
   if (sections.length === 0) {
     return { ok: false, error: 'At least one section with content is required.' };
@@ -83,6 +83,140 @@ export function normaliseSpec(input) {
       disclosure: DISCLOSURE_LABELS[input.disclosure] ? input.disclosure : 'internal_only',
     },
   };
+}
+
+/**
+ * Slide layouts the renderer can DRAW, as opposed to typeset.
+ *
+ * Declared in the heading rather than as schema fields, and that is not a
+ * shortcut. create_document's schema is flat and non-strict because a nested
+ * one was rejected with "Schema is too complex." — a request-level 400 that
+ * killed every conversation, including ones that never touched the tool, and
+ * took three deploys to diagnose. A visual vocabulary expressed inside the
+ * content string costs the schema nothing.
+ *
+ *   ## stat | 265 | attacks on food and agriculture in 2025
+ *   ## bars | MTTR 71 | Alert noise 90 | Triage 64
+ *   ## chain | VSentinel > VInsight > VCommand > VShield
+ *   ## timeline | Plant | Grow | Harvest | Ship
+ *   ## split | What they run today | What SecSemantic changes
+ *   ## quote | Severity is calendar-blind.
+ *
+ * Anything else is prose, and prose is still the default: a layout used
+ * because it exists, rather than because the content is that shape, is worse
+ * than a paragraph.
+ */
+export const LAYOUTS = ['stat', 'bars', 'chain', 'timeline', 'split', 'quote'];
+
+/** Split "a | b | c" into trimmed, non-empty parts. */
+function pipes(text) {
+  return String(text)
+    .split('|')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * A "label 71" pair for a bar. The number is the last token, so a label may
+ * contain spaces and still parse.
+ */
+function bar(text) {
+  const m = /^(.*?)[\s:]+(-?\d+(?:\.\d+)?)\s*%?$/.exec(String(text).trim());
+  if (!m) return null;
+  const label = m[1].trim();
+  const value = Number(m[2]);
+  if (!label || !Number.isFinite(value)) return null;
+  return { label, value };
+}
+
+/**
+ * The words a layout carries, for any renderer that cannot draw it.
+ *
+ * Layout data is ADDITIVE: a section always carries a title and points that
+ * say the same thing in text. The PDF renderer reads only title, body and
+ * points and knows nothing about layouts — without this, a `stat` section
+ * would render as an empty heading and the number would vanish silently,
+ * which is the worst way for a feature to be missing.
+ *
+ * It also means adding a layout can never break a renderer that has not been
+ * taught it yet.
+ */
+function asText(drawn) {
+  if (drawn.layout === 'stat') {
+    return { title: [drawn.value, drawn.caption].filter(Boolean).join(' — '), points: [] };
+  }
+  if (drawn.layout === 'bars') {
+    return { title: '', points: drawn.bars.map((b) => `${b.label} — ${b.value}`) };
+  }
+  if (drawn.layout === 'chain') {
+    return { title: drawn.steps.join(' → '), points: [] };
+  }
+  if (drawn.layout === 'timeline') {
+    // A COPY. Sharing the array meant a bullet parsed after the heading was
+    // pushed into the stops as well, and the timeline grew a sixth stop
+    // reading "A medium CVE in...".
+    return { title: '', points: [...drawn.stops] };
+  }
+  if (drawn.layout === 'split') {
+    return { title: '', points: [drawn.left, drawn.right] };
+  }
+  if (drawn.layout === 'quote') {
+    return { title: drawn.line, points: [] };
+  }
+  return { title: '', points: [] };
+}
+
+/**
+ * Read a layout directive off a heading, or return null for ordinary prose.
+ *
+ * Returns the layout plus the data it needs, already validated — a renderer
+ * should never receive a `bars` slide with nothing to draw, because an empty
+ * chart is worse than the paragraph it replaced.
+ */
+export function parseLayout(headingText) {
+  const parts = pipes(headingText);
+  if (parts.length < 2) return null;
+
+  const kind = parts[0].toLowerCase();
+  if (!LAYOUTS.includes(kind)) return null;
+
+  const rest = parts.slice(1);
+
+  if (kind === 'stat') {
+    // The number carries the slide; the caption says what it counts.
+    return { layout: 'stat', value: rest[0], caption: rest.slice(1).join(' — ') };
+  }
+
+  if (kind === 'bars') {
+    const bars = rest.map(bar).filter(Boolean).slice(0, 6);
+    return bars.length >= 2 ? { layout: 'bars', bars } : null;
+  }
+
+  if (kind === 'chain') {
+    const steps = rest
+      .join(' | ')
+      .split(/>|→/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+    return steps.length >= 2 ? { layout: 'chain', steps } : null;
+  }
+
+  if (kind === 'timeline') {
+    const stops = rest.slice(0, 6);
+    return stops.length >= 2 ? { layout: 'timeline', stops } : null;
+  }
+
+  if (kind === 'split') {
+    return rest.length >= 2 ? { layout: 'split', left: rest[0], right: rest[1] } : null;
+  }
+
+  if (kind === 'quote') {
+    const line = rest.join(' — ');
+    return line ? { layout: 'quote', line } : null;
+  }
+
+  return null;
 }
 
 /**
@@ -113,6 +247,15 @@ export function parseSections(markdown) {
       if (current) sections.push(current);
 
       const [, text] = heading;
+      const drawn = parseLayout(text);
+
+      if (drawn) {
+        // The drawing data AND the words that say the same thing, so a
+        // renderer that cannot draw this layout still shows its content.
+        current = { eyebrow: '', body: '', ...asText(drawn), ...drawn };
+        continue;
+      }
+
       const pipe = text.indexOf('|');
       current = pipe === -1
         ? { eyebrow: '', title: text, body: '', points: [] }
@@ -137,9 +280,23 @@ export function parseSections(markdown) {
   return sections;
 }
 
+/** The fields each layout carries, so nothing else rides along. */
+function drawnFields(s) {
+  if (s.layout === 'stat') return { value: clean(s.value, 12, false), caption: clean(s.caption, 90, false) };
+  if (s.layout === 'bars') return { bars: s.bars };
+  if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)) };
+  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 20, false)) };
+  if (s.layout === 'split') return { left: clean(s.left, 60, false), right: clean(s.right, 60, false) };
+  if (s.layout === 'quote') return { line: clean(s.line, 120, false) };
+  return {};
+}
+
 function normaliseSection(raw) {
   const s = raw && typeof raw === 'object' ? raw : {};
   return {
+    // Layout data survives normalisation untouched: it was validated when it
+    // was parsed, and clean() is for prose.
+    ...(s.layout ? { layout: s.layout, ...drawnFields(s) } : {}),
     eyebrow: clean(s.eyebrow, LIMITS.eyebrowChars, false),
     title: clean(s.title, LIMITS.sectionTitleChars, true),
     body: clean(s.body, LIMITS.sectionBodyChars, false),

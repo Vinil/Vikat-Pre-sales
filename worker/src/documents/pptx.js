@@ -259,6 +259,255 @@ function heightOf(text, metrics, sizePt, widthIn, lineHeight, tracking = 0) {
   return (Math.max(lines.length, 1) * sizePt * lineHeight * metrics.naturalLineHeight) / 72;
 }
 
+// --- Drawn slides ---------------------------------------------------------
+//
+// Every layout below is built from the same rect() and text() the prose slides
+// use. Nothing here is an image: a deck that needs a photograph needs a
+// designer, and pretending otherwise produces clip art. What these do is give
+// a number, a sequence or a comparison the shape it actually has, so a slide
+// reads in two seconds from the back of a room instead of being a paragraph
+// the presenter reads aloud.
+
+/** The caption line under a drawing, in the muted ink prose uses. */
+function captionAt(textValue, y, width) {
+  return text({ x: M.left, y, w: width, h: 0.5 }, [
+    { text: textValue, role: 'body', size: SIZE.body, lineHeight: 1.4, color: INK.body },
+  ]);
+}
+
+/**
+ * One number, at the size the number deserves.
+ *
+ * 96pt is larger than anything else in the deck on purpose: a stat slide that
+ * hedges its own headline is a paragraph with extra whitespace.
+ */
+function statSlide(spec, section, meta, pageLabel) {
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+
+  shapes.push(
+    text({ x: M.left, y: M.top + 0.55, w: CONTENT_WIDTH, h: 2.1 }, [
+      { text: section.value, role: 'display', size: 96, tracking: -0.04, lineHeight: 1, color: COLOR.navy },
+    ]),
+  );
+
+  if (section.caption) {
+    shapes.push(
+      text({ x: M.left, y: M.top + 2.75, w: CONTENT_WIDTH * 0.7, h: 1.1 }, [
+        { text: section.caption, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.2, color: COLOR.circuitTeal },
+      ]),
+    );
+  }
+
+  if (section.body) shapes.push(captionAt(section.body, M.top + 3.95, CONTENT_WIDTH * 0.8));
+
+  shapes.push(footer(spec, false, pageLabel));
+  return slideXml(shapes, bg(COLOR.cream));
+}
+
+/**
+ * Horizontal bars, scaled to the largest value.
+ *
+ * Scaled to the data rather than to 100 so a set of small numbers is still
+ * legible — and labelled with the real figure, so the scaling can never
+ * overstate anything.
+ */
+function barsSlide(spec, section, meta, pageLabel) {
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+  let y = M.top + 0.45;
+
+  if (section.body) {
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.85, h: 0.9 }, [
+        { text: section.body, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
+      ]),
+    );
+    y += 1.15;
+  }
+
+  const max = Math.max(...section.bars.map((b) => Math.abs(b.value))) || 1;
+  const trackWidth = CONTENT_WIDTH * 0.68;
+  const rowHeight = 0.72;
+
+  section.bars.forEach((b, i) => {
+    const top = y + i * rowHeight;
+
+    shapes.push(
+      text({ x: M.left, y: top, w: trackWidth, h: 0.3 }, [
+        { text: b.label, role: 'body', size: 14, lineHeight: 1, color: INK.body },
+      ]),
+    );
+
+    // The empty track, so a short bar still reads as a proportion.
+    shapes.push(rect({ x: M.left, y: top + 0.3, w: trackWidth, h: 0.26 }, solid(INK.rule)));
+    shapes.push(
+      rect(
+        { x: M.left, y: top + 0.3, w: Math.max(0.08, (trackWidth * Math.abs(b.value)) / max), h: 0.26 },
+        solid(i === 0 ? COLOR.signalGreen : COLOR.circuitTeal),
+      ),
+    );
+
+    shapes.push(
+      text({ x: M.left + trackWidth + 0.22, y: top + 0.2, w: 1.6, h: 0.45 }, [
+        { text: String(b.value), role: 'display', size: 24, tracking: -0.02, lineHeight: 1, color: COLOR.navy },
+      ]),
+    );
+  });
+
+  shapes.push(footer(spec, false, pageLabel));
+  return slideXml(shapes, bg(COLOR.cream));
+}
+
+/** A sequence of named stages, left to right, with the flow made visible. */
+function chainSlide(spec, section, meta, pageLabel) {
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+  let y = M.top + 0.45;
+
+  if (section.body) {
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.85, h: 0.9 }, [
+        { text: section.body, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
+      ]),
+    );
+    y += 1.3;
+  } else {
+    y += 0.9;
+  }
+
+  const n = section.steps.length;
+  const gap = 0.28;
+  const boxW = (CONTENT_WIDTH - gap * (n - 1)) / n;
+  const boxH = 1.35;
+
+  section.steps.forEach((step, i) => {
+    const x = M.left + i * (boxW + gap);
+    // Deepening navy along the chain: the eye follows the darkening, which is
+    // the direction of the argument.
+    const shade = i === n - 1 ? COLOR.navy : i === 0 ? COLOR.circuitTeal : COLOR.navy;
+    shapes.push(rect({ x, y, w: boxW, h: boxH }, solid(shade)));
+    shapes.push(
+      text({ x: x + 0.16, y: y + 0.42, w: boxW - 0.32, h: 0.7 }, [
+        { text: step, role: 'display', size: 17, tracking: -0.01, lineHeight: 1.15, color: ON_NAVY.strong },
+      ]),
+    );
+
+    if (i < n - 1) {
+      // A connector, not an arrowhead: a filled notch between boxes reads as
+      // flow at slide distance and needs no glyph.
+      shapes.push(rect({ x: x + boxW, y: y + boxH / 2 - 0.03, w: gap, h: 0.06 }, solid(COLOR.signalGreen)));
+    }
+  });
+
+  shapes.push(footer(spec, false, pageLabel));
+  return slideXml(shapes, bg(COLOR.cream));
+}
+
+/** Stops along a single rule — a calendar, a phase plan, a sequence in time. */
+function timelineSlide(spec, section, meta, pageLabel) {
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+  let y = M.top + 0.45;
+
+  if (section.body) {
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.85, h: 0.9 }, [
+        { text: section.body, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
+      ]),
+    );
+    y += 1.5;
+  } else {
+    y += 1.1;
+  }
+
+  shapes.push(rect({ x: M.left, y: y + 0.5, w: CONTENT_WIDTH, h: 0.045 }, solid(INK.rule)));
+
+  const n = section.stops.length;
+  const step = CONTENT_WIDTH / n;
+
+  section.stops.forEach((stop, i) => {
+    const x = M.left + i * step;
+    shapes.push(rect({ x, y: y + 0.34, w: 0.16, h: 0.36 }, solid(i === n - 1 ? COLOR.signalGreen : COLOR.circuitTeal)));
+    shapes.push(
+      text({ x, y: y + 0.92, w: step - 0.2, h: 0.8 }, [
+        { text: stop, role: 'display', size: 15, tracking: -0.01, lineHeight: 1.2, color: COLOR.navy },
+      ]),
+    );
+  });
+
+  shapes.push(footer(spec, false, pageLabel));
+  return slideXml(shapes, bg(COLOR.cream));
+}
+
+/** Two states side by side, the second one carrying the weight. */
+function splitSlide(spec, section, meta, pageLabel) {
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+  let y = M.top + 0.45;
+
+  if (section.body) {
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.85, h: 0.9 }, [
+        { text: section.body, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
+      ]),
+    );
+    y += 1.25;
+  } else {
+    y += 0.85;
+  }
+
+  const gap = 0.4;
+  const colW = (CONTENT_WIDTH - gap) / 2;
+  const colH = 2.5;
+
+  // Left is the status quo, in outline; right is the change, filled. The
+  // asymmetry is the argument.
+  shapes.push(rect({ x: M.left, y, w: colW, h: colH }, solid(COLOR.white)));
+  shapes.push(rect({ x: M.left, y, w: colW, h: 0.05 }, solid(INK.rule)));
+  shapes.push(
+    text({ x: M.left + 0.28, y: y + 0.45, w: colW - 0.56, h: colH - 0.7 }, [
+      { text: section.left, role: 'display', size: 20, tracking: -0.01, lineHeight: 1.25, color: INK.muted },
+    ]),
+  );
+
+  shapes.push(rect({ x: M.left + colW + gap, y, w: colW, h: colH }, solid(COLOR.navy)));
+  shapes.push(rect({ x: M.left + colW + gap, y, w: colW, h: 0.05 }, solid(COLOR.signalGreen)));
+  shapes.push(
+    text({ x: M.left + colW + gap + 0.28, y: y + 0.45, w: colW - 0.56, h: colH - 0.7 }, [
+      { text: section.right, role: 'display', size: 20, tracking: -0.01, lineHeight: 1.25, color: ON_NAVY.strong },
+    ]),
+  );
+
+  shapes.push(footer(spec, false, pageLabel));
+  return slideXml(shapes, bg(COLOR.cream));
+}
+
+/** One sentence, full bleed on navy. The slide a presenter stops talking on. */
+function quoteSlide(spec, section, meta, pageLabel) {
+  const shapes = [
+    rect({ x: M.left, y: M.top + 0.3, w: 0.7, h: 0.07 }, solid(COLOR.signalGreen)),
+    text({ x: M.left, y: M.top + 0.9, w: CONTENT_WIDTH * 0.88, h: 3.2 }, [
+      { text: section.line, role: 'display', size: 44, tracking: -0.03, lineHeight: 1.18, color: ON_NAVY.strong },
+    ]),
+  ];
+
+  if (section.body) {
+    shapes.push(
+      text({ x: M.left, y: M.top + 4.2, w: CONTENT_WIDTH * 0.7, h: 0.6 }, [
+        { text: section.body, role: 'body', size: SIZE.body, lineHeight: 1.4, color: ON_NAVY.body },
+      ]),
+    );
+  }
+
+  shapes.push(footer(spec, true, pageLabel));
+  return slideXml(shapes, bg(COLOR.deepNavy));
+}
+
+const DRAWN = {
+  stat: statSlide,
+  bars: barsSlide,
+  chain: chainSlide,
+  timeline: timelineSlide,
+  split: splitSlide,
+  quote: quoteSlide,
+};
+
 function contentSlide(spec, section, meta, pageLabel, fonts) {
   const width = CONTENT_WIDTH * 0.88;
   const shapes = [
@@ -370,9 +619,11 @@ export function renderPptx(spec, meta, fonts) {
 
   const slides = [
     coverSlide(spec, context, fonts),
-    ...spec.sections.map((s, i) =>
-      contentSlide(spec, s, context, `${i + 2} / ${spec.sections.length + 2}`, fonts),
-    ),
+    ...spec.sections.map((s, i) => {
+      const label = `${i + 2} / ${spec.sections.length + 2}`;
+      const draw = s.layout && DRAWN[s.layout];
+      return draw ? draw(spec, s, context, label) : contentSlide(spec, s, context, label, fonts);
+    }),
     closingSlide(spec, context),
   ];
 

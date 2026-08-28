@@ -220,7 +220,7 @@ export const TOOL_DEFINITIONS = [
         content: {
           type: 'string',
           description:
-            `The body, as markdown. One "## " heading per section, up to ${LIMITS.sections}; each becomes a slide in a deck or a block in a document. Put an optional eyebrow of two or three words before a pipe in the heading. Under each heading write an optional short paragraph of prose, then up to ${LIMITS.points} "- " points of one idea each. No other markdown: no bold, no links, no nested lists, no tables. For example:\n\n## context | Agents reach production faster than controls do\nThe model is ready long before the guardrails are.\n- Agents call tools with real credentials\n- Nobody owns the blast radius`,
+            `The body, as markdown. One "## " heading per section, up to ${LIMITS.sections}; each becomes a slide in a deck or a block in a document. Put an optional eyebrow of two or three words before a pipe in the heading. Under each heading write an optional short paragraph of prose, then up to ${LIMITS.points} "- " points of one idea each. No other markdown: no bold, no links, no nested lists, no tables. For example:\n\n## context | Agents reach production faster than controls do\nThe model is ready long before the guardrails are.\n- Agents call tools with real credentials\n- Nobody owns the blast radius\n\nSix headings — stat, bars, chain, timeline, split, quote — draw a slide rather than typesetting one. The system prompt gives their exact form.`,
         },
       },
       required: ['format', 'title', 'subtitle', 'audience', 'disclosure', 'content'],
