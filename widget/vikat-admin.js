@@ -241,6 +241,12 @@
 
   // --- SharePoint ----------------------------------------------------------
 
+  function loadSharePoint() {
+    return api('/admin/sharepoint')
+      .then(function (r) { renderSharePoint(r); })
+      .catch(function () {});
+  }
+
   function renderSharePoint(data) {
     var scope = data.scope || {};
 
@@ -408,12 +414,25 @@
         w.appendChild(el('b', null, s.you.email));
         w.appendChild(document.createTextNode(s.you.role + (s.you.roleSource === 'bootstrap' ? ' · from config' : '')));
 
-        loadKnowledge();
-        loadSharePoint();
-        loadUsers();
+        // Independent, and kept that way: a throw in one used to take the
+        // rest of the sequence with it.
+        [loadKnowledge, loadSharePoint, loadUsers].forEach(function (load) {
+          try {
+            load();
+          } catch (err) {
+            console.error('[admin] ' + load.name + ' failed:', err);
+          }
+        });
       })
-      .catch(function () {
-        // api() has already surfaced 401/403 appropriately.
+      .catch(function (err) {
+        // api() has already surfaced 401/403 appropriately, so an auth failure
+        // needs nothing here. A ReferenceError does: this catch once swallowed
+        // one thrown by the second of three loaders, so the page rendered its
+        // header, loaded one tab, and left the other two on their placeholders
+        // forever — with a clean console and no failed request to find.
+        if (err instanceof TypeError || err instanceof ReferenceError) {
+          console.error('[admin] boot failed:', err);
+        }
       });
   }
 
