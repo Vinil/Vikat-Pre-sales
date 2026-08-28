@@ -242,6 +242,77 @@
   text-decoration-color: var(--vk-cyan);
 }
 
+/* ── Formatted answer bodies ─────────────────────────────────
+
+   A rep skims these between calls, so the shape of the answer has to be
+   visible before any of it is read. Tight vertical rhythm: these are chat
+   bubbles, not an article, and document margins make a three-line answer look
+   like a memo. */
+
+.vk-p {
+  margin: 0 0 8px;
+}
+
+.vk-p:last-child,
+.vk-list:last-child,
+.vk-h:last-child {
+  margin-bottom: 0;
+}
+
+.vk-h {
+  margin: 14px 0 6px;
+  font-weight: 600;
+  color: var(--vk-w);
+  line-height: 1.35;
+}
+
+.vk-h:first-child {
+  margin-top: 0;
+}
+
+.vk-h1 { font-size: 15px; }
+.vk-h2 { font-size: 14px; }
+/* Level three stops growing and goes quiet instead — three sizes of bold in a
+   chat bubble reads as shouting. */
+.vk-h3 {
+  font-size: 13px;
+  color: var(--vk-w60);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.vk-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.vk-list li {
+  margin: 0 0 3px;
+  padding-left: 2px;
+}
+
+.vk-list li::marker {
+  color: var(--vk-cyan);
+}
+
+.vk-list li:last-child {
+  margin-bottom: 0;
+}
+
+.vk-code {
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(242, 244, 250, 0.08);
+  overflow-wrap: anywhere;
+}
+
+.vk-msg-agent strong {
+  color: var(--vk-w);
+  font-weight: 600;
+}
+
 /* ── Disclosure tags ────────────────────────────────────────── */
 /* The reason this tool exists: what the rep may repeat to a customer.
    Rendered as a chip so it cannot be skimmed past. */

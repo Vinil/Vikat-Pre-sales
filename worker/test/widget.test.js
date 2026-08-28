@@ -375,3 +375,71 @@ test('one failing loader does not cancel the others', async () => {
 
   await admin.close();
 });
+
+// --- markdown in answer bodies ---------------------------------------------
+
+/** The markup renderBody produced — render() above already returns it. */
+const html = async (text) => (await render(text)).html;
+
+test('a bullet list renders as a list, not as literal hyphens', async () => {
+  // The prompt asks for "short lists, clear headers" on a brief and the model
+  // obliges. All of it used to arrive as literal "- " in one wall of text.
+  const rendered = await html('Three things:\n\n- Deal Desk owns pricing\n- Security owns questionnaires\n- Legal owns redlines');
+
+  assert.match(rendered, /<ul class="vk-list">/);
+  assert.equal((rendered.match(/<li>/g) || []).length, 3);
+  assert.match(rendered, /Deal Desk owns pricing/);
+  assert.ok(!rendered.includes('- Deal Desk'), 'the marker must not survive as text');
+});
+
+test('numbered lists, headings and bold each render as themselves', async () => {
+  const rendered = await html('## Next steps\n\n1. Send the deck\n2. Book the follow-up\n\nThat is **not** a commitment.');
+
+  assert.match(rendered, /<div class="vk-h vk-h2">Next steps<\/div>/);
+  assert.match(rendered, /<ol class="vk-list">/);
+  assert.equal((rendered.match(/<li>/g) || []).length, 2);
+  assert.match(rendered, /<strong>not<\/strong>/);
+});
+
+test('paragraphs keep their line breaks and links still work', async () => {
+  const rendered = await html('VShield covers it.\nVSentinel does not.\n\nSee [the deck](https://vikatai.sharepoint.com/x.pptx).');
+
+  assert.match(rendered, /<br>/, 'a single newline is a break, not a joined sentence');
+  assert.equal((rendered.match(/<p class="vk-p">/g) || []).length, 2);
+  assert.match(rendered, /<a class="vk-link" href="https:\/\/vikatai\.sharepoint\.com\/x\.pptx"/);
+  assert.match(rendered, /the deck<\/a>/);
+});
+
+test('a code span is literal inside, markup and all', async () => {
+  const rendered = await html('Set `SHAREPOINT_LIBRARY` to `**not** a library`.');
+
+  assert.equal((rendered.match(/<code class="vk-code">/g) || []).length, 2);
+  assert.ok(!rendered.includes('<strong>not</strong>'), 'asterisks inside backticks are characters');
+});
+
+test('markup in the text becomes text, never nodes', async () => {
+  // The property this renderer must not lose. Answers summarise SharePoint
+  // documents, and anyone at Vikat can name a file. A title containing a
+  // script tag must reach the screen as characters.
+  const rendered = await html('- A doc called <img src=x onerror=alert(1)> exists\n\n<script>alert(2)</script>');
+
+  assert.ok(!/<img/i.test(rendered), 'no element may be constructed from the text');
+  assert.ok(!/<script/i.test(rendered), 'nor a script');
+  assert.match(rendered, /&lt;img src=x onerror=alert\(1\)&gt;/, 'it must be visible as text');
+});
+
+test('a javascript: URL is not turned into a link', async () => {
+  const rendered = await html('Try [this](javascript:alert(1)) or javascript:alert(2)');
+
+  assert.ok(!/href="javascript:/i.test(rendered), 'only http(s) and same-origin paths become anchors');
+});
+
+test('half-written markup mid-stream degrades to text', async () => {
+  // renderBody runs on every delta with the text so far, so it constantly sees
+  // unclosed markup. It must not throw, and must not eat the characters.
+  for (const partial of ['**bol', '- item\n- ', '## ', '`code']) {
+    const rendered = await html(partial);
+    assert.equal(typeof rendered, 'string', `renderBody threw on ${JSON.stringify(partial)}`);
+  }
+  assert.match(await html('**bol'), /\*\*bol/, 'an unclosed bold stays visible');
+});

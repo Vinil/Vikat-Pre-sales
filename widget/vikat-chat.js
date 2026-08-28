@@ -281,22 +281,28 @@
   var LINK_RE = /\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]{1,120})\]\((\/[^\/\s)][^\s)]*)\)|(https?:\/\/[^\s<>"')\]]+)/g;
 
   /**
-   * Render agent text into `node`, turning links into anchors.
+   * Emit plain text, promoting **bold** as it goes.
    *
-   * Built from text nodes and elements, never innerHTML: the model's output is
-   * untrusted in the ordinary way — it summarises documents anyone at Vikat can
-   * put in SharePoint — and one document with markup in its title should not
-   * become script in a rep's browser.
+   * The innermost layer, and the only one that creates text nodes.
    */
-  function renderBody(node, text) {
-    node.textContent = '';
+  function emitText(parent, text) {
+    var parts = text.split(/\*\*([^*\n]+)\*\*/);
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      if (i % 2 === 1) parent.appendChild(el('strong', null, parts[i]));
+      else parent.appendChild(document.createTextNode(parts[i]));
+    }
+  }
+
+  /** Emit text with links turned into anchors, and bold inside the rest. */
+  function emitLinked(parent, text) {
     LINK_RE.lastIndex = 0;
 
     var last = 0;
     var m;
 
     while ((m = LINK_RE.exec(text)) !== null) {
-      if (m.index > last) node.appendChild(document.createTextNode(text.slice(last, m.index)));
+      if (m.index > last) emitText(parent, text.slice(last, m.index));
 
       var label = m[1] || m[3];
       var url = m[2] || m[4] || m[5];
@@ -319,13 +325,106 @@
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
       }
-      node.appendChild(a);
+      parent.appendChild(a);
 
-      if (trail) node.appendChild(document.createTextNode(trail));
+      if (trail) parent.appendChild(document.createTextNode(trail));
       last = m.index + m[0].length;
     }
 
-    if (last < text.length) node.appendChild(document.createTextNode(text.slice(last)));
+    if (last < text.length) emitText(parent, text.slice(last));
+  }
+
+  /**
+   * Inline markup: code spans, then links, then bold.
+   *
+   * Code first because its content is literal — an asterisk or a bracket
+   * inside backticks is a character, not markup.
+   */
+  function renderInline(parent, text) {
+    var parts = text.split(/`([^`\n]+)`/);
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      if (i % 2 === 1) parent.appendChild(el('code', 'vk-code', parts[i]));
+      else emitLinked(parent, parts[i]);
+    }
+  }
+
+  var BULLET = /^\s*[-*]\s+(.*)$/;
+  var NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
+  var HEADING = /^\s*(#{1,3})\s+(.*)$/;
+
+  /**
+   * Render agent text into `node` as blocks: headings, lists and paragraphs.
+   *
+   * The prompt asks the model for "short lists, clear headers" on a brief, and
+   * it obliges. Until this existed, all of that arrived as literal "- " and
+   * "**" in one undifferentiated wall of text — the structure was being
+   * produced and then thrown away, which is worse than never asking for it.
+   *
+   * Built from text nodes and elements, never innerHTML: the model's output is
+   * untrusted in the ordinary way — it summarises documents anyone at Vikat can
+   * put in SharePoint — and one document with markup in its title should not
+   * become script in a rep's browser. Every branch below appends nodes; none
+   * assigns markup. That is the property the tests check, not the prettiness.
+   */
+  function renderBody(node, text) {
+    node.textContent = '';
+
+    var lines = String(text == null ? '' : text).split('\n');
+    var i = 0;
+
+    while (i < lines.length) {
+      var line = lines[i];
+
+      if (!line.trim()) {
+        i += 1;
+        continue;
+      }
+
+      var h = HEADING.exec(line);
+      if (h) {
+        var head = el('div', 'vk-h vk-h' + h[1].length);
+        renderInline(head, h[2]);
+        node.appendChild(head);
+        i += 1;
+        continue;
+      }
+
+      var isBullet = BULLET.test(line);
+      if (isBullet || NUMBERED.test(line)) {
+        var list = el(isBullet ? 'ul' : 'ol', 'vk-list');
+        var re = isBullet ? BULLET : NUMBERED;
+
+        while (i < lines.length) {
+          var item = re.exec(lines[i]);
+          if (!item) break;
+          var li = el('li');
+          renderInline(li, item[1]);
+          list.appendChild(li);
+          i += 1;
+        }
+
+        node.appendChild(list);
+        continue;
+      }
+
+      // A paragraph runs until a blank line or the start of another block.
+      // Single newlines inside it are kept as breaks: the model uses them to
+      // separate a claim from its caveat, and joining them loses that.
+      var para = el('p', 'vk-p');
+      var first = true;
+
+      while (i < lines.length) {
+        var l = lines[i];
+        if (!l.trim() || HEADING.test(l) || BULLET.test(l) || NUMBERED.test(l)) break;
+        if (!first) para.appendChild(el('br'));
+        renderInline(para, l);
+        first = false;
+        i += 1;
+      }
+
+      node.appendChild(para);
+    }
   }
 
   /** Agent bubble with an update() that re-splits disclosure tags as it streams. */
