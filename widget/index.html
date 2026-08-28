@@ -92,9 +92,163 @@
   .pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
   .pane[hidden] { display: none; }
 
-  /* Chat pane: the widget fills it entirely. */
-  #pane-chat { padding: 0; }
-  #assistant { flex: 1 1 auto; min-height: 0; }
+  /* Chat pane: three columns, the conversation in the middle.
+     The rails collapse to a spine rather than disappearing, so the way back is
+     always on screen — a control that vanishes when you use it is a control
+     people stop using. */
+  #pane-chat {
+    padding: 0;
+    display: grid;
+    grid-template-columns: var(--rail-l, 232px) minmax(0, 1fr) var(--rail-r, 260px);
+    align-items: stretch;
+  }
+  #pane-chat.l-shut { --rail-l: 40px; }
+  #pane-chat.r-shut { --rail-r: 40px; }
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: rgba(242, 244, 250, 0.015);
+  }
+  .rail-l { border-right: 1px solid var(--w08); }
+  .rail-r { border-left: 1px solid var(--w08); }
+
+  .rail-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 8px 10px 12px;
+    min-height: 44px;
+    border-bottom: 1px solid var(--w08);
+  }
+  .rail-r .rail-head { padding: 10px 12px 10px 8px; }
+
+  .rail-tog {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--w60);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .rail-tog:hover { color: var(--w); }
+  .rail-r .rail-tog { flex-direction: row-reverse; }
+
+  .rail-chev {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(135deg);
+    transition: transform 0.15s ease;
+  }
+  .rail-r .rail-chev { transform: rotate(-45deg); }
+  .l-shut .rail-l .rail-chev { transform: rotate(-45deg); }
+  .r-shut .rail-r .rail-chev { transform: rotate(135deg); }
+
+  .rail-act {
+    flex: none;
+    padding: 3px 9px;
+    border: 1px solid var(--w20);
+    border-radius: 999px;
+    background: none;
+    color: var(--w80);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .rail-act:hover { border-color: var(--cyan); color: var(--cyan); }
+
+  .rail-count { flex: none; font-size: 11px; color: var(--w40); }
+
+  .rail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
+
+  /* Collapsed: the head stays, everything else goes. The label is dropped
+     rather than rotated — vertical text at 11px is decoration, not a label. */
+  .l-shut .rail-l .rail-body,
+  .l-shut .rail-l .rail-name,
+  .l-shut .rail-l .rail-act,
+  .r-shut .rail-r .rail-body,
+  .r-shut .rail-r .rail-name,
+  .r-shut .rail-r .rail-count { display: none; }
+  .l-shut .rail-l .rail-head,
+  .r-shut .rail-r .rail-head { padding: 10px 0; justify-content: center; }
+  .l-shut .rail-l .rail-tog,
+  .r-shut .rail-r .rail-tog { flex: none; justify-content: center; }
+
+  .rail-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    margin-bottom: 2px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--w80);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.35;
+    cursor: pointer;
+  }
+  .rail-item:hover { background: var(--w04); color: var(--w); }
+  .rail-item[aria-current="true"] { background: var(--w08); color: var(--w); }
+  .rail-item .t {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rail-item .d { margin-top: 2px; font-size: 11px; color: var(--w40); }
+
+  .rail-empty { padding: 10px; font-size: 12px; line-height: 1.5; color: var(--w40); }
+
+  .asset {
+    display: block;
+    padding: 9px 10px;
+    margin-bottom: 4px;
+    border: 1px solid var(--w08);
+    border-radius: 9px;
+    color: var(--w80);
+    text-decoration: none;
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+  .asset:hover { border-color: var(--w20); color: var(--w); }
+  .asset .n { overflow-wrap: anywhere; }
+  .asset .m { margin-top: 3px; font-size: 11px; color: var(--w40); }
+  .asset .m a { color: var(--cyan); }
+  .asset-group {
+    margin: 6px 0 4px;
+    padding: 0 10px;
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--w40);
+  }
+  /* Only on a generated file, and only when it is not for a customer. */
+  .asset .warn { color: var(--orange); }
+
+  /* Below this the conversation needs the whole width more than the rails
+     need to exist. */
+  @media (max-width: 1000px) {
+    #pane-chat { grid-template-columns: minmax(0, 1fr); }
+    .rail { display: none; }
+  }
+
+
+  #assistant { min-width: 0; min-height: 0; }
 
   /* The widget draws its own header inside an inline mount; here the app
      header already names the tool, so drop the duplicate chrome and let the
@@ -193,7 +347,35 @@
 
 <main>
   <section class="pane" id="pane-chat" role="tabpanel" aria-labelledby="tab-chat">
+    <aside class="rail rail-l" id="rail-chats">
+      <div class="rail-head">
+        <button type="button" class="rail-tog" id="chats-tog" aria-expanded="true" aria-controls="chats-body"
+                title="Hide conversations">
+          <span class="rail-chev" aria-hidden="true"></span>
+          <span class="rail-name">Chats</span>
+        </button>
+        <button type="button" class="rail-act" id="chats-new" title="Start a new conversation">New</button>
+      </div>
+      <div class="rail-body" id="chats-body">
+        <div class="rail-empty">Loading…</div>
+      </div>
+    </aside>
+
     <div id="assistant"></div>
+
+    <aside class="rail rail-r" id="rail-assets">
+      <div class="rail-head">
+        <button type="button" class="rail-tog" id="assets-tog" aria-expanded="true" aria-controls="assets-body"
+                title="Hide assets">
+          <span class="rail-chev" aria-hidden="true"></span>
+          <span class="rail-name">Assets</span>
+        </button>
+        <span class="rail-count" id="assets-count"></span>
+      </div>
+      <div class="rail-body" id="assets-body">
+        <div class="rail-empty">Documents built and collateral found in this conversation collect here.</div>
+      </div>
+    </aside>
   </section>
 
   <section class="pane" id="pane-collateral" role="tabpanel" aria-labelledby="tab-collateral" hidden>
@@ -214,6 +396,9 @@
         data-mode="inline"
         data-mount="#assistant"
         defer></script>
+<!-- After vikat-chat.js: deferred scripts run in document order, and the
+     rails boot against window.VikatChat. -->
+<script src="./vikat-rails.js" defer></script>
 <script src="./vikat-collateral.js" data-endpoint="/" defer></script>
 
 </body>

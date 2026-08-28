@@ -441,6 +441,14 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               ...(result.isError ? { is_error: true } : {}),
             });
 
+            // Anything the turn produced or surfaced, for the assets rail.
+            //
+            // Sent as its own event rather than scraped out of the answer
+            // text: the model decides how much of a tool result to mention,
+            // and a rail built from what it happened to write would lose the
+            // fourth deck whenever it chose to list three.
+            const assets = result.effect && result.effect.assets;
+            if (Array.isArray(assets) && assets.length) send('asset', { assets });
           }
 
           convo.push({ role: 'user', content: results });

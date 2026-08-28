@@ -440,7 +440,19 @@ export async function runTool(call, ctx) {
 
         return {
           content: `${found.length} document(s)${listing ? ` of ${collateralCount()} indexed` : ' matched'}:\n\n${rows}\n\nGive the rep the link as a markdown link on the file name. Quote the summary only as far as it goes — it is the document's own opening text, not a description of everything inside. Say when a document was last updated if it is more than a few months old. Do not claim what a document contains beyond what is shown here.`,
-          effect: { query, results: found.length },
+          effect: {
+            query,
+            results: found.length,
+            // For the assets rail. The same rows the model was given, so the
+            // panel and the answer can never disagree about what was found.
+            assets: found.map((d) => ({
+              kind: 'collateral',
+              name: d.name,
+              url: d.webUrl,
+              folder: d.folder || '',
+              modified: d.modified || null,
+            })),
+          },
         };
       }
 
@@ -475,6 +487,18 @@ export async function runTool(call, ctx) {
             sections: result.sections,
             disclosure: result.disclosure,
             filed: result.filed,
+            assets: [
+              {
+                kind: 'generated',
+                name: result.fileName,
+                url: result.downloadPath,
+                sharePointUrl: result.filed ? result.sharePointUrl : null,
+                // The label printed on the document itself, so the rail can
+                // say "internal only" next to a file a rep is about to send.
+                disclosure: result.disclosureLabel,
+                format: result.format,
+              },
+            ],
           },
         };
       }

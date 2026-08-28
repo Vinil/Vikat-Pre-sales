@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
 
 const ADMIN_HTML = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -442,4 +443,174 @@ test('half-written markup mid-stream degrades to text', async () => {
     assert.equal(typeof rendered, 'string', `renderBody threw on ${JSON.stringify(partial)}`);
   }
   assert.match(await html('**bol'), /\*\*bol/, 'an unclosed bold stays visible');
+});
+
+// --- the rails -------------------------------------------------------------
+
+const WIDGET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget');
+
+/**
+ * The widget directory over HTTP.
+ *
+ * file:// will not do here: the rails call fetch('/chats'), which on a file
+ * origin resolves to file:///chats and never becomes a request the stubs can
+ * answer. A real origin is also what the app actually runs on.
+ */
+const server = http.createServer((req, res) => {
+  const name = (req.url || '/').split('?')[0];
+  const file = path.join(WIDGET_DIR, name === '/' ? 'index.html' : name);
+
+  if (!file.startsWith(WIDGET_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    res.writeHead(404).end('not found');
+    return;
+  }
+
+  const type = file.endsWith('.js')
+    ? 'text/javascript'
+    : file.endsWith('.css')
+      ? 'text/css'
+      : 'text/html';
+  res.writeHead(200, { 'content-type': type }).end(fs.readFileSync(file));
+});
+
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const APP_URL = `http://127.0.0.1:${server.address().port}/index.html`;
+test.after(() => server.close());
+
+/** The app shell with /chats and /whoami stubbed. */
+async function openApp(chats = []) {
+  const app = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const errors = [];
+  app.on('pageerror', (e) => errors.push('uncaught: ' + e));
+  app.on('console', (m) => {
+    if (m.type() === 'error' && m.text().includes('[rails]')) errors.push(m.text());
+  });
+
+  // Only the API is stubbed; the page and its scripts come from the server.
+  await app.route('**/*', (route) => {
+    const url = route.request().url();
+    if (/\.(html|js|css)(\?|$)/.test(url)) return route.continue();
+    if (url.includes('/chats/')) {
+      const id = url.split('/chats/')[1];
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionId: id,
+          turns: [{ userMessage: 'What did we agree?', agentResponse: 'Deal Desk owns the discount.' }],
+        }),
+      });
+    }
+    if (url.includes('/chats')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ chats }) });
+    }
+    if (url.includes('/whoami')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'rep@vikat.ai', role: 'rep' }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"documents":[],"total":0}' });
+  });
+
+  await app.goto(APP_URL);
+  await app.waitForFunction(() => Boolean(window.VikatChat), null, { timeout: 5000 });
+  return { app, errors };
+}
+
+test('the chat rail lists the conversations the server returns', async () => {
+  const { app, errors } = await openApp([
+    { sessionId: 'aaaa11112222', title: 'Skan COO deck', updatedAt: new Date().toISOString() },
+    { sessionId: 'bbbb33334444', title: 'VShield pricing', updatedAt: new Date().toISOString() },
+  ]);
+
+  await app.waitForFunction(() => document.querySelectorAll('#chats-body .rail-item').length === 2, null, {
+    timeout: 5000,
+  });
+  assert.match(await app.textContent('#chats-body'), /Skan COO deck/);
+  assert.deepEqual(errors, []);
+  await app.close();
+});
+
+test('opening a past chat replays the server transcript, not local storage', async () => {
+  // The whole point of the per-account list: a rep picks up on a machine that
+  // has never seen this conversation, so the turns must come over the wire.
+  const { app } = await openApp([
+    { sessionId: 'aaaa11112222', title: 'Skan COO deck', updatedAt: new Date().toISOString() },
+  ]);
+
+  await app.waitForSelector('#chats-body .rail-item');
+  await app.click('#chats-body .rail-item');
+
+  await app.waitForFunction(
+    () => document.querySelector('.vk-log').textContent.includes('Deal Desk owns the discount.'),
+    null,
+    { timeout: 5000 },
+  );
+  assert.equal(await app.evaluate(() => window.VikatChat.sessionId()), 'aaaa11112222');
+  await app.close();
+});
+
+test('New chat clears the conversation and the assets', async () => {
+  const { app } = await openApp([]);
+
+  await app.evaluate(() => {
+    window.VikatChat.open('cccc55556666', [{ userMessage: 'old', agentResponse: 'older' }]);
+  });
+  await app.waitForFunction(() => document.querySelector('.vk-log').textContent.includes('older'));
+
+  await app.click('#chats-new');
+  await app.waitForFunction(() => !document.querySelector('.vk-log').textContent.includes('older'));
+
+  assert.notEqual(await app.evaluate(() => window.VikatChat.sessionId()), 'cccc55556666');
+  await app.close();
+});
+
+test('assets arrive on their own event, grouped, and deduplicated', async () => {
+  // Built from the tool result rather than scraped from the answer: the model
+  // decides how much of a result to mention, and a rail built from what it
+  // happened to write would lose the fourth deck whenever it listed three.
+  const { app } = await openApp([]);
+
+  await app.evaluate(() => {
+    window.VikatChatInternals.emitForTest('asset', [
+      { kind: 'generated', name: 'Acme_Brief.pdf', url: '/document/x', disclosure: 'Internal only' },
+      { kind: 'collateral', name: 'VShield Pricing.pptx', url: 'https://vikatai.sharepoint.com/p.pptx', folder: 'Pricing' },
+      { kind: 'collateral', name: 'VShield Pricing.pptx', url: 'https://vikatai.sharepoint.com/p.pptx', folder: 'Pricing' },
+    ]);
+  });
+
+  await app.waitForFunction(() => document.querySelectorAll('#assets-body .asset').length === 2, null, {
+    timeout: 5000,
+  });
+
+  const body = await app.textContent('#assets-body');
+  assert.match(body, /Generated/);
+  assert.match(body, /Referenced/);
+  assert.match(body, /Acme_Brief\.pdf/);
+  assert.equal(await app.textContent('#assets-count'), '2', 'the duplicate is one asset');
+  assert.equal(
+    await app.$eval('#assets-body .asset .warn', (n) => n.textContent),
+    'Internal only',
+    'the disclosure a rep must see before sending sits on the card',
+  );
+  await app.close();
+});
+
+test('a collapsed rail stays collapsed on the next visit', async () => {
+  const { app } = await openApp([]);
+
+  await app.click('#assets-tog');
+  assert.ok(await app.evaluate(() => document.querySelector('#pane-chat').classList.contains('r-shut')));
+
+  await app.reload();
+  await app.waitForFunction(() => Boolean(window.VikatChat));
+  assert.ok(
+    await app.evaluate(() => document.querySelector('#pane-chat').classList.contains('r-shut')),
+    'a rep who closed it has decided; reopening it every load overrules them daily',
+  );
+  // And the way back is still on screen.
+  assert.ok(await app.isVisible('#assets-tog'), 'the toggle must survive collapsing');
+  await app.close();
 });

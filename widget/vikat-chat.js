@@ -52,6 +52,26 @@
 
   /** @type {{role: string, content: string}[]} */
   var history = [];
+
+  // Listeners for the surrounding app. The widget owns the conversation, so
+  // the rails around it have to be told when it changes rather than polling
+  // for it — and a rail that guessed by reading sessionStorage would miss the
+  // moment a stream produced an asset.
+  var listeners = {};
+
+  function on(name, fn) {
+    (listeners[name] = listeners[name] || []).push(fn);
+  }
+
+  function emit(name, payload) {
+    (listeners[name] || []).forEach(function (fn) {
+      try {
+        fn(payload);
+      } catch (err) {
+        console.error('[chat] listener for ' + name + ' failed:', err);
+      }
+    });
+  }
   var busy = false;
   var controller = null;
 
@@ -635,6 +655,8 @@
             status.textContent = '';
             status.appendChild(el('span', 'vk-dot'));
             status.appendChild(el('span', null, toolLabel(data.name)));
+          } else if (event === 'asset') {
+            emit('asset', data.assets || []);
           } else if (event === 'error') {
             status.remove();
             addError(data.message, { retry: data.code === 'upstream_busy' });
@@ -647,6 +669,10 @@
       if (answer.trim()) {
         history.push({ role: 'assistant', content: answer });
         saveHistory();
+        // The server indexed this conversation on the turn it just handled, so
+        // a brand-new chat only becomes listable now. The rail refreshes on
+        // this rather than on send, or it would ask before the entry existed.
+        emit('turn', sessionId());
       } else {
         // Nothing came back — do not leave a stale user turn that would be
         // resent with the next message.
@@ -706,7 +732,8 @@
     submit();
   });
 
-  resetBtn.addEventListener('click', function () {
+  /** Abandon this conversation and start an unnamed one. */
+  function newChat() {
     if (controller) controller.abort();
     history = [];
     try {
@@ -716,8 +743,39 @@
       /* nothing to clear */
     }
     repaint();
+    emit('session', sessionId());
     input.focus();
-  });
+  }
+
+  /**
+   * Reopen a past conversation.
+   *
+   * `turns` comes from GET /chats/:id, which is the SERVER's record of what
+   * was said. Replaying from there rather than from sessionStorage is what
+   * makes a chat openable on a second machine at all.
+   */
+  function openChat(id, turns) {
+    if (controller) controller.abort();
+
+    history = [];
+    (turns || []).forEach(function (turn) {
+      if (turn.userMessage) history.push({ role: 'user', content: turn.userMessage });
+      if (turn.agentResponse) history.push({ role: 'assistant', content: turn.agentResponse });
+    });
+
+    try {
+      sessionStorage.setItem(SESSION_KEY, id);
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    } catch (e) {
+      /* the conversation still works for this page view */
+    }
+
+    repaint();
+    emit('session', id);
+    input.focus();
+  }
+
+  resetBtn.addEventListener('click', newChat);
 
   function open() {
     panel.classList.remove('vk-hidden');
@@ -786,5 +844,19 @@
   // at all, and renderBody turns model output into DOM — both are worth
   // asserting on directly rather than through a live conversation. Exposed
   // deliberately; neither reads module state.
-  window.VikatChatInternals = { splitTags: splitTags, renderBody: renderBody };
+  /**
+   * What the app shell around this widget is allowed to use.
+   *
+   * Deliberately small: the widget owns the conversation and the rails read
+   * from it, never the other way round. A rail that wrote history directly
+   * would be a second owner of the same state.
+   */
+  window.VikatChat = {
+    newChat: newChat,
+    open: openChat,
+    sessionId: sessionId,
+    on: on,
+  };
+
+  window.VikatChatInternals = { splitTags: splitTags, renderBody: renderBody, emitForTest: emit };
 })();
