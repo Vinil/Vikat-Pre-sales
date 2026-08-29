@@ -171,6 +171,31 @@ export function extractText(buffer, name) {
 // --- PDF ------------------------------------------------------------------
 
 /**
+ * A parenthesised string handed to a text-showing operator.
+ *
+ * The grouping matters and used to be wrong: `/\(([^)]*)\)\s*Tj|TJ/` reads as
+ * "(...)Tj OR TJ", so a bare "TJ" anywhere passed — and two such bytes turn up
+ * constantly in binary. That is how compressed image data came to be scanned
+ * for text.
+ */
+const SHOW_OPERATOR = /\(((?:\\.|[^\\()])*)\)\s*(?:Tj|TJ|')/;
+
+/** Printable-ish latin1, the alphabet a PDF content stream is written in. */
+function printableRatio(s) {
+  if (!s) return 0;
+  const printable = s.replace(/[^\x20-\x7E\r\n\t]/g, '').length;
+  return printable / s.length;
+}
+
+/**
+ * Whether an un-inflated stream is plausibly an uncompressed content stream
+ * rather than image or font bytes that happen to contain a text operator.
+ */
+function looksLikeContentStream(s) {
+  return printableRatio(s) > 0.9 && /\bBT\b/.test(s);
+}
+
+/**
  * Best-effort PDF text extraction.
  *
  * PDFs store text as positioned glyph runs, so faithful extraction needs a
@@ -198,22 +223,43 @@ export function extractPdf(buffer, name) {
     try {
       decoded = inflateSync(chunk).toString('latin1');
     } catch {
-      // Not deflate, or corrupt. Fall back to treating it as literal.
-      decoded = chunk.toString('latin1');
+      // A stream that will not inflate is an image, a font, or a filter this
+      // does not implement. It is NOT text. Treating it as literal put raw
+      // compressed bytes through the operator scan below, and a rep opened the
+      // Collateral tab to a summary reading 's85$^p`meEs^]#Eh&DP!B^S.cO'.
+      // Uncompressed content streams do exist, so keep it only if it reads as
+      // one.
+      const literal = chunk.toString('latin1');
+      decoded = looksLikeContentStream(literal) ? literal : null;
     }
 
-    if (decoded && /\(([^)]*)\)\s*Tj|TJ/.test(decoded)) raw += `${decoded}\n`;
+    if (decoded && SHOW_OPERATOR.test(decoded)) raw += `${decoded}\n`;
   }
 
   // Pull the literal strings out of text-showing operators.
   const pieces = [];
-  const showRe = /\(((?:\\.|[^\\()])*)\)\s*(?:Tj|TJ|')/g;
+  const showRe = new RegExp(SHOW_OPERATOR.source, 'g');
   let s;
   while ((s = showRe.exec(raw)) !== null) {
     pieces.push(s[1].replace(/\\([()\\])/g, '$1').replace(/\\[rn]/g, ' '));
   }
 
   const text = pieces.join(' ').replace(/\s+/g, ' ').trim();
+
+  // The comment above this function promises it "gives up loudly rather than
+  // emitting mangled output". It did not: mangled output reached the knowledge
+  // base and the Collateral tab as a document summary. This is that promise,
+  // enforced. Prose is overwhelmingly printable and has spaces in it; a run of
+  // decompression noise is neither.
+  const wordish = text.split(/\s+/).filter((w) => /^[\x20-\x7E]{1,30}$/.test(w)).length;
+  const mangled = text && (printableRatio(text) < 0.95 || wordish / Math.max(1, text.split(/\s+/).length) < 0.6);
+
+  if (mangled) {
+    warnings.push(
+      'extracted text failed a legibility check and was discarded — the PDF stores its text in a form this extractor cannot read. Convert it to .docx or .pptx.',
+    );
+    return { sections: [], warnings };
+  }
 
   if (!text) {
     warnings.push(

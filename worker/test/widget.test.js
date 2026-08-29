@@ -614,3 +614,34 @@ test('a collapsed rail stays collapsed on the next visit', async () => {
   assert.ok(await app.isVisible('#assets-tog'), 'the toggle must survive collapsing');
   await app.close();
 });
+
+test('switching to Collateral hides the chat entirely', async () => {
+  // It did not. #pane-chat sets `display: grid` for its rails, and an ID
+  // selector outranks `.pane[hidden]` — so the Collateral list rendered on top
+  // of a still-visible conversation, with the chat rail, the transcript and
+  // the assets rail all showing through it.
+  const { app } = await openApp([]);
+
+  await app.click('#tab-collateral');
+  await app.waitForFunction(
+    () => document.querySelector('#pane-collateral').hidden === false,
+    null,
+    { timeout: 5000 },
+  );
+
+  const chatVisible = await app.evaluate(() => {
+    const pane = document.querySelector('#pane-chat');
+    return getComputedStyle(pane).display !== 'none';
+  });
+  assert.equal(chatVisible, false, 'the chat pane must not be painted behind the collateral list');
+
+  // And back, with the grid intact rather than collapsed to a block.
+  await app.click('#tab-chat');
+  await app.waitForFunction(() => document.querySelector('#pane-chat').hidden === false);
+  assert.equal(
+    await app.evaluate(() => getComputedStyle(document.querySelector('#pane-chat')).display),
+    'grid',
+    'the rails layout must survive being hidden and shown',
+  );
+  await app.close();
+});

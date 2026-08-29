@@ -90,7 +90,11 @@
   main { flex: 1 1 auto; min-height: 0; position: relative; }
 
   .pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
-  .pane[hidden] { display: none; }
+  /* !important because #pane-chat sets display for its grid, and an ID beats
+     an attribute selector. Hiding a pane is a visibility primitive, not a
+     layout preference: when it lost that fight the Collateral tab rendered on
+     top of a still-visible chat, both at once. */
+  .pane[hidden] { display: none !important; }
 
   /* Chat pane: three columns, the conversation in the middle.
      The rails collapse to a spine rather than disappearing, so the way back is

@@ -128,6 +128,68 @@ test('extracted PDF text is flagged as best-effort', () => {
   assert.match(r.warnings[0], /best-effort/, 'the caller must know not to trust this blindly');
 });
 
+test('a binary stream containing "TJ" is not mined for text', () => {
+  // What a rep actually saw in the Collateral tab, as the summary of
+  // Vikat_SecSemantic_ExecBrief.pdf:
+  //
+  //   s85$^p`meEs^]#Eh&DP!B^S.cO 8R;$.Oj1PX6mk4M_H4tc+V"V*2D
+  //
+  // Two defects together. The gate read /\(([^)]*)\)\s*Tj|TJ/, which parses as
+  // "(...)Tj OR TJ" — so a bare "TJ" anywhere passed, and those two bytes turn
+  // up constantly in compressed data. And a stream that failed to inflate was
+  // kept as "literal" text, so image bytes reached the operator scan, which
+  // duly found parenthesised runs in the noise.
+  // Bytes that fail to inflate, are mostly unprintable, and happen to contain
+  // both a bare "TJ" and a parenthesised run followed by "Tj" — which is all
+  // it took. Built explicitly rather than with random noise: the first version
+  // of this test used noise that never reached the operator scan, so it passed
+  // against the broken code and proved nothing.
+  const noise = Buffer.concat([
+    Buffer.from([0x78, 0x9c, 0xff, 0xfe, 0x00, 0x91, 0xd3, 0x1b, 0x00, 0xa7]),
+    Buffer.from('TJ', 'latin1'),
+    Buffer.from([0x00, 0xbe, 0xef, 0x1c]),
+    Buffer.from('(s85$^p`meEs^]#Eh&DP!B^S.cO) Tj', 'latin1'),
+    Buffer.from([0x00, 0xd9, 0x7a, 0x03, 0xfc, 0x8b]),
+  ]);
+  const pdf = Buffer.concat([
+    Buffer.from('%PDF-1.4\nstream\n', 'latin1'),
+    noise,
+    Buffer.from('\nendstream\n%%EOF', 'latin1'),
+  ]);
+
+  const r = extractPdf(pdf, 'Vikat_SecSemantic_ExecBrief.pdf');
+  assert.deepEqual(r.sections, [], 'binary must not become a document summary');
+  assert.ok(
+    r.warnings.some((w) => /no extractable text|legibility/.test(w)),
+    'and it must say so, rather than failing silently',
+  );
+});
+
+test('mangled output is discarded even if it reaches the end', () => {
+  // The belt to the braces. This function's own comment promises it "gives up
+  // loudly rather than emitting mangled output"; until now it did not, and the
+  // consequence was not cosmetic — the same text became knowledge-base chunks
+  // the assistant could retrieve and quote.
+  const junk = '(\x01\x9e\xd3q\x88\xfe\x11) Tj (\x7f\xa0\xb2\xc4) Tj';
+  const pdf = Buffer.from(`%PDF-1.4\nstream\nBT ${junk} ET\nendstream\n%%EOF`, 'latin1');
+
+  const r = extractPdf(pdf, 'garbled.pdf');
+  assert.deepEqual(r.sections, []);
+  assert.ok(r.warnings.length, 'silence is the failure being prevented');
+});
+
+test('an uncompressed content stream is still read', () => {
+  // The fallback exists for a reason: plenty of PDFs carry plain content
+  // streams. Refusing every un-inflatable stream would have fixed the garbage
+  // by breaking the feature.
+  const pdf = Buffer.from(
+    '%PDF-1.4\nstream\nBT /F1 12 Tf (VShield validates every MCP tool call.) Tj ET\nendstream\n%%EOF',
+  );
+  const r = extractPdf(pdf, 'plain.pdf');
+  assert.equal(r.sections.length, 1);
+  assert.match(r.sections[0].content, /VShield validates every MCP tool call/);
+});
+
 // --- Dispatch -------------------------------------------------------------
 
 test('extract dispatches on file extension', () => {
