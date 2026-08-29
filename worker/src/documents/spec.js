@@ -25,6 +25,13 @@ export const LIMITS = {
   sectionTitleChars: 90,
   sectionBodyChars: 600,
   points: 6,
+  /**
+   * Sections above which a deck must draw something.
+   *
+   * Four rather than two: a short deck is often a genuine summary, and
+   * refusing those would teach the model to pad rather than to visualise.
+   */
+  proseOnlyDeck: 4,
   pointChars: 180,
   eyebrowChars: 40,
 };
@@ -67,6 +74,27 @@ export function normaliseSpec(input) {
 
   if (sections.length === 0) {
     return { ok: false, error: 'At least one section with content is required.' };
+  }
+
+  // A deck of nothing but prose is the thing the drawn layouts exist to
+  // prevent, and it is what a rep got when they asked for five visual slides.
+  //
+  // Refused rather than warned about, because a warning attached to a
+  // successfully built file is a warning nobody reads — the deck is already in
+  // SharePoint by then. The model gets one specific instruction and rebuilds.
+  //
+  // Only for a deck, and only past a few sections: a three-slide summary is
+  // legitimately prose, and a pdf is a document where paragraphs are the point.
+  if (format === 'pptx' && sections.length >= LIMITS.proseOnlyDeck && !sections.some((s) => s.layout)) {
+    return {
+      ok: false,
+      error:
+        `A ${sections.length}-slide deck with no drawn slides is a document with slide breaks. ` +
+        'Rebuild it using at least one of stat, bars, chain, timeline, split or quote for the ' +
+        'content that has that shape — a figure, a comparison, a sequence, a platform, two ' +
+        'states, or the one line to end on. Keep prose slides for the parts that are genuinely ' +
+        'argument.',
+    };
   }
 
   return {

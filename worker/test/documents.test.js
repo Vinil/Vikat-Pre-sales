@@ -97,7 +97,9 @@ test('over-long content is truncated, not rejected', () => {
 
 test('the section and point counts are capped', () => {
   const many = Array.from({ length: 40 }, (_, i) => ({ title: `Section ${i}`, points: Array(20).fill('point') }));
-  const s = spec({ sections: many });
+  // As a pdf: the caps are format-independent, and a 40-slide deck of pure
+  // prose is now refused for a different reason entirely.
+  const s = spec({ format: 'pdf', sections: many });
   assert.equal(s.sections.length, LIMITS.sections);
   assert.equal(s.sections[0].points.length, LIMITS.points);
 });
@@ -791,4 +793,45 @@ test('an unknown directive is a title, not a silent drop', () => {
   assert.ok(r.ok);
   assert.equal(r.spec.sections[0].layout, undefined);
   assert.match(r.spec.sections[0].title, /a \| b/i, 'the words still reach the slide');
+});
+
+// --- visual richness ------------------------------------------------------
+
+const proseDeck = (n) =>
+  Array.from({ length: n }, (_, i) => `## section ${i} | Heading ${i}\nSome prose for slide ${i}.`).join('\n\n');
+
+test('a deck of nothing but prose is refused, not quietly built', () => {
+  // What a rep actually got when they asked for five visual slides. Refused
+  // rather than warned about: a warning attached to a built file is one nobody
+  // reads, because the deck is already in SharePoint by then.
+  const r = normaliseSpec({ format: 'pptx', title: 'SecSemantic for agriculture', content: proseDeck(5) });
+
+  assert.equal(r.ok, false);
+  assert.match(r.error, /drawn slides/);
+  // The message has to be actionable, or the model cannot fix it.
+  for (const layout of ['stat', 'bars', 'chain', 'timeline', 'split', 'quote']) {
+    assert.match(r.error, new RegExp(layout), `the refusal must name ${layout}`);
+  }
+});
+
+test('one drawn slide is enough to satisfy it', () => {
+  // The rule is against a deck that draws NOTHING, not a quota. A quota would
+  // push the model to decorate slides whose content has no shape.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content: `${proseDeck(5)}\n\n## quote | The one line to end on.`,
+  });
+  assert.ok(r.ok, r.error);
+});
+
+test('a short deck may be all prose', () => {
+  // A three-slide summary is legitimately prose. Refusing those would teach
+  // the model to pad a deck rather than to visualise one.
+  assert.ok(normaliseSpec({ format: 'pptx', title: 'T', content: proseDeck(3) }).ok);
+});
+
+test('a pdf is never refused for being prose', () => {
+  // It is a document. Paragraphs are the point.
+  assert.ok(normaliseSpec({ format: 'pdf', title: 'T', content: proseDeck(8) }).ok);
 });
