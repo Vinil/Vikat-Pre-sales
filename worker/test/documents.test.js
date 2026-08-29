@@ -15,6 +15,7 @@ import { PDFDocument } from 'pdf-lib';
 import { normaliseSpec, parseSections, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
 import { renderPdf } from '../src/documents/pdf.js';
+import { renderDocx } from '../src/documents/docx.js';
 import { createDocument } from '../src/documents/index.js';
 import { loadFonts } from '../src/documents/fonts.js';
 import { deliverDocument, documentStoreStatus, resetCaches } from '../src/documentStore.js';
@@ -74,7 +75,7 @@ test('emoji are stripped from anything that reaches a document', () => {
 // --- Spec -----------------------------------------------------------------
 
 test('an unknown format is refused rather than guessed at', () => {
-  const r = normaliseSpec({ format: 'docx', title: 'x', sections: [{ title: 'y' }] });
+  const r = normaliseSpec({ format: 'keynote', title: 'x', sections: [{ title: 'y' }] });
   assert.ok(!r.ok);
   assert.match(r.error, /format/);
 });
@@ -834,4 +835,114 @@ test('a short deck may be all prose', () => {
 test('a pdf is never refused for being prose', () => {
   // It is a document. Paragraphs are the point.
   assert.ok(normaliseSpec({ format: 'pdf', title: 'T', content: proseDeck(8) }).ok);
+});
+
+// --- DOCX -----------------------------------------------------------------
+
+const docxSpec = (content) => {
+  const r = normaliseSpec({
+    format: 'docx',
+    title: 'SecSemantic for agriculture',
+    subtitle: 'Defend what the harvest depends on.',
+    audience: 'Agricultural producer security leadership',
+    disclosure: 'external_ok',
+    content:
+      content ||
+      [
+        '## context | Why agriculture is targeted',
+        'Attackers time intrusions to the calendar.',
+        '- Seventeen days offline during harvest is a season',
+        '',
+        '## stat | 265 | attacks on food and agriculture in 2025',
+        'Harvest windows are the target.',
+        '',
+        '## bars | MTTR 71 | Alert noise 90',
+        'Measured',
+        '',
+        '## chain | VSentinel > VInsight > VCommand > VShield',
+        'Four planes',
+        '',
+        '## quote | A harvest does not wait for your patch window.',
+      ].join('\n'),
+  });
+  assert.ok(r.ok, r.error);
+  return r.spec;
+};
+
+const docxParts = (bytes) => {
+  const files = unzipSync(bytes);
+  return Object.fromEntries(Object.entries(files).map(([k, v]) => [k, strFromU8(v)]));
+};
+
+test('a docx contains the parts Word requires to open it', () => {
+  const parts = docxParts(renderDocx(docxSpec(), META));
+  for (const required of [
+    '[Content_Types].xml',
+    '_rels/.rels',
+    'word/document.xml',
+    'word/_rels/document.xml.rels',
+    'word/styles.xml',
+    'word/footer1.xml',
+  ]) {
+    assert.ok(parts[required], `missing ${required}`);
+  }
+});
+
+test('every table declares a grid', () => {
+  // CT_Tbl puts w:tblGrid immediately after w:tblPr, and Word and LibreOffice
+  // both refuse the whole FILE without it. python-docx parses it happily,
+  // which is how a document that cannot be opened can look fine from a script.
+  const doc = docxParts(renderDocx(docxSpec(), META))['word/document.xml'];
+  const tables = (doc.match(/<w:tbl>/g) || []).length;
+  const grids = (doc.match(/<w:tblGrid>/g) || []).length;
+  assert.ok(tables > 0, 'the drawn layouts should have produced tables');
+  assert.equal(grids, tables, 'every table needs its grid');
+});
+
+test('a docx uses only the palette and the two typefaces', () => {
+  // The same rule the deck and the pdf live under. Word additionally falls
+  // back to Calibri for anything unstyled, which is why styles.xml sets the
+  // default too — "approximately the brand" is what a guideline exists to
+  // prevent.
+  const parts = docxParts(renderDocx(docxSpec(), META));
+  const allowed = new Set(PALETTE.map((c) => c.replace('#', '').toUpperCase()));
+
+  for (const name of ['word/document.xml', 'word/footer1.xml', 'word/styles.xml']) {
+    for (const [, value] of parts[name].matchAll(/w:(?:color|fill) w:val="([0-9A-Fa-f]{6})"/g)) {
+      assert.ok(allowed.has(value.toUpperCase()), `${name} uses ${value}, which is not in the palette`);
+    }
+    for (const [, face] of parts[name].matchAll(/w:ascii="([^"]+)"/g)) {
+      assert.ok(/^(Inter|JetBrains Mono)$/.test(face), `${name} uses ${face}`);
+    }
+  }
+});
+
+test('the disclosure label is in the footer, so it repeats on every page', () => {
+  // Drawn by the renderer into a footer part rather than written by the model
+  // at the end of the text: Word repeats a footer on every page by itself,
+  // which is the same guarantee the deck gets by drawing it on each slide.
+  const parts = docxParts(renderDocx(docxSpec(), META));
+  assert.ok(parts['word/footer1.xml'].includes(eyebrowCase(DISCLOSURE_LABELS.external_ok)));
+  assert.match(parts['word/document.xml'], /<w:footerReference w:type="default"/, 'and the body must reference it');
+});
+
+test('a docx of pure prose is allowed', () => {
+  // The drawn-layout rule is about decks. A brief is a document; paragraphs
+  // are what it is for.
+  const r = normaliseSpec({ format: 'docx', title: 'T', content: proseDeck(8) });
+  assert.ok(r.ok, r.error);
+  assert.ok(renderDocx(r.spec, META).length > 0);
+});
+
+test('a bar never spans more of the grid than it has', () => {
+  // The bar is drawn in twelfths, so a rounding error would let a value paint
+  // past the track — and the printed number beside it would then disagree with
+  // the picture.
+  const spec = docxSpec('## bars | Tiny 1 | Huge 100\nMeasured');
+  const doc = docxParts(renderDocx(spec, META))['word/document.xml'];
+
+  for (const [, span] of doc.matchAll(/<w:gridSpan w:val="(\d+)"\/>/g)) {
+    assert.ok(Number(span) <= 12, `a cell spans ${span} of 12 columns`);
+  }
+  assert.match(doc, />100</, 'the real figure is printed, so the scaling cannot overstate it');
 });

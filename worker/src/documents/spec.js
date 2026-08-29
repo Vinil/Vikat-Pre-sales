@@ -15,7 +15,7 @@
 import { brandSafe, sentenceCase } from '../brand.js';
 
 /** Formats the assistant can produce. */
-export const FORMATS = ['pptx', 'pdf'];
+export const FORMATS = ['pptx', 'pdf', 'docx'];
 
 /** Caps, so one tool call cannot ask for a hundred-slide deck. */
 export const LIMITS = {

@@ -193,9 +193,9 @@ export const TOOL_DEFINITIONS = [
       properties: {
         format: {
           type: 'string',
-          enum: ['pptx', 'pdf'],
+          enum: ['pptx', 'pdf', 'docx'],
           description:
-            'pptx for something the rep will present or edit; pdf for something they will send, where the layout must not move.',
+            'pptx for something the rep will present; docx for something a person will revise before it goes out; pdf for something they will send as-is, where the layout must not move.',
         },
         title: {
           type: 'string',

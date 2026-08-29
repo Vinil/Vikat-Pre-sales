@@ -13,11 +13,13 @@
 import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS } from './spec.js';
 import { renderPptx } from './pptx.js';
 import { renderPdf } from './pdf.js';
+import { renderDocx } from './docx.js';
 import { deliverDocument } from '../documentStore.js';
 
 const CONTENT_TYPE = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 
 /**
@@ -45,7 +47,9 @@ export async function createDocument(input, ctx) {
   const bytes =
     spec.format === 'pdf'
       ? await renderPdf(spec, { preparedBy, isoDate }, fonts)
-      : renderPptx(spec, { preparedBy, isoDate }, fonts.metrics);
+      : spec.format === 'docx'
+        ? renderDocx(spec, { preparedBy, isoDate })
+        : renderPptx(spec, { preparedBy, isoDate }, fonts.metrics);
 
   const fileName = fileNameFor(spec, isoDate);
   const contentType = CONTENT_TYPE[spec.format];
