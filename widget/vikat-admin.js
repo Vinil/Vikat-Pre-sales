@@ -316,7 +316,69 @@
 
   var ROLE_LABEL = { admin: 'Admin', rep: 'Rep', denied: 'Denied' };
 
+  /**
+   * Grants this browser has made that the server list has not caught up with.
+   *
+   * Workers KV is eventually consistent for LIST specifically: a put is
+   * visible to a get straight away, but the key can take a while to appear in
+   * a list. So the panel saved a grant, re-listed, got the old answer, and
+   * showed "No explicit grants yet." — the write had worked and the screen
+   * said otherwise. Nothing in the test suite caught it because fakeKV is a
+   * Map and answers a list immediately.
+   *
+   * email -> row, or null for a removal awaiting the same catch-up.
+   */
+  var pendingUsers = {};
+
+  /**
+   * The server's list, with this browser's own recent changes applied.
+   *
+   * An entry drops out of the overlay as soon as the server agrees with it,
+   * so this converges rather than accumulating a parallel truth.
+   */
+  function mergeUsers(users) {
+    var byEmail = {};
+    (users || []).forEach(function (u) { byEmail[u.email] = u; });
+
+    Object.keys(pendingUsers).forEach(function (email) {
+      var mine = pendingUsers[email];
+      var theirs = byEmail[email];
+
+      if (mine === null) {
+        if (theirs) delete byEmail[email];
+        else delete pendingUsers[email];
+        return;
+      }
+
+      if (theirs && theirs.role === mine.role) {
+        delete pendingUsers[email];
+        return;
+      }
+
+      byEmail[email] = Object.assign({}, mine, { pending: true });
+    });
+
+    return Object.keys(byEmail)
+      .map(function (email) { return byEmail[email]; })
+      .sort(function (a, b) {
+        // Bootstrap admins first, as the server orders them, then by address.
+        var rank = (a.source === 'bootstrap' ? 0 : 1) - (b.source === 'bootstrap' ? 0 : 1);
+        return rank || a.email.localeCompare(b.email);
+      });
+  }
+
+  /** Apply a change locally and repaint, before asking the server again. */
+  function noteUserChange(email, row) {
+    pendingUsers[String(email).toLowerCase()] = row;
+    if (lastUserData) renderUsers(lastUserData);
+    loadUsers();
+  }
+
+  var lastUserData = null;
+
   function renderUsers(data) {
+    lastUserData = data;
+
     var list = $('#user-list');
     list.textContent = '';
 
@@ -325,7 +387,7 @@
         ? 'Anyone who can sign in with a Vikat account is a Rep by default. Set someone to Denied to block them.'
         : 'Nobody has access until they are granted a role here.';
 
-    var users = data.users || [];
+    var users = mergeUsers(data.users);
     if (users.length === 0) {
       list.appendChild(el('div', 'empty', 'No explicit grants yet.'));
       return;
@@ -343,9 +405,11 @@
       main.appendChild(title);
 
       main.appendChild(el('div', 'item-meta',
-        u.editable
-          ? 'Granted by ' + (u.grantedBy || 'unknown') + ' · ' + fmtDate(u.updatedAt)
-          : 'Set in wrangler.toml as a bootstrap admin. Cannot be changed here.'));
+        !u.editable
+          ? 'Set in wrangler.toml as a bootstrap admin. Cannot be changed here.'
+          : u.pending
+            ? 'Saved just now — the directory takes a moment to list it.'
+            : 'Granted by ' + (u.grantedBy || 'unknown') + ' · ' + fmtDate(u.updatedAt)));
 
       var actions = el('div', 'item-actions');
 
@@ -361,7 +425,10 @@
         change.style.width = 'auto';
         change.addEventListener('change', function () {
           api('/admin/users', { method: 'POST', body: { email: u.email, role: change.value } })
-            .then(function () { toast('Role updated.'); loadUsers(); })
+            .then(function (r) {
+              toast('Role updated.');
+              noteUserChange(u.email, r.user);
+            })
             .catch(function () { loadUsers(); });
         });
         actions.appendChild(change);
@@ -371,7 +438,10 @@
         del.addEventListener('click', function () {
           if (!confirm('Remove the explicit grant for ' + u.email + '?')) return;
           api('/admin/users?email=' + encodeURIComponent(u.email), { method: 'DELETE' })
-            .then(function (r) { toast(r.note || 'Removed.'); loadUsers(); })
+            .then(function (r) {
+              toast(r.note || 'Removed.');
+              noteUserChange(u.email, null);
+            })
             .catch(function () {});
         });
         actions.appendChild(del);
@@ -389,10 +459,11 @@
       method: 'POST',
       body: { email: $('#user-email').value, role: $('#user-role').value },
     })
-      .then(function () {
+      .then(function (r) {
         toast('Role saved.');
+        var email = $('#user-email').value;
         $('#user-form').reset();
-        loadUsers();
+        noteUserChange(r.user ? r.user.email : email, r.user);
       })
       .catch(function () {});
   });

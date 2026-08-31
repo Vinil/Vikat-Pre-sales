@@ -645,3 +645,136 @@ test('switching to Collateral hides the chat entirely', async () => {
   );
   await app.close();
 });
+
+// --- the admin user list, against a lagging directory ---------------------
+
+/** admin.html with a users API whose list can be told to lag its own writes. */
+async function openAdminUsers({ lagList = false } = {}) {
+  const admin = await browser.newPage();
+  const stored = [];
+
+  await admin.route('**/admin/**', (route) => {
+    const req = route.request();
+    const url = req.url();
+    const json = (body, status = 200) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (url.includes('/admin/summary')) {
+      return json({ you: { email: 'boss@vikat.ai', role: 'admin', roleSource: 'bootstrap' } });
+    }
+    if (url.includes('/admin/knowledge')) return json({ entries: [] });
+    if (!url.includes('/admin/users')) return json({});
+
+    if (req.method() === 'POST') {
+      const body = JSON.parse(req.postData() || '{}');
+      const user = {
+        email: body.email,
+        role: body.role,
+        grantedBy: 'boss@vikat.ai',
+        updatedAt: new Date().toISOString(),
+        source: 'grant',
+        editable: true,
+      };
+      // The write lands; whether the LIST sees it yet is the whole question.
+      if (!lagList) stored.push(user);
+      return json({ user });
+    }
+
+    if (req.method() === 'DELETE') return json({ note: 'Removed.' });
+
+    return json({
+      users: [
+        { email: 'boss@vikat.ai', role: 'admin', source: 'bootstrap', grantedBy: 'wrangler.toml', editable: false },
+        ...stored,
+      ],
+      defaultRole: 'rep',
+      roles: ['admin', 'rep', 'denied'],
+    });
+  });
+
+  await admin.goto(`file://${ADMIN_HTML}`);
+  await admin.waitForFunction(() => document.querySelector('#whoami').textContent.includes('boss@vikat.ai'), null, {
+    timeout: 5000,
+  });
+  await admin.evaluate(() => {
+    document.querySelectorAll('[role=tabpanel]').forEach((p) => (p.hidden = true));
+    document.querySelector('#panel-users').hidden = false;
+  });
+  return admin;
+}
+
+test('a granted user appears even when the directory has not listed them yet', async () => {
+  // Workers KV is eventually consistent for LIST specifically: a put is
+  // visible to a get immediately, but the key takes a while to show up in a
+  // list. So the panel saved a grant, re-listed, got the old answer back, and
+  // reported "No explicit grants yet." — the write had worked and the screen
+  // said otherwise. fakeKV is a Map and lists instantly, which is why every
+  // server-side test passed.
+  const admin = await openAdminUsers({ lagList: true });
+
+  await admin.fill('#user-email', 'newrep@vikat.ai');
+  await admin.selectOption('#user-role', 'rep');
+  await admin.click('#user-form button[type=submit]');
+
+  await admin.waitForFunction(
+    () => document.querySelector('#user-list').textContent.includes('newrep@vikat.ai'),
+    null,
+    { timeout: 5000 },
+  );
+  assert.match(await admin.textContent('#user-list'), /Saved just now/, 'and say why it is not settled yet');
+  await admin.close();
+});
+
+test('a granted user comes with a role control and a way to remove them', async () => {
+  // Neither appeared, because both are rendered per row and there were no
+  // rows: one bug looked like three.
+  const admin = await openAdminUsers();
+
+  await admin.fill('#user-email', 'newrep@vikat.ai');
+  await admin.selectOption('#user-role', 'rep');
+  await admin.click('#user-form button[type=submit]');
+
+  await admin.waitForFunction(
+    () => document.querySelectorAll('#user-list .item').length === 2,
+    null,
+    { timeout: 5000 },
+  );
+
+  const controls = await admin.evaluate(() => {
+    const rows = [...document.querySelectorAll('#user-list .item')];
+    const granted = rows.find((r) => r.textContent.includes('newrep@vikat.ai'));
+    const bootstrap = rows.find((r) => r.textContent.includes('boss@vikat.ai'));
+    return {
+      grantedHasSelect: Boolean(granted.querySelector('select')),
+      grantedHasRemove: Boolean(granted.querySelector('button.danger')),
+      bootstrapHasSelect: Boolean(bootstrap.querySelector('select')),
+    };
+  });
+
+  assert.equal(controls.grantedHasSelect, true, 'a grant must be re-assignable');
+  assert.equal(controls.grantedHasRemove, true, 'and removable');
+  assert.equal(controls.bootstrapHasSelect, false, 'a bootstrap admin comes from config and must not be');
+  await admin.close();
+});
+
+test('the overlay clears once the server agrees, rather than double-listing', async () => {
+  // The failure this could have introduced: a local row and a server row for
+  // the same person, shown twice.
+  const admin = await openAdminUsers();
+
+  await admin.fill('#user-email', 'newrep@vikat.ai');
+  await admin.selectOption('#user-role', 'rep');
+  await admin.click('#user-form button[type=submit]');
+
+  await admin.waitForFunction(
+    () => document.querySelector('#user-list').textContent.includes('newrep@vikat.ai'),
+    null,
+    { timeout: 5000 },
+  );
+
+  const count = await admin.evaluate(
+    () => [...document.querySelectorAll('#user-list .item')].filter((r) => r.textContent.includes('newrep@vikat.ai')).length,
+  );
+  assert.equal(count, 1, 'one person, one row');
+  await admin.close();
+});
