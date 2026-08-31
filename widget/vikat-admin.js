@@ -245,7 +245,12 @@
     return api('/admin/upload')
       .then(function (r) {
         $('#up-accepts').textContent =
-          'Accepts ' + (r.accepts || []).join(', ') + ', up to ' + Math.round((r.maxBytes || 0) / 1024) + 'KB.';
+          'Accepts ' + (r.accepts || []).join(', ') + ', up to ' + Math.round((r.maxBytes || 0) / 1024) + 'KB.' +
+          (r.pdfReader === 'model'
+            // Office files are unzipped locally and cost nothing; a PDF is read
+            // by the model. Worth knowing before uploading fifty of them.
+            ? ' PDFs are read by the model, which takes longer and uses tokens.'
+            : ' PDFs are read locally, so a scanned one cannot be read at all.');
         $('#up-file').setAttribute('accept', (r.accepts || []).join(','));
 
         var select = $('#up-library');
@@ -298,7 +303,12 @@
     submit.disabled = true;
     // Reading a deck takes a moment and the button going quiet looks like
     // nothing happening, which is how someone ends up uploading it twice.
-    status.textContent = 'Reading ' + input.files[0].name + '…';
+    var isPdf = /\.pdf$/i.test(input.files[0].name);
+    status.textContent = isPdf
+      // A PDF goes to the model, which takes longer than unzipping a deck and
+      // costs tokens. Both are worth saying before the wait, not after.
+      ? 'Reading ' + input.files[0].name + ' with the model — this takes a moment and uses tokens…'
+      : 'Reading ' + input.files[0].name + '…';
 
     // Not through api(): that helper JSON-encodes its body, and multipart must
     // set its own boundary.
@@ -310,8 +320,26 @@
         if (!r.res.ok) throw new Error((r.payload && r.payload.error) || 'Upload failed');
 
         toast(r.payload.note || 'Uploaded.');
-        status.textContent =
-          r.payload.chunks + ' passage(s) added' + (r.payload.filed ? ' and filed in SharePoint.' : '.');
+
+        var said = r.payload.chunks + ' passage(s) added' + (r.payload.filed ? ' and filed in SharePoint.' : '.');
+        var usage = r.payload.usage;
+        if (r.payload.reader === 'model' && usage) {
+          // Printed rather than assumed: this is the one upload that spends
+          // money, and an admin should see how much before doing it fifty
+          // times.
+          said +=
+            ' Read by the model' +
+            (usage.pages ? ' (~' + usage.pages + ' pages, ' : ' (') +
+            (usage.inputTokens || 0).toLocaleString() +
+            ' in / ' +
+            (usage.outputTokens || 0).toLocaleString() +
+            ' out tokens).';
+        }
+        status.textContent = said;
+
+        // A truncated transcript or a fallback to the byte extractor is not a
+        // failure, but the admin has to know it happened.
+        (r.payload.warnings || []).forEach(function (w) { toast(w, true); });
         $('#up-form').reset();
         loadUploadTargets();
         loadKnowledge();

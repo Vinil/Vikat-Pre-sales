@@ -135,6 +135,11 @@ test('an uploaded document is answerable before any sync runs', async () => {
 test('a file whose text cannot be read is refused, and never filed', async () => {
   // A scanned PDF uploads cleanly and teaches the assistant nothing. Filing it
   // anyway would leave it in SharePoint looking indexed.
+  //
+  // The model reader is unreachable here (graphStub answers nothing else), so
+  // this is the case where BOTH readers fail — and the message the admin gets
+  // has to be about their document, not about the API. test/pdf.test.js
+  // covers the model reader itself.
   const { env } = setup();
   const stub = graphStub();
   const res = await withFetch(stub, () =>

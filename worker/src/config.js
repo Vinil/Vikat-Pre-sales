@@ -132,6 +132,25 @@ export const DEFAULTS = {
   // session, which a text document will never reach.
   MAX_DOCUMENT_BYTES: 4 * 1024 * 1024,
 
+  // --- Reading uploaded PDFs ---------------------------------------------
+  // 'model' — an uploaded PDF is read by the model, which handles subsetted
+  //   fonts and scanned pages that the byte extractor cannot. This SPENDS
+  //   TOKENS per upload, roughly 1,500-3,000 input tokens per page plus the
+  //   transcript it writes back; a 20-page PDF is a few cents. It is the only
+  //   place in the ingest path that costs anything, and the admin panel prints
+  //   the usage after every upload so it is visible rather than assumed.
+  // 'bytes' — the byte extractor only. Free, and correct on a PDF with a clean
+  //   text layer; on anything else it refuses and the upload fails.
+  // The nightly sync in CI has no API key, so it uses 'bytes' either way.
+  PDF_READER: 'model',
+  // The transcript's own ceiling, separate from MAX_TOKENS.
+  //
+  // A chat answer is a few hundred words; a faithful transcript of a 40-page
+  // brief is tens of thousands. At the chat ceiling of 16000 a long PDF stops
+  // half-read — honestly reported, but half-read. Only tokens actually
+  // generated are billed, so a short PDF costs no more for the higher ceiling.
+  PDF_READ_MAX_TOKENS: 32000,
+
   // --- Agent loop --------------------------------------------------------
   MAX_TOOL_ITERATIONS: 4,
 };
@@ -147,6 +166,7 @@ const NUMERIC_KEYS = new Set([
   'SESSION_TTL_SECONDS',
   'DOCUMENT_TTL_SECONDS',
   'MAX_DOCUMENT_BYTES',
+  'PDF_READ_MAX_TOKENS',
   'MAX_TOOL_ITERATIONS',
 ]);
 

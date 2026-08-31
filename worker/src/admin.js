@@ -263,6 +263,9 @@ async function handleUpload(request, url, ctx) {
         // file curated collateral where nothing reads it.
         reservedFolder: cfg.SHAREPOINT_GENERATED_FOLDER,
         sharePoint: ok ? 'ready' : reason,
+        // Whether a PDF will be read by the model, and so whether uploading
+        // one costs anything. The panel says so before the upload, not after.
+        pdfReader: cfg.PDF_READER === 'bytes' || !env.ANTHROPIC_API_KEY ? 'bytes' : 'model',
       },
       200,
       cors,
@@ -310,7 +313,9 @@ async function handleUpload(request, url, ctx) {
   // Read it first. A file whose text cannot be extracted must not be filed
   // anywhere: it would sit in SharePoint looking indexed and teach the
   // assistant nothing, which is worse than a refused upload.
-  const read = ingest(bytes, fileName);
+  // A PDF is read by the model rather than by parsing its bytes, so this
+  // spends tokens — see pdfText.js. The usage comes back and is reported.
+  const read = await ingest(bytes, fileName, { env, cfg });
   if (!read.ok) return json({ error: read.error, warnings: read.warnings }, 422, cors);
 
   const library = clean(form.get('library') || cfg.SHAREPOINT_LIBRARY).slice(0, 120);
@@ -354,6 +359,10 @@ async function handleUpload(request, url, ctx) {
       warnings: read.warnings,
       filed: filed.ok,
       webUrl: filed.ok ? filed.webUrl : null,
+      // What read it, and what that cost. Said rather than hidden: this is the
+      // one upload path that spends model tokens.
+      reader: read.reader,
+      usage: read.usage || null,
       // Said plainly rather than implied: the assistant knows it either way,
       // and whether it also reached SharePoint is a separate fact.
       note: filed.ok
