@@ -108,7 +108,20 @@ export function searchCollateral(query, options = {}) {
   return rankDocuments(COLLATERAL, query, options);
 }
 
-/** How many documents are indexed. Surfaced by /collateral and /health. */
+/**
+ * The compiled index plus documents uploaded since it was built.
+ *
+ * An upload is provisional in exactly the way an uploaded knowledge chunk is:
+ * it shows in the Collateral tab immediately, and drops out the night the sync
+ * indexes the same file from SharePoint and the compiled index carries it. One
+ * document, one row, whichever side of that boundary you are on.
+ */
+export function searchCollateralWith(uploaded, query, options = {}) {
+  const compiledPages = new Set(COLLATERAL.map((d) => d.page));
+  const extra = (uploaded || []).filter((d) => d.page && !compiledPages.has(d.page));
+  return rankDocuments([...extra, ...COLLATERAL], query, options);
+}
+
 export function collateralCount() {
   return COLLATERAL.length;
 }

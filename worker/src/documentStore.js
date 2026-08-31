@@ -125,6 +125,92 @@ function encodePath(segments) {
  * @param {object} cfg
  * @returns {Promise<{ delivered: boolean, webUrl?: string, reason?: string }>}
  */
+/**
+ * The document libraries on the site, so an admin can choose where a file goes.
+ *
+ * Names only. The caller picks one and hands it back to uploadDocument, which
+ * resolves it again — the drive id is never sent to a browser, because it is
+ * the one part of this that a URL could be built from.
+ */
+export async function listLibraries(env, cfg) {
+  if (!graphConfigured(env, cfg)) return { ok: false, reason: 'not_configured', libraries: [] };
+
+  try {
+    const token = await getToken(env);
+    const siteId =
+      cfg.SHAREPOINT_SITE_ID ||
+      (await graph(token, `/sites/${cfg.SHAREPOINT_HOSTNAME}:${cfg.SHAREPOINT_SITE_PATH}`)).id;
+    const drives = await graph(token, `/sites/${siteId}/drives`);
+
+    return {
+      ok: true,
+      libraries: (drives.value || [])
+        .filter((d) => d.driveType === 'documentLibrary')
+        .map((d) => d.name)
+        .sort(),
+    };
+  } catch (err) {
+    console.error('[documentStore] listLibraries failed:', err?.message || err);
+    return { ok: false, reason: 'error', libraries: [] };
+  }
+}
+
+/**
+ * Put a file somewhere a person chose.
+ *
+ * Distinct from deliverDocument, which files the assistant's OWN output into a
+ * folder the sync skips so it can never index its own writing. An uploaded
+ * document is the opposite case: it is real collateral, and it belongs where
+ * the sync will find it.
+ *
+ * The generated folder is refused here for exactly that reason — a rep
+ * uploading into it would be putting curated material somewhere nothing reads.
+ */
+export async function uploadDocument(file, { library, folder }, env, cfg) {
+  if (!graphConfigured(env, cfg)) return { ok: false, reason: 'not_configured' };
+  if (file.bytes.byteLength > cfg.MAX_DOCUMENT_BYTES) return { ok: false, reason: 'too_large' };
+
+  const cleanFolder = String(folder || '').replace(/^\/+|\/+$/g, '');
+  if (cleanFolder && cleanFolder.split('/')[0] === cfg.SHAREPOINT_GENERATED_FOLDER) {
+    return { ok: false, reason: 'generated_folder' };
+  }
+
+  try {
+    const token = await getToken(env);
+    const driveId = await resolveDrive(token, { ...cfg, SHAREPOINT_LIBRARY: library || cfg.SHAREPOINT_LIBRARY });
+    const segments = cleanFolder ? [...cleanFolder.split('/'), file.fileName] : [file.fileName];
+    const path = encodePath(segments);
+
+    const res = await fetch(
+      `${GRAPH}/drives/${driveId}/root:/${path}:/content?@microsoft.graph.conflictBehavior=rename`,
+      {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${token}`, 'content-type': file.contentType },
+        body: file.bytes,
+      },
+    );
+
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 300);
+      console.error(`[documentStore] upload failed: ${res.status} ${detail}`);
+      return { ok: false, reason: res.status === 403 ? 'forbidden' : 'upload_failed', detail };
+    }
+
+    const item = await res.json();
+    return {
+      ok: true,
+      webUrl: item.webUrl || null,
+      name: item.name,
+      // The path the nightly sync will index this under. Stored with the
+      // knowledge so the provisional copy can retire when the sync catches up.
+      syncPath: `sharepoint/${library || cfg.SHAREPOINT_LIBRARY}/${cleanFolder ? `${cleanFolder}/` : ''}${item.name}`,
+    };
+  } catch (err) {
+    console.error('[documentStore] upload failed:', err?.message || err);
+    return { ok: false, reason: 'error' };
+  }
+}
+
 export async function deliverDocument(file, env, cfg) {
   if (!graphConfigured(env, cfg)) {
     return { delivered: false, reason: 'not_configured' };

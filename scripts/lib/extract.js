@@ -8,10 +8,38 @@
  *
  * Every extractor returns { sections: [{ title, content }], warnings: [] }.
  * `sections` maps onto the { section, content } half of a knowledge chunk.
+ *
+ * Written against Uint8Array and fflate only — no Buffer, no node:zlib — so
+ * the SAME file runs in the Worker, which is not Node. Deliberate rather than
+ * tidy: the PDF path refuses mangled output on a legibility check that took a
+ * production bug to find, and a second copy of that logic for the upload route
+ * would eventually stop agreeing with this one.
  */
 
-import { unzipSync, strFromU8 } from 'fflate';
-import { inflateSync } from 'node:zlib';
+/** Latin-1 bytes to a string, the alphabet PDF operators live in. */
+function latin1(bytes) {
+  let out = '';
+  // Chunked: fromCharCode.apply blows the stack on a whole file.
+  for (let i = 0; i < bytes.length; i += 8192) {
+    out += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return out;
+}
+
+/** A latin-1 string back to the bytes it stands for. */
+function bytesOf(s) {
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i += 1) out[i] = s.charCodeAt(i) & 0xff;
+  return out;
+}
+
+/** Whatever the caller handed us, as bytes. */
+function asBytes(buffer) {
+  if (buffer instanceof Uint8Array) return buffer;
+  return new Uint8Array(buffer);
+}
+
+import { unzipSync, strFromU8, unzlibSync, inflateSync } from 'fflate';
 
 // --- XML helpers ----------------------------------------------------------
 
@@ -161,7 +189,7 @@ export function extractDocx(buffer) {
 // --- Plain text and markdown ---------------------------------------------
 
 export function extractText(buffer, name) {
-  const text = Buffer.from(buffer).toString('utf8');
+  const text = new TextDecoder().decode(asBytes(buffer));
   return {
     sections: text.trim() ? [{ title: name, content: text.trim() }] : [],
     warnings: [],
@@ -209,28 +237,36 @@ function looksLikeContentStream(s) {
  */
 export function extractPdf(buffer, name) {
   const warnings = [];
-  const buf = Buffer.from(buffer);
+  const buf = asBytes(buffer);
 
   let raw = '';
   const streamRe = /stream\r?\n([\s\S]*?)endstream/g;
   let m;
 
-  while ((m = streamRe.exec(buf.toString('latin1'))) !== null) {
-    const chunk = Buffer.from(m[1], 'latin1');
+  const source = latin1(buf);
+
+  while ((m = streamRe.exec(source)) !== null) {
+    const chunk = bytesOf(m[1]);
     let decoded = null;
 
-    // Try Flate first — by far the most common filter.
+    // Flate first, by far the most common filter. A PDF stream carries the
+    // zlib wrapper, so unzlib is the right call; raw deflate is tried second
+    // because a few writers omit the header.
     try {
-      decoded = inflateSync(chunk).toString('latin1');
+      decoded = latin1(unzlibSync(chunk));
     } catch {
-      // A stream that will not inflate is an image, a font, or a filter this
-      // does not implement. It is NOT text. Treating it as literal put raw
-      // compressed bytes through the operator scan below, and a rep opened the
-      // Collateral tab to a summary reading 's85$^p`meEs^]#Eh&DP!B^S.cO'.
-      // Uncompressed content streams do exist, so keep it only if it reads as
-      // one.
-      const literal = chunk.toString('latin1');
-      decoded = looksLikeContentStream(literal) ? literal : null;
+      try {
+        decoded = latin1(inflateSync(chunk));
+      } catch {
+        // A stream that will not inflate is an image, a font, or a filter this
+        // does not implement. It is NOT text. Treating it as literal put raw
+        // compressed bytes through the operator scan below, and a rep opened
+        // the Collateral tab to a summary reading 's85$^p`meEs^]#Eh&DP!B^S.cO'.
+        // Uncompressed content streams do exist, so keep it only if it reads
+        // as one.
+        const literal = latin1(chunk);
+        decoded = looksLikeContentStream(literal) ? literal : null;
+      }
     }
 
     if (decoded && SHOW_OPERATOR.test(decoded)) raw += `${decoded}\n`;
@@ -277,7 +313,7 @@ export function extractPdf(buffer, name) {
 export const SUPPORTED_EXTENSIONS = ['.pptx', '.docx', '.pdf', '.txt', '.md'];
 
 /**
- * @param {ArrayBuffer|Buffer} buffer
+ * @param {ArrayBuffer|Uint8Array} buffer
  * @param {string} name  File name, used for the extension and as a fallback title.
  * @returns {{ sections: {title: string, content: string}[], warnings: string[] }}
  */

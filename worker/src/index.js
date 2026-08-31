@@ -24,7 +24,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig } from './config.js';
 import { createStorage } from './storage.js';
 import { retrieve, retrievalStatus } from './retrieve.js';
-import { searchCollateral, collateralCount } from './collateral.js';
+import { searchCollateral, searchCollateralWith, collateralCount } from './collateral.js';
 import { loadFonts } from './documents/fonts.js';
 import { documentStoreStatus } from './documentStore.js';
 import { buildSystemPrompt } from './systemPrompt.js';
@@ -707,8 +707,14 @@ export default {
         // browser filters instantly and no keystroke costs a round trip.
         // Past a few thousand this becomes a server-side search — the
         // searchCollateral() seam is already where that would go.
+        // Uploads first, so a document an admin added a minute ago is not
+        // missing from the tab that exists to list what we have.
+        const uploaded = await storage.listUploadedDocuments();
         return json(
-          { documents: searchCollateral(url.searchParams.get('q') || ''), total: collateralCount() },
+          {
+            documents: searchCollateralWith(uploaded, url.searchParams.get('q') || ''),
+            total: collateralCount() + uploaded.length,
+          },
           200,
           { ...cors, 'cache-control': 'private, max-age=60' },
         );

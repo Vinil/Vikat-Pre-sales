@@ -14,7 +14,8 @@
  */
 
 import { ROLES, resolveRole, wouldLeaveNoAdmin } from './roles.js';
-import { documentStoreStatus } from './documentStore.js';
+import { documentStoreStatus, listLibraries, uploadDocument } from './documentStore.js';
+import { ingest, SUPPORTED_EXTENSIONS } from './ingest.js';
 import { retrievalStatus } from './retrieve.js';
 import { collateralCount } from './collateral.js';
 
@@ -220,6 +221,150 @@ async function handleSharePoint(request, url, ctx) {
   return json({ error: 'Method not allowed.' }, 405, cors);
 }
 
+// --- Upload ---------------------------------------------------------------
+
+/** The content types Graph should store these under. */
+const UPLOAD_TYPES = {
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+};
+
+const extensionOf = (name) => {
+  const dot = String(name).lastIndexOf('.');
+  return dot === -1 ? '' : String(name).slice(dot).toLowerCase();
+};
+
+/**
+ * Take a document an admin uploaded and make it part of what the assistant
+ * knows, then file it where the collateral lives.
+ *
+ * The order matters and is the opposite of the obvious one: the knowledge is
+ * saved BEFORE the SharePoint upload is attempted. Graph being down should
+ * cost the filing, not the reason the admin uploaded the thing. The response
+ * says plainly which of the two happened.
+ */
+async function handleUpload(request, url, ctx) {
+  const { storage, user, cors, cfg, env } = ctx;
+
+  if (request.method === 'GET') {
+    // Where an upload can go. Answered from Graph, so it is the real list of
+    // libraries rather than a guess the admin has to match by hand.
+    const { ok, libraries, reason } = await listLibraries(env, cfg);
+    return json(
+      {
+        libraries,
+        defaultLibrary: cfg.SHAREPOINT_LIBRARY,
+        accepts: SUPPORTED_EXTENSIONS,
+        maxBytes: cfg.MAX_DOCUMENT_BYTES,
+        // A folder the sync skips on purpose; offering it would be offering to
+        // file curated collateral where nothing reads it.
+        reservedFolder: cfg.SHAREPOINT_GENERATED_FOLDER,
+        sharePoint: ok ? 'ready' : reason,
+      },
+      200,
+      cors,
+    );
+  }
+
+  if (request.method !== 'POST') {
+    return json({ error: 'Use POST.', code: 'method_not_allowed' }, 405, cors);
+  }
+
+  let form;
+  try {
+    form = await request.formData();
+  } catch {
+    return json({ error: 'Send the file as multipart/form-data.' }, 400, cors);
+  }
+
+  const file = form.get('file');
+  if (!file || typeof file.arrayBuffer !== 'function') {
+    return json({ error: 'No file was attached.' }, 400, cors);
+  }
+
+  const fileName = clean(file.name || 'upload').slice(0, 180);
+  const extension = extensionOf(fileName);
+
+  if (!SUPPORTED_EXTENSIONS.includes(extension)) {
+    return json(
+      { error: `${extension || 'That file'} cannot be read. Accepted: ${SUPPORTED_EXTENSIONS.join(', ')}.` },
+      400,
+      cors,
+    );
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength > cfg.MAX_DOCUMENT_BYTES) {
+    return json(
+      {
+        error: `${fileName} is ${Math.round(bytes.byteLength / 1024)}KB; the limit is ${Math.round(cfg.MAX_DOCUMENT_BYTES / 1024)}KB.`,
+      },
+      413,
+      cors,
+    );
+  }
+
+  // Read it first. A file whose text cannot be extracted must not be filed
+  // anywhere: it would sit in SharePoint looking indexed and teach the
+  // assistant nothing, which is worse than a refused upload.
+  const read = ingest(bytes, fileName);
+  if (!read.ok) return json({ error: read.error, warnings: read.warnings }, 422, cors);
+
+  const library = clean(form.get('library') || cfg.SHAREPOINT_LIBRARY).slice(0, 120);
+  const folder = clean(form.get('folder') || '').slice(0, 200);
+
+  const filed = await uploadDocument(
+    { fileName, bytes, contentType: UPLOAD_TYPES[extension] || 'application/octet-stream' },
+    { library, folder },
+    env,
+    cfg,
+  );
+
+  // One knowledge entry per chunk, tagged with where the sync will eventually
+  // find the same file. retrieve() drops a tagged entry once the compiled base
+  // carries that path, so the provisional copy retires by itself rather than
+  // needing a cleanup job — and the document never exists twice.
+  const saved = [];
+  for (const [i, chunk] of read.chunks.entries()) {
+    saved.push(
+      await storage.saveKnowledge(
+        {
+          section: `${fileName} — ${chunk.section}`,
+          content: chunk.content,
+          status: 'approved',
+          notes: `Uploaded by ${user.email}`,
+          sourcePath: filed.ok ? filed.syncPath : null,
+          uploadName: fileName,
+          uploadWebUrl: filed.ok ? filed.webUrl : null,
+          uploadFolder: folder,
+          uploadIndex: i,
+        },
+        user.email,
+      ),
+    );
+  }
+
+  return json(
+    {
+      fileName,
+      chunks: saved.length,
+      warnings: read.warnings,
+      filed: filed.ok,
+      webUrl: filed.ok ? filed.webUrl : null,
+      // Said plainly rather than implied: the assistant knows it either way,
+      // and whether it also reached SharePoint is a separate fact.
+      note: filed.ok
+        ? `Added to the assistant's knowledge and filed in ${library}${folder ? `/${folder}` : ''}.`
+        : `Added to the assistant's knowledge. NOT filed in SharePoint (${filed.reason}) — it will not appear in Collateral for other people until it is.`,
+    },
+    200,
+    cors,
+  );
+}
+
 // --- Users ----------------------------------------------------------------
 
 async function handleUsers(request, url, ctx) {
@@ -358,6 +503,8 @@ export async function handleAdmin(request, url, ctx) {
   switch (url.pathname) {
     case '/admin/knowledge':
       return handleKnowledge(request, url, ctx);
+    case '/admin/upload':
+      return handleUpload(request, url, ctx);
     case '/admin/sharepoint':
       return handleSharePoint(request, url, ctx);
     case '/admin/users':

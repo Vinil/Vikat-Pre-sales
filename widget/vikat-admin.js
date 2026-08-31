@@ -239,6 +239,92 @@
       .catch(function () {});
   }
 
+  // --- Upload --------------------------------------------------------------
+
+  function loadUploadTargets() {
+    return api('/admin/upload')
+      .then(function (r) {
+        $('#up-accepts').textContent =
+          'Accepts ' + (r.accepts || []).join(', ') + ', up to ' + Math.round((r.maxBytes || 0) / 1024) + 'KB.';
+        $('#up-file').setAttribute('accept', (r.accepts || []).join(','));
+
+        var select = $('#up-library');
+        select.textContent = '';
+
+        var libraries = r.libraries || [];
+        if (libraries.length === 0) {
+          // Graph is not reachable or not configured. Say so on the control it
+          // affects rather than leaving an empty dropdown to be puzzled over.
+          var none = el('option', null, 'SharePoint unavailable — ' + (r.sharePoint || 'unknown'));
+          none.value = '';
+          select.appendChild(none);
+          select.disabled = true;
+          $('#up-folder-hint').textContent =
+            'The file will still be read into the assistant’s knowledge; it just will not be filed.';
+          return;
+        }
+
+        select.disabled = false;
+        libraries.forEach(function (name) {
+          var opt = el('option', null, name);
+          opt.value = name;
+          if (name === r.defaultLibrary) opt.selected = true;
+          select.appendChild(opt);
+        });
+
+        if (r.reservedFolder) {
+          $('#up-folder-hint').textContent =
+            'Where in the library it belongs. Leave blank for the top level. "' +
+            r.reservedFolder +
+            '" is reserved for the assistant’s own output and is not read back.';
+        }
+      })
+      .catch(function () {});
+  }
+
+  $('#up-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    var input = $('#up-file');
+    if (!input.files || !input.files[0]) return;
+
+    var body = new FormData();
+    body.append('file', input.files[0]);
+    body.append('library', $('#up-library').value);
+    body.append('folder', $('#up-folder').value);
+
+    var submit = $('#up-submit');
+    var status = $('#up-status');
+    submit.disabled = true;
+    // Reading a deck takes a moment and the button going quiet looks like
+    // nothing happening, which is how someone ends up uploading it twice.
+    status.textContent = 'Reading ' + input.files[0].name + '…';
+
+    // Not through api(): that helper JSON-encodes its body, and multipart must
+    // set its own boundary.
+    fetch(ENDPOINT + '/admin/upload', { method: 'POST', credentials: 'include', body: body })
+      .then(function (res) {
+        return res.json().then(function (payload) { return { res: res, payload: payload }; });
+      })
+      .then(function (r) {
+        if (!r.res.ok) throw new Error((r.payload && r.payload.error) || 'Upload failed');
+
+        toast(r.payload.note || 'Uploaded.');
+        status.textContent =
+          r.payload.chunks + ' passage(s) added' + (r.payload.filed ? ' and filed in SharePoint.' : '.');
+        $('#up-form').reset();
+        loadUploadTargets();
+        loadKnowledge();
+      })
+      .catch(function (err) {
+        status.textContent = '';
+        toast(err.message || 'Upload failed', true);
+      })
+      .finally(function () {
+        submit.disabled = false;
+      });
+  });
+
   // --- SharePoint ----------------------------------------------------------
 
   function loadSharePoint() {
@@ -487,7 +573,7 @@
 
         // Independent, and kept that way: a throw in one used to take the
         // rest of the sequence with it.
-        [loadKnowledge, loadSharePoint, loadUsers].forEach(function (load) {
+        [loadKnowledge, loadUploadTargets, loadSharePoint, loadUsers].forEach(function (load) {
           try {
             load();
           } catch (err) {

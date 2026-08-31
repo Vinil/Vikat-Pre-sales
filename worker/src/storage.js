@@ -244,6 +244,34 @@ export function createStorage(env, cfg) {
       return out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     },
 
+    /**
+     * Uploaded documents, one row each rather than one per chunk.
+     *
+     * Built from the same kb: entries the assistant answers from, so the
+     * Collateral tab and the assistant can never disagree about what exists.
+     */
+    async listUploadedDocuments() {
+      const entries = await this.listKnowledge();
+      const byPath = new Map();
+
+      for (const e of entries) {
+        if (!e.sourcePath || !e.uploadWebUrl) continue;
+        const existing = byPath.get(e.sourcePath);
+        if (existing && String(existing.modified) >= String(e.updatedAt)) continue;
+
+        byPath.set(e.sourcePath, {
+          name: e.uploadName || e.section,
+          webUrl: e.uploadWebUrl,
+          folder: e.uploadFolder || '',
+          modified: e.updatedAt,
+          page: e.sourcePath,
+          summary: String(e.content || '').slice(0, 220),
+        });
+      }
+
+      return [...byPath.values()];
+    },
+
     async getKnowledge(id) {
       return kv.get(`kb:${id}`, 'json');
     },
@@ -258,6 +286,17 @@ export function createStorage(env, cfg) {
         content: entry.content,
         status: entry.status === 'approved' ? 'approved' : 'draft',
         notes: entry.notes || '',
+        // Upload provenance, absent on a hand-written entry.
+        //
+        // sourcePath is where the nightly sync will index the same file from
+        // SharePoint. retrieve() drops an entry once the compiled base carries
+        // that path, so the provisional copy retires by itself and the document
+        // never exists twice.
+        ...(entry.sourcePath ? { sourcePath: entry.sourcePath } : {}),
+        ...(entry.uploadName ? { uploadName: entry.uploadName } : {}),
+        ...(entry.uploadWebUrl ? { uploadWebUrl: entry.uploadWebUrl } : {}),
+        ...(entry.uploadFolder ? { uploadFolder: entry.uploadFolder } : {}),
+        ...(Number.isInteger(entry.uploadIndex) ? { uploadIndex: entry.uploadIndex } : {}),
         createdBy: existing?.createdBy || actor,
         createdAt: existing?.createdAt || now,
         updatedBy: actor,

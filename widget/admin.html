@@ -176,6 +176,10 @@
   dl.kv dd { margin: 0; font-size: 13px; word-break: break-word; }
   dl.kv dd.unset { color: var(--w40); font-style: italic; }
   @media (max-width: 560px) { dl.kv > div { grid-template-columns: 1fr; gap: 2px; } }
+  /* The native control is a white slab on a dark panel otherwise. */
+  input[type=file] { width: 100%; padding: 8px 10px; border: 1px solid var(--w08); border-radius: 9px; background: var(--sf); color: var(--w80); font: inherit; font-size: 13px; }
+  input[type=file]::file-selector-button { margin-right: 10px; padding: 5px 12px; border: 1px solid var(--w20); border-radius: 999px; background: none; color: var(--w80); font: inherit; font-size: 12px; cursor: pointer; }
+  input[type=file]::file-selector-button:hover { border-color: var(--cyan); color: var(--cyan); }
 </style>
 </head>
 <body>
@@ -202,6 +206,39 @@
 
   <!-- Knowledge -->
   <section class="panel" id="panel-knowledge" role="tabpanel" aria-labelledby="tab-knowledge">
+    <div class="card">
+      <h2>Upload a document</h2>
+      <p class="sub">
+        A deck, brief or one-pager. Its text is read and added to the assistant's knowledge straight away,
+        and the file is filed in SharePoint so it appears in Collateral for everyone.
+        <span id="up-accepts" class="hint" style="display:inline"></span>
+      </p>
+
+      <form id="up-form">
+        <div class="row row-2">
+          <div>
+            <label for="up-file">File</label>
+            <input type="file" id="up-file" required>
+          </div>
+          <div>
+            <label for="up-library">Library</label>
+            <select id="up-library"></select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="up-folder">Folder (optional)</label>
+            <input type="text" id="up-folder" placeholder="CISO Briefs" autocomplete="off">
+            <p class="hint" id="up-folder-hint">Where in the library it belongs. Leave blank for the top level.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="submit" class="primary" id="up-submit">Upload</button>
+          <span id="up-status" class="hint" style="margin:0"></span>
+        </div>
+      </form>
+    </div>
+
     <div class="card">
       <h2 id="kb-form-heading">Add knowledge</h2>
       <p class="sub">

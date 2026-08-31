@@ -14,6 +14,9 @@
 
 import { KNOWLEDGE, KNOWLEDGE_TOKENS, KNOWLEDGE_META } from './knowledge.js';
 
+/** Every page in the compiled base, for retiring superseded uploads. */
+const COMPILED_PAGES = new Set(KNOWLEDGE.map((c) => c.page));
+
 /**
  * @typedef {object} SessionContext
  * @property {string} [sessionId]
@@ -73,6 +76,11 @@ export async function retrieve(query, sessionContext = {}) {
       const entries = await sessionContext.storage.listKnowledge();
       runtime = entries
         .filter((e) => e.status === 'approved' && e.content && e.content.trim())
+        // An uploaded document is provisional: it answers questions from the
+        // moment it is uploaded, and steps aside the night the sync indexes the
+        // same file from SharePoint. Without this the assistant would hold two
+        // copies of every uploaded document and cite whichever it retrieved.
+        .filter((e) => !e.sourcePath || !COMPILED_PAGES.has(e.sourcePath))
         .map((e) => ({
           id: `admin:${e.id}`,
           page: 'admin/knowledge',
