@@ -700,6 +700,13 @@
     if (name === 'log_prospect') return 'Logging the prospect';
     if (name === 'ask_expert') return 'Routing to an expert';
     if (name === 'flag_content_gap') return 'Flagging a content gap';
+    if (name === 'find_collateral') return 'Searching our material';
+    if (name === 'create_document') return 'Building the document';
+    // Named apart from the internal search on purpose: a rep should be able
+    // to tell at a glance whether an answer came from our material or from
+    // the open web.
+    if (name === 'web_search') return 'Searching the web';
+    if (name === 'web_fetch') return 'Reading a page';
     return 'Working';
   }
 

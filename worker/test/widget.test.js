@@ -478,7 +478,7 @@ const APP_URL = `http://127.0.0.1:${server.address().port}/index.html`;
 test.after(() => server.close());
 
 /** The app shell with /chats and /whoami stubbed. */
-async function openApp(chats = []) {
+async function openApp(chats = [], chatAssets = []) {
   const app = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   app.on('pageerror', (e) => errors.push('uncaught: ' + e));
@@ -498,6 +498,7 @@ async function openApp(chats = []) {
         body: JSON.stringify({
           sessionId: id,
           turns: [{ userMessage: 'What did we agree?', agentResponse: 'Deal Desk owns the discount.' }],
+          assets: chatAssets,
         }),
       });
     }
@@ -518,6 +519,62 @@ async function openApp(chats = []) {
   await app.waitForFunction(() => Boolean(window.VikatChat), null, { timeout: 5000 });
   return { app, errors };
 }
+
+const PAST_ASSETS = [
+  {
+    kind: 'generated',
+    name: 'Skan_COO_Brief.pdf',
+    url: '/document/doc_past',
+    disclosure: 'Internal only',
+  },
+  { kind: 'web', name: 'Skan raises Series C', url: 'https://reuters.com/skan-series-c' },
+];
+
+test('reopening a conversation brings back what it produced', async () => {
+  // The bug: assets lived only in this page's memory, so a rep who switched
+  // chats or refreshed saw an empty rail beside a transcript that plainly
+  // showed a deck being built.
+  const { app, errors } = await openApp(
+    [{ sessionId: 'aaaa11112222', title: 'Skan COO deck', updatedAt: new Date().toISOString() }],
+    PAST_ASSETS,
+  );
+
+  await app.waitForSelector('#chats-body .rail-item');
+  await app.click('#chats-body .rail-item');
+
+  await app.waitForFunction(() => document.querySelectorAll('#assets-body .asset').length === 2, null, {
+    timeout: 5000,
+  });
+
+  const body = await app.textContent('#assets-body');
+  assert.match(body, /Skan_COO_Brief\.pdf/);
+  assert.match(body, /Skan raises Series C/);
+  assert.deepEqual(errors, []);
+  await app.close();
+});
+
+test('a page read on the web is never listed as our material', async () => {
+  // Internal collateral and an external page look identical on a card unless
+  // the card says otherwise, and a rep must never send a customer something
+  // they believe is ours because the rail implied it.
+  const { app, errors } = await openApp(
+    [{ sessionId: 'aaaa11112222', title: 'Skan COO deck', updatedAt: new Date().toISOString() }],
+    PAST_ASSETS,
+  );
+
+  await app.waitForSelector('#chats-body .rail-item');
+  await app.click('#chats-body .rail-item');
+  await app.waitForFunction(() => document.querySelectorAll('#assets-body .asset').length === 2);
+
+  const groups = await app.$$eval('#assets-body .asset-group', (ns) => ns.map((n) => n.textContent));
+  assert.ok(groups.includes('From the web'), groups.join(' | '));
+
+  const webCard = await app.textContent('#assets-body .asset:last-of-type');
+  assert.match(webCard, /External source/);
+  assert.match(webCard, /reuters\.com/, 'the host, so a rep can judge the source at a glance');
+  assert.deepEqual(errors, []);
+  await app.close();
+});
 
 test('the chat rail lists the conversations the server returns', async () => {
   const { app, errors } = await openApp([

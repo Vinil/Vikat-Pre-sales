@@ -151,8 +151,33 @@ export const DEFAULTS = {
   // generated are billed, so a short PDF costs no more for the higher ceiling.
   PDF_READ_MAX_TOKENS: 32000,
 
+  // --- Web research ------------------------------------------------------
+  // Prospect research: who a company is, what they announced, who runs it,
+  // what pressure they are under. Anthropic runs the search server-side, so
+  // there is no new vendor and no new domain — but each search is BILLED on
+  // top of tokens, which is why there is a hard per-turn cap rather than
+  // trust that the model will be frugal.
+  //
+  // 'on' | 'off'. Off leaves the assistant exactly as it was: closed, and
+  // honest about it.
+  WEB_RESEARCH: 'on',
+  // Searches, and pages read, per turn. A cap the model cannot exceed: it is
+  // enforced by the API, not by the prompt.
+  WEB_SEARCH_MAX_USES: 5,
+  WEB_FETCH_MAX_USES: 5,
+  // Domains the assistant must never read. Comma-separated. Empty means no
+  // blocklist — the prompt, not a list, is what keeps it off Vikat's own
+  // marketing (see systemPrompt.js: the web is never a source for what Vikat
+  // does).
+  WEB_BLOCKED_DOMAINS: [],
+
   // --- Agent loop --------------------------------------------------------
   MAX_TOOL_ITERATIONS: 4,
+  // How many times a turn paused by the server-side tool loop is resumed.
+  // A long research turn hits the API's own 10-iteration ceiling and comes
+  // back as stop_reason 'pause_turn' with a HALF-WRITTEN answer; resuming is
+  // what finishes it. Capped so a pathological turn cannot loop forever.
+  MAX_TURN_CONTINUATIONS: 3,
 };
 
 const NUMERIC_KEYS = new Set([
@@ -168,11 +193,19 @@ const NUMERIC_KEYS = new Set([
   'MAX_DOCUMENT_BYTES',
   'PDF_READ_MAX_TOKENS',
   'MAX_TOOL_ITERATIONS',
+  'MAX_TURN_CONTINUATIONS',
+  'WEB_SEARCH_MAX_USES',
+  'WEB_FETCH_MAX_USES',
 ]);
 
 const BOOLEAN_KEYS = new Set(['ALLOW_DEV_AUTH']);
 
-const LIST_KEYS = new Set(['ALLOWED_ORIGINS', 'ALLOWED_EMAIL_DOMAINS', 'BOOTSTRAP_ADMINS']);
+const LIST_KEYS = new Set([
+  'ALLOWED_ORIGINS',
+  'ALLOWED_EMAIL_DOMAINS',
+  'BOOTSTRAP_ADMINS',
+  'WEB_BLOCKED_DOMAINS',
+]);
 
 /**
  * Merge environment overrides onto DEFAULTS.

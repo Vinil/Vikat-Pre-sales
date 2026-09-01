@@ -11,6 +11,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { TOOL_DEFINITIONS } from '../src/tools.js';
+import { webTools } from '../src/webTools.js';
+import { loadConfig } from '../src/config.js';
 import worker from '../src/index.js';
 import { forgetRefusals } from '../src/toolHealth.js';
 import { fakeKV } from './helpers.js';
@@ -18,6 +20,14 @@ import { fakeKV } from './helpers.js';
 // The refusal memo is isolate-scoped by design, which in one test process means
 // it is shared. Clear it so each case starts from a healthy tool set.
 test.beforeEach(() => forgetRefusals());
+
+/**
+ * Every tool a healthy request offers: the ones this Worker runs plus the ones
+ * Anthropic runs. Counted rather than hard-coded, because the ladder's job is
+ * "shed exactly one", and pinning a literal here would make adding any tool
+ * look like a regression in the ladder.
+ */
+const ALL_TOOLS = () => TOOL_DEFINITIONS.length + webTools(loadConfig(ENV)).length;
 
 const ENV = {
   AUTH_MODE: 'dev',
@@ -147,7 +157,7 @@ test('a refused tool schema costs the tools, not the answer', async () => {
 
 test('a refusal sheds one tool at a time, not the whole set', async () => {
   // This stub refuses ANY request carrying tools, so the ladder walks all the
-  // way down — five tools, five refusals, then an answer with none. What
+  // way down — one refusal per tool, then an answer with none. What
   // matters is the shape: each retry offers strictly fewer tools than the last,
   // rather than jumping straight to zero. Against a real API refusing ONE bad
   // schema, that difference is four working tools instead of none.
@@ -155,7 +165,7 @@ test('a refusal sheds one tool at a time, not the whole set', async () => {
   const stub = stubApi({ onRequest: (body) => counts.push(body.tools?.length ?? 0) });
   await chat(stub);
 
-  assert.equal(counts[0], TOOL_DEFINITIONS.length, 'the first attempt offers everything');
+  assert.equal(counts[0], ALL_TOOLS(), 'the first attempt offers everything');
   assert.equal(counts.at(-1), 0, 'the last attempt offers nothing and is answered');
   for (let i = 1; i < counts.length; i += 1) {
     assert.equal(counts[i], counts[i - 1] - 1, `attempt ${i + 1} should shed exactly one tool`);
@@ -179,7 +189,7 @@ test('one bad schema costs one tool, not the other four', async () => {
   assert.match(text, /Answered without tools\./, 'the rep still gets an answer');
   assert.equal(offered.length, 2, 'one refusal, one retry');
   assert.ok(!offered[1].includes('log_prospect'), 'the refused tool is gone');
-  assert.equal(offered[1].length, TOOL_DEFINITIONS.length - 1, 'and nothing else went with it');
+  assert.equal(offered[1].length, ALL_TOOLS() - 1, 'and nothing else went with it');
   assert.ok(offered[1].includes('find_collateral'), 'find_collateral survives, which is the point');
 });
 

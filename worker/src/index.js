@@ -31,6 +31,7 @@ import { buildSystemPrompt } from './systemPrompt.js';
 import { refusedTools, noteRefusal, schemaCost } from './toolHealth.js';
 
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
+import { webTools, sourcesFrom } from './webTools.js';
 import { authenticate } from './auth.js';
 import { resolveRole, canUseAssistant, canAdminister } from './roles.js';
 import { handleAdmin, handleAdminSummary } from './admin.js';
@@ -279,11 +280,21 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
   // answer with an invented product architecture in it: the model imitated a
   // tool call in visible text, got nothing back, and answered from priors
   // anyway. The prompt has to lose them at the same moment the request does.
-  let systemNoTools = null;
-  const systemFor = (toolsOn) => {
-    if (toolsOn) return system;
-    systemNoTools ??= buildSystemPrompt(cfg, knowledge, sessionContext, { toolsAvailable: false });
-    return systemNoTools;
+  //
+  // Two axes now, because the web tools can be shed independently of the
+  // custom ones: a prompt that still explains how to research a prospect
+  // while the request carries no web tool is the same bug in a new place.
+  const variants = new Map();
+  const systemFor = (toolsOn, webOn) => {
+    if (toolsOn && webOn) return system;
+    const key = toolsOn + ':' + webOn;
+    if (!variants.has(key)) {
+      variants.set(
+        key,
+        buildSystemPrompt(cfg, knowledge, sessionContext, { toolsAvailable: toolsOn, webAvailable: webOn }),
+      );
+    }
+    return variants.get(key);
   };
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
@@ -292,6 +303,33 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
     async start(controller) {
       /** @type {Array<{name: string, input: object}>} */
       const toolCalls = [];
+      /**
+       * Everything this turn produced or surfaced.
+       *
+       * Kept as well as streamed. The rail used to be fed by the SSE event
+       * alone, which meant the assets existed only in the browser's memory:
+       * a refresh, a switch to another chat, or reopening this one later and
+       * they were gone. They are part of what the turn did, so they belong in
+       * the record of the turn.
+       */
+      const turnAssets = [];
+
+      /**
+       * File the pages a research turn read, as assets.
+       *
+       * Sources belong in the rail for the same reason generated documents
+       * do: a rep about to repeat a claim in front of a customer needs to see
+       * where it came from without scrolling the answer. They are marked
+       * external so nothing on the web is ever mistaken for Vikat material.
+       */
+      const recordSources = (content) => {
+        const found = sourcesFrom(content).filter(
+          (s) => !turnAssets.some((existing) => existing.url === s.url),
+        );
+        if (!found.length) return;
+        turnAssets.push(...found);
+        send('asset', { assets: found });
+      };
       let fullText = '';
       let closed = false;
 
@@ -309,12 +347,20 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
       const dropped = new Set(refusedTools());
       let thinkingDisabled = false;
 
-      const activeTools = () => TOOL_DEFINITIONS.filter((d) => !dropped.has(d.name));
+      // Server tools run at Anthropic; the ones from tools.js run here. They
+      // travel together in `tools` and are separated again in the loop.
+      const activeTools = () => [
+        ...TOOL_DEFINITIONS.filter((d) => !dropped.has(d.name)),
+        ...webTools(cfg).filter((d) => !dropped.has(d.name)),
+      ];
 
       const buildRequest = (convo) => ({
         model: cfg.MODEL,
         max_tokens: cfg.MAX_TOKENS,
-        system: systemFor(activeTools().length > 0),
+        system: systemFor(
+          activeTools().length > 0,
+          activeTools().some((t) => t.name === 'web_search'),
+        ),
         messages: convo,
         // Adaptive thinking, despite costing a little latency before the first
         // token. With thinking off, the model intermittently writes a tool
@@ -392,6 +438,15 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               fullText += delta;
               send('text', { text: delta });
             });
+            // A server tool runs at Anthropic, so the loop below never sees it
+            // and never announces it. Without this a research turn is thirty
+            // silent seconds with a typing dot — indistinguishable from a hang,
+            // which is the exact complaint that got MAX_TOKENS raised.
+            stream.on('streamEvent', (event) => {
+              if (event.type === 'content_block_start' && event.content_block?.type === 'server_tool_use') {
+                send('tool', { name: event.content_block.name });
+              }
+            });
             return await stream.finalMessage();
           } catch (err) {
             if (!degrade(err)) throw err;
@@ -412,7 +467,33 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         let lastStop = null;
 
         for (let iteration = 0; iteration < cfg.MAX_TOOL_ITERATIONS; iteration++) {
-          const final = await runTurn(convo);
+          let final = await runTurn(convo);
+
+          /**
+           * Finish a turn the server-side tool loop paused.
+           *
+           * A research question can spend the API's own 10-iteration budget on
+           * searches and come back as `pause_turn` with the answer half
+           * written. That is not an error and nothing throws — it arrives
+           * looking exactly like a finished turn, so without this the rep gets
+           * a sentence that stops mid-thought and no indication why.
+           *
+           * Resuming means re-sending with the paused assistant turn appended
+           * and NOTHING else: the API sees the trailing server_tool_use block
+           * and picks up where it stopped. Adding a "continue" message of our
+           * own would be a new instruction, not a resumption.
+           */
+          for (let carry = 0; final.stop_reason === 'pause_turn'; carry += 1) {
+            if (carry >= cfg.MAX_TURN_CONTINUATIONS) {
+              console.warn(`[chat] session ${sessionId} still paused after ${carry} continuation(s)`);
+              break;
+            }
+            convo.push({ role: 'assistant', content: final.content });
+            recordSources(final.content);
+            final = await runTurn(convo);
+          }
+
+          recordSources(final.content);
           lastStop = final.stop_reason;
 
           if (final.stop_reason !== 'tool_use') {
@@ -420,6 +501,10 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             break;
           }
 
+          // Only `tool_use` blocks are ours to run. A server tool appears as
+          // `server_tool_use` and has ALREADY run by the time this response
+          // arrives — trying to execute one would look up a handler that does
+          // not exist and fail the turn.
           const blocks = final.content.filter((b) => b.type === 'tool_use');
           convo.push({ role: 'assistant', content: final.content });
 
@@ -448,7 +533,10 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             // and a rail built from what it happened to write would lose the
             // fourth deck whenever it chose to list three.
             const assets = result.effect && result.effect.assets;
-            if (Array.isArray(assets) && assets.length) send('asset', { assets });
+            if (Array.isArray(assets) && assets.length) {
+              turnAssets.push(...assets);
+              send('asset', { assets });
+            }
           }
 
           convo.push({ role: 'user', content: results });
@@ -509,6 +597,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               userMessage,
               agentResponse: fullText,
               toolCalls,
+              assets: turnAssets,
             })
             .catch((e) => console.error('[chat] appendLog failed:', e?.message || e)),
         );
@@ -682,6 +771,20 @@ export default {
         const logs = await storage.getLogs(chatId);
         logs.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
 
+        // Assets are flattened across the whole conversation rather than
+        // returned per turn: the rail shows what this conversation has to
+        // show, not a per-message history, and the same deck surfaced in
+        // three turns is one asset.
+        const seen = new Set();
+        const assets = [];
+        for (const log of logs) {
+          for (const asset of log.assets || []) {
+            if (!asset || !asset.url || seen.has(asset.url)) continue;
+            seen.add(asset.url);
+            assets.push(asset);
+          }
+        }
+
         return json(
           {
             sessionId: chatId,
@@ -691,6 +794,7 @@ export default {
               agentResponse: l.agentResponse,
               toolCalls: (l.toolCalls || []).map((c) => c.name),
             })),
+            assets,
           },
           200,
           cors,

@@ -127,45 +127,58 @@
 
   function openChat(id) {
     // The transcript comes from the server, which is what lets a rep pick a
-    // conversation up on a different machine than they started it on.
+    // conversation up on a different machine than they started it on. Its
+    // assets come with it, for the same reason.
     api('/chats/' + encodeURIComponent(id))
       .then(function (r) {
         window.VikatChat.open(id, r.turns || []);
-        // Assets are per-stream and are not replayed: nothing recorded which
-        // documents a past turn produced. Say that rather than showing an
-        // empty rail that looks like the conversation produced nothing.
-        resetAssets(true);
+        resetAssets();
+        addAssets(r.assets || []);
       })
       .catch(function () {
         chatsBody.appendChild(el('div', 'rail-empty', 'That conversation could not be opened.'));
       });
   }
 
+  /**
+   * Put back what the conversation already produced.
+   *
+   * Called on load as well as on switching chats. A refresh used to empty the
+   * rail while the transcript survived in sessionStorage, so the rep was
+   * looking at a conversation that had plainly built them a deck and a rail
+   * that said none had been built.
+   *
+   * A brand-new session has no server record yet and 404s; that is the empty
+   * rail, not an error worth showing.
+   */
+  function restoreAssets(id) {
+    if (!id) return;
+    api('/chats/' + encodeURIComponent(id))
+      .then(function (r) {
+        addAssets(r.assets || []);
+      })
+      .catch(function () {});
+  }
+
   // --- Right rail: assets --------------------------------------------------
 
   var assetsBody = $('#assets-body');
   var assetsCount = $('#assets-count');
-  var assets = { generated: [], collateral: [] };
+  var assets = { generated: [], collateral: [], web: [] };
 
-  function resetAssets(reopened) {
-    assets = { generated: [], collateral: [] };
-    renderAssets(reopened);
+  function resetAssets() {
+    assets = { generated: [], collateral: [], web: [] };
+    renderAssets();
   }
 
-  function renderAssets(reopened) {
+  function renderAssets() {
     assetsBody.textContent = '';
-    var total = assets.generated.length + assets.collateral.length;
+    var total = assets.generated.length + assets.collateral.length + assets.web.length;
     assetsCount.textContent = total ? String(total) : '';
 
     if (!total) {
       assetsBody.appendChild(
-        el(
-          'div',
-          'rail-empty',
-          reopened
-            ? 'Documents from an earlier conversation are not replayed here. Anything produced from now on will appear.'
-            : 'Documents built and collateral found in this conversation collect here.',
-        ),
+        el('div', 'rail-empty', 'Documents built and collateral found in this conversation collect here.'),
       );
       return;
     }
@@ -183,6 +196,39 @@
         assetsBody.appendChild(collateralCard(a));
       });
     }
+
+    if (assets.web.length) {
+      // Its own group, and named for where it came from. A page the assistant
+      // read on the open web is not our material and must never sit in a list
+      // that implies it is.
+      assetsBody.appendChild(el('div', 'asset-group', 'From the web'));
+      assets.web.forEach(function (a) {
+        assetsBody.appendChild(webCard(a));
+      });
+    }
+  }
+
+  function webCard(a) {
+    var card = el('a', 'asset');
+    card.href = a.url;
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    card.appendChild(el('div', 'n', a.name));
+
+    var meta = el('div', 'm');
+    meta.appendChild(el('span', 'warn', 'External source'));
+    var host = '';
+    try {
+      host = new URL(a.url).hostname.replace(/^www\./, '');
+    } catch (e) {
+      /* a malformed url still gets a card, just without the host */
+    }
+    if (host) {
+      meta.appendChild(document.createTextNode(' \u00b7 ' + host));
+    }
+    card.appendChild(meta);
+
+    return card;
   }
 
   function generatedCard(a) {
@@ -229,12 +275,12 @@
   function addAssets(incoming) {
     (incoming || []).forEach(function (a) {
       if (!a || !a.url || !a.name) return;
-      var bucket = a.kind === 'generated' ? assets.generated : assets.collateral;
+      var bucket = assets[a.kind === 'generated' ? 'generated' : a.kind === 'web' ? 'web' : 'collateral'];
       // The same deck surfaced twice in one conversation is one asset.
       if (bucket.some(function (existing) { return existing.url === a.url; })) return;
       bucket.push(a);
     });
-    renderAssets(false);
+    renderAssets();
   }
 
   // --- Wiring --------------------------------------------------------------
@@ -254,7 +300,7 @@
 
     $('#chats-new').addEventListener('click', function () {
       window.VikatChat.newChat();
-      resetAssets(false);
+      resetAssets();
     });
 
     window.VikatChat.on('asset', addAssets);
@@ -271,8 +317,9 @@
       loadChats();
     });
 
-    renderAssets(false);
+    renderAssets();
     loadChats();
+    restoreAssets(currentId);
   }
 
   // vikat-chat.js is loaded after this file, so wait for it rather than racing.
