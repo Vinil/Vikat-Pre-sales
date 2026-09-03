@@ -308,6 +308,113 @@ test('a turn that will not stop pausing is capped', async () => {
   assert.equal(stub.bodies.length, 3, 'the first attempt plus two continuations, then it stops');
 });
 
+/**
+ * The API, stubbed: pauses once, resumes into a tool call, then answers.
+ *
+ * The shape that broke a real turn. Research paused, resumed, and the resumed
+ * slice asked for collateral — and the loop pushed the paused slice and the
+ * resumed slice as two separate assistant messages.
+ */
+function pauseThenToolApi() {
+  const bodies = [];
+  let turn = 0;
+
+  const frames = (blocks, stopReason) => {
+    const out = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}',
+      '',
+    ];
+    blocks.forEach((b, i) => {
+      out.push('event: content_block_start', `data: ${JSON.stringify({ type: 'content_block_start', index: i, content_block: b.start })}`, '');
+      for (const d of b.deltas || []) {
+        out.push('event: content_block_delta', `data: ${JSON.stringify({ type: 'content_block_delta', index: i, delta: d })}`, '');
+      }
+      out.push('event: content_block_stop', `data: {"type":"content_block_stop","index":${i}}`, '');
+    });
+    out.push(
+      'event: message_delta',
+      `data: {"type":"message_delta","delta":{"stop_reason":"${stopReason}","stop_sequence":null},"usage":{"output_tokens":4}}`,
+      '',
+      'event: message_stop',
+      'data: {"type":"message_stop"}',
+      '',
+      '',
+    );
+    return out.join('\n');
+  };
+
+  const fn = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) return { ok: false, status: 404, text: async () => 'no' };
+    bodies.push(JSON.parse(init.body));
+
+    const n = turn++;
+    let body;
+    if (n === 0) {
+      body = frames([{ start: { type: 'text', text: '' }, deltas: [{ type: 'text_delta', text: 'Researching them' }] }], 'pause_turn');
+    } else if (n === 1) {
+      body = frames(
+        [{ start: { type: 'tool_use', id: 'tu_1', name: 'find_collateral', input: {} }, deltas: [{ type: 'input_json_delta', partial_json: '{"query":"astec"}' }] }],
+        'tool_use',
+      );
+    } else {
+      body = frames([{ start: { type: 'text', text: '' }, deltas: [{ type: 'text_delta', text: ' — here is the deck.' }] }], 'end_turn');
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(body));
+          c.close();
+        },
+      }),
+    };
+  };
+
+  fn.bodies = bodies;
+  return fn;
+}
+
+test('a paused turn that then wants a tool never sends two assistant turns in a row', async () => {
+  // What a rep saw: "Let me research Astec Industries and pull relevant
+  // collateral at the same time", seven sources in the rail, then "Something
+  // went wrong." The research had already happened; the request that followed
+  // it was malformed.
+  const stub = pauseThenToolApi();
+  const { status } = await chat(stub, env());
+
+  assert.equal(status, 200);
+  assert.ok(stub.bodies.length >= 3, `only ${stub.bodies.length} request(s) — the turn did not get through`);
+
+  for (const [n, body] of stub.bodies.entries()) {
+    const roles = body.messages.map((m) => m.role);
+    for (let i = 1; i < roles.length; i += 1) {
+      assert.notEqual(
+        roles[i],
+        roles[i - 1],
+        `request ${n + 1} sent ${roles[i]} twice in a row: ${roles.join(' → ')}`,
+      );
+    }
+  }
+});
+
+test('the work a paused turn already did is carried into the turn that follows', async () => {
+  // Merging the slices must not lose the first one — the searches it ran are
+  // what the tool call and the final answer are built on.
+  const stub = pauseThenToolApi();
+  await chat(stub, env());
+
+  const assistant = stub.bodies[2].messages.filter((m) => m.role === 'assistant');
+  assert.equal(assistant.length, 1, 'one turn, one message');
+
+  const text = JSON.stringify(assistant[0].content);
+  assert.match(text, /Researching them/, 'the paused slice');
+  assert.match(text, /find_collateral/, 'and the resumed slice, in the same message');
+});
+
 test('the web tools are in the request the model actually receives', async () => {
   const stub = pausingApi({ pauses: 0 });
   await chat(stub, env());

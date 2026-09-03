@@ -500,14 +500,28 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
            * and picks up where it stopped. Adding a "continue" message of our
            * own would be a new instruction, not a resumption.
            */
+          //
+          // A resumed turn is ONE assistant turn, not several. Each pause
+          // returns another slice of the same reply, so the slices are
+          // accumulated and pushed as a single message. Pushing each one
+          // separately is what broke a research turn that then wanted a tool:
+          // the paused slice went in as an assistant message, the loop below
+          // pushed the resumed slice as a second, and the next request carried
+          // two assistant messages back to back — which the API rejects, so a
+          // turn that had already done its searching died as "Something went
+          // wrong" with the sources sitting in the rail.
+          let carried = [];
+
           for (let carry = 0; final.stop_reason === 'pause_turn'; carry += 1) {
             if (carry >= cfg.MAX_TURN_CONTINUATIONS) {
               console.warn(`[chat] session ${sessionId} still paused after ${carry} continuation(s)`);
               break;
             }
-            convo.push({ role: 'assistant', content: final.content });
             recordSources(final.content);
-            final = await runTurn(convo);
+            carried = carried.concat(final.content);
+            // A fresh array: `convo` must stay exactly what has been agreed so
+            // far, or the accumulated slices would be pushed onto it twice.
+            final = await runTurn(convo.concat([{ role: 'assistant', content: carried }]));
           }
 
           recordSources(final.content);
@@ -523,7 +537,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
           // arrives — trying to execute one would look up a handler that does
           // not exist and fail the turn.
           const blocks = final.content.filter((b) => b.type === 'tool_use');
-          convo.push({ role: 'assistant', content: final.content });
+          convo.push({ role: 'assistant', content: carried.concat(final.content) });
 
           const results = [];
           for (const block of blocks) {

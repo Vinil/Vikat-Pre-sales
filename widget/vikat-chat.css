@@ -689,3 +689,27 @@
     grid-column: 1 / -1;
   }
 }
+
+/* The upstream reason, for admins. Folded away: it is diagnostic detail, not
+   something a rep reading an error needs in their face. */
+.vk-detail {
+  margin-top: 8px;
+}
+
+.vk-detail summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--vk-w40);
+}
+
+.vk-detail-body {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--vk-w04);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--vk-w60);
+  overflow-wrap: anywhere;
+}

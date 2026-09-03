@@ -613,6 +613,13 @@
       n.appendChild(a);
     }
 
+    if (opts && opts.detail) {
+      var d = el('details', 'vk-detail');
+      d.appendChild(el('summary', null, 'What the API said'));
+      d.appendChild(el('div', 'vk-detail-body', opts.detail));
+      n.appendChild(d);
+    }
+
     if (opts && opts.retry) {
       n.appendChild(document.createTextNode(' '));
       var r = el('a', null, 'Retry.');
@@ -793,7 +800,11 @@
             answer = '';
           } else if (event === 'error') {
             status.remove();
-            addError(data.message, { retry: data.code === 'upstream_busy' });
+            // `detail` is the upstream reason, sent only to admins. The server
+            // already went to the trouble of including it and this dropped it
+            // on the floor — which is how "Something went wrong" reached an
+            // admin who was one line away from knowing exactly what broke.
+            addError(data.message, { retry: data.code === 'upstream_busy', detail: data.detail });
           }
         });
       }
