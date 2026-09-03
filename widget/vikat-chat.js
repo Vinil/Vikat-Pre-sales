@@ -790,6 +790,15 @@
             status.appendChild(el('span', null, toolLabel(data.name)));
           } else if (event === 'asset') {
             emit('asset', data.assets || []);
+          } else if (event === 'reset') {
+            // The server abandoned a half-streamed answer and is starting the
+            // turn again. Without this the rep reads the discarded half and
+            // the real answer as one paragraph.
+            if (bubble && bubble.node) bubble.node.remove();
+            bubble = null;
+            answer = '';
+            spoken = '';
+            if (!status.isConnected) log.appendChild(status);
           } else if (event === 'draft') {
             status.remove();
             (data.drafts || []).forEach(addDraft);
