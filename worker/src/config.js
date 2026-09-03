@@ -59,7 +59,18 @@ export const DEFAULTS = {
   // Reps hold longer working sessions than prospects did, and paste in
   // prospect emails and RFP excerpts to ask about.
   MAX_MESSAGES_PER_SESSION: 100,
-  MAX_CHARS_PER_MESSAGE: 8000,
+  // Effectively no limit, which is the point: a rep pastes a whole RFP, a
+  // chain of six emails, a transcript. 8000 characters cut those off mid-way
+  // and the assistant answered the half it was given without knowing the rest
+  // existed.
+  //
+  // Not literally unbounded, and it would be dishonest to call it that. The
+  // real ceiling is the model's context window, which the whole conversation
+  // shares — so a paste far larger than this would not fail here, it would
+  // fail at the API with a message nobody could act on. This number is roughly
+  // 50k tokens: comfortably larger than anything a person pastes, small enough
+  // that the failure it prevents stays impossible.
+  MAX_CHARS_PER_MESSAGE: 200000,
 
   // --- Rate limiting (per authenticated user) ----------------------------
   // Abuse is not the threat model here; a runaway client loop is. Set high

@@ -19,6 +19,7 @@
  */
 
 import { deliverLead } from './leadSink.js';
+import { normaliseDraft, CHANNEL_NAMES } from './outreach.js';
 import { searchCollateral, collateralCount } from './collateral.js';
 import { createDocument } from './documents/index.js';
 import { LIMITS } from './documents/spec.js';
@@ -168,6 +169,42 @@ export const TOOL_DEFINITIONS = [
         },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'draft_outreach',
+    description:
+      "Write an email or a LinkedIn draft the rep can copy and send. Call it whenever a rep asks for outreach, a follow-up, a connection note, an InMail, a sequence, or LinkedIn content — one call per draft, and call it several times in one turn for a sequence or a campaign. The draft is shown as a card with its own copy buttons, so write ONLY the message: no 'here is a draft', no commentary, no placeholder like [name] unless the rep genuinely has not said who it is for. Every claim in it must come from the knowledge base or from what the rep or your research established, and anything drawn from the web must be true to its source — a rep will send this to a real person under their own name.",
+    // Flat, and not strict. See create_document below for why nesting and
+    // `strict` are both avoided: the schema budget is a request-level limit,
+    // and normaliseDraft() validates and trims everything regardless.
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        channel: {
+          type: 'string',
+          enum: CHANNEL_NAMES,
+          description:
+            'Where this is going. linkedin_note is a connection request and is HARD LIMITED to 300 characters by LinkedIn itself; linkedin_post is public content, not a message to one person.',
+        },
+        subject: {
+          type: 'string',
+          description:
+            'Subject line, for email and linkedin_message. Specific to this prospect and this trigger — a subject that would fit any company is the one that gets deleted. Empty string for a channel that has none.',
+        },
+        body: {
+          type: 'string',
+          description:
+            'The message itself, exactly as it should be sent. Plain text with blank lines between paragraphs — no markdown, because it is going into an email client or LinkedIn. Open on the prospect and their trigger, not on Vikat.',
+        },
+        label: {
+          type: 'string',
+          description:
+            'A few words naming this draft, for when there are several: "Touch 1 — the fine", "Follow-up if no reply", "Post 2 of 3". Empty string if there is only one.',
+        },
+      },
+      required: ['channel', 'subject', 'body', 'label'],
     },
   },
   {
@@ -399,6 +436,36 @@ export async function runTool(call, ctx) {
         return {
           content: `Gap logged for the content owner. Say so in one short sentence and move on — do not apologise again. Then give the rep the best partial answer you have, and name who could answer it properly.`,
           effect: { gapType: input.gap_type, delivered: delivery.delivered },
+        };
+      }
+
+      case 'draft_outreach': {
+        const read = normaliseDraft(call.input);
+        if (!read.ok) {
+          return {
+            content: `That draft could not be used: ${read.error} Write the message itself and call the tool again.`,
+            isError: true,
+          };
+        }
+
+        const { draft, warnings } = read;
+
+        // The model is told the draft is ALREADY IN FRONT OF THE REP. Without
+        // this it writes the whole email out again underneath, and the rep gets
+        // two copies of a thing they only need one of — the card being the one
+        // with the copy buttons on it.
+        const note = warnings.length ? `\n\n${warnings.join(' ')}` : '';
+        return {
+          content:
+            `${draft.channelLabel} draft "${draft.label}" is now shown to the rep as a card they can copy.${note}\n\n` +
+            'Do NOT repeat the draft in your reply. Say in one line what angle you took and why — the trigger you built it on — ' +
+            'and what you would change if they tell you more. If a claim in it came from the web, say which one and from where.',
+          effect: {
+            channel: draft.channel,
+            // The rail and the card read from the same object, so what the rep
+            // copies and what they see listed can never disagree.
+            drafts: [draft],
+          },
         };
       }
 

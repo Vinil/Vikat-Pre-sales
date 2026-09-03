@@ -445,6 +445,146 @@ test('half-written markup mid-stream degrades to text', async () => {
   assert.match(await html('**bol'), /\*\*bol/, 'an unclosed bold stays visible');
 });
 
+// --- outreach drafts -------------------------------------------------------
+
+const DRAFT = {
+  channel: 'email',
+  channelLabel: 'Email',
+  label: 'Touch 1 — the fine',
+  subject: 'The March ruling, and the audit that follows it',
+  body: 'Saw the ruling last month.\n\nWorth fifteen minutes?',
+};
+
+/**
+ * A page with the widget on it, built the same way the shared one is.
+ *
+ * Its own page rather than the shared one: these tests append cards to the log
+ * and stub the clipboard, and doing that to a page other tests read from makes
+ * every later failure a puzzle.
+ */
+async function widgetPage() {
+  const page = await browser.newPage();
+  await page.setContent('<!doctype html><html><body><div id="m"></div></body></html>');
+  await page.addScriptTag({
+    content: fs
+      .readFileSync(WIDGET, 'utf8')
+      .replace(
+        'var script = document.currentScript;',
+        "var script = { getAttribute: function (k) { return ({'data-endpoint':'http://x','data-mode':'inline','data-mount':'#m'})[k] || null; } };",
+      ),
+  });
+  await page.evaluate(() => {
+    window.__copied = [];
+    // The async clipboard needs a permission this page does not have. What is
+    // under test is which STRING the button hands over, not whether Chromium
+    // will accept it.
+    navigator.clipboard = { writeText: (t) => { window.__copied.push(t); return Promise.resolve(); } };
+  });
+  return page;
+}
+
+async function withDraft(draft = DRAFT) {
+  const page = await widgetPage();
+  await page.evaluate((d) => window.VikatChatInternals.addDraft(d), draft);
+  await page.waitForSelector('.vk-draft');
+  return page;
+}
+
+test('a draft is a card with the subject and body kept apart', async () => {
+  // The whole point. In the answer text these are one blob a rep has to
+  // select around markdown, with the subject buried in a sentence.
+  const page = await withDraft();
+
+  assert.equal(await page.textContent('.vk-draft-ch'), 'Email');
+  assert.match(await page.textContent('.vk-draft-label'), /Touch 1/);
+  assert.match(await page.textContent('.vk-draft'), /The March ruling/);
+  assert.match(await page.textContent('.vk-draft-text'), /Worth fifteen minutes/);
+
+  await page.close();
+});
+
+test('the blank line between paragraphs survives into the copied text', async () => {
+  // An email whose paragraph breaks collapse arrives as a wall of text. The
+  // break has to be in the DOM text, not faked with CSS margins.
+  const page = await withDraft();
+
+  const body = await page.$eval('.vk-draft-text', (n) => n.textContent);
+  assert.ok(body.includes('\n\n'), JSON.stringify(body));
+
+  await page.close();
+});
+
+test('the body is inserted as text, never as markup', async () => {
+  // A prospect's own words end up in here. A draft quoting a filing that
+  // contains a tag must not have that tag rendered.
+  const page = await withDraft({
+    ...DRAFT,
+    body: 'They said <img src=x onerror="window.__x=1"> in the filing.',
+  });
+
+  assert.equal(await page.evaluate(() => window.__x), undefined);
+  assert.equal(await page.$$eval('.vk-draft-text img', (n) => n.length), 0);
+  assert.match(await page.textContent('.vk-draft-text'), /<img/);
+
+  await page.close();
+});
+
+test('copying the body hands over the body, exactly', async () => {
+  const page = await withDraft();
+
+  await page.click('.vk-draft-body .vk-copy');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+
+  assert.equal(await page.evaluate(() => window.__copied[0]), DRAFT.body);
+
+  // And it says so, or a rep clicks three times not knowing whether it worked.
+  await page.waitForSelector('.vk-copy.done', { timeout: 5000 });
+
+  await page.close();
+});
+
+test('copying the subject hands over only the subject', async () => {
+  const page = await withDraft();
+
+  await page.click('.vk-draft-row:not(.vk-draft-body) .vk-copy');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+
+  assert.equal(await page.evaluate(() => window.__copied[0]), DRAFT.subject);
+
+  await page.close();
+});
+
+test('subject and body can be taken together', async () => {
+  const page = await withDraft();
+
+  await page.click('.vk-copy-main');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+
+  const copied = await page.evaluate(() => window.__copied[0]);
+  assert.ok(copied.startsWith(DRAFT.subject), copied.slice(0, 60));
+  assert.ok(copied.endsWith(DRAFT.body), copied.slice(-40));
+
+  await page.close();
+});
+
+test('a connection note gets no subject row, and shows its length', async () => {
+  // 300 characters is a hard limit on LinkedIn, so the count is not decoration.
+  const note = 'Saw the Series C. Curious how the new regions change your patching window.';
+  const page = await withDraft({
+    channel: 'linkedin_note',
+    channelLabel: 'LinkedIn connection note',
+    label: '',
+    body: note,
+  });
+
+  const keys = await page.$$eval('.vk-draft-k', (ns) => ns.map((n) => n.textContent));
+  assert.ok(!keys.includes('Subject'), keys.join(', '));
+  assert.equal(await page.$$eval('.vk-copy-main', (ns) => ns.length), 0, 'nothing to combine');
+  assert.equal(await page.textContent('.vk-draft-count'), `${note.length} characters`);
+
+  await page.close();
+});
+
 // --- the rails -------------------------------------------------------------
 
 const WIDGET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget');

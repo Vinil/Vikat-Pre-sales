@@ -226,7 +226,11 @@
   input.rows = 1;
   input.placeholder = 'Ask about products, pricing, competitors…';
   input.setAttribute('aria-label', 'Message the sales assistant');
-  input.setAttribute('maxlength', '8000');
+  // No maxlength. A rep pastes a whole RFP or a chain of six emails, and a
+  // textarea that silently truncates at 8000 characters is worse than one that
+  // refuses: the paste LOOKS complete and the answer is confidently based on
+  // half of it. The server has the only limit, and it is large enough that
+  // nothing a person pastes reaches it.
 
   var send = el('button', 'vk-send');
   send.type = 'submit';
@@ -485,6 +489,115 @@
     return n;
   }
 
+  /**
+   * A draft, as something to copy rather than something to read.
+   *
+   * The whole point of the card. An email written into the answer text is
+   * still an email, and it is also four paragraphs a rep has to select around
+   * markdown, a subject line they have to find inside a sentence, and a "here
+   * is a draft" they have to delete. Two buttons remove all of that.
+   */
+  function addDraft(draft) {
+    var card = el('div', 'vk-draft');
+
+    var head = el('div', 'vk-draft-head');
+    head.appendChild(el('span', 'vk-draft-ch', draft.channelLabel || 'Draft'));
+    if (draft.label && draft.label !== draft.channelLabel) {
+      head.appendChild(el('span', 'vk-draft-label', draft.label));
+    }
+    card.appendChild(head);
+
+    if (draft.subject) {
+      var subjRow = el('div', 'vk-draft-row');
+      subjRow.appendChild(el('div', 'vk-draft-k', 'Subject'));
+      subjRow.appendChild(el('div', 'vk-draft-v', draft.subject));
+      subjRow.appendChild(copyButton('Copy', draft.subject));
+      card.appendChild(subjRow);
+    }
+
+    var bodyRow = el('div', 'vk-draft-row vk-draft-body');
+    bodyRow.appendChild(el('div', 'vk-draft-k', draft.subject ? 'Body' : 'Message'));
+    // textContent, never innerHTML: this is plain text headed for an email
+    // client, and the prospect's own name is in it.
+    bodyRow.appendChild(el('div', 'vk-draft-v vk-draft-text', draft.body));
+    bodyRow.appendChild(copyButton('Copy', draft.body));
+    card.appendChild(bodyRow);
+
+    var foot = el('div', 'vk-draft-foot');
+    if (draft.subject) {
+      foot.appendChild(copyButton('Copy subject + body', draft.subject + '\n\n' + draft.body, true));
+    }
+    // A character count, because LinkedIn silently refuses a connection note
+    // over 300 and an email over ~200 words gets skimmed. The rep is the one
+    // who decides; they just need to be able to see it.
+    foot.appendChild(el('span', 'vk-draft-count', draft.body.length + ' characters'));
+    card.appendChild(foot);
+
+    log.appendChild(card);
+    scroll();
+    return card;
+  }
+
+  function copyButton(label, text, primary) {
+    var b = el('button', 'vk-copy' + (primary ? ' vk-copy-main' : ''), label);
+    b.type = 'button';
+
+    b.addEventListener('click', function () {
+      copyText(text).then(
+        function () {
+          var was = b.textContent;
+          b.textContent = 'Copied';
+          b.classList.add('done');
+          setTimeout(function () {
+            b.textContent = was;
+            b.classList.remove('done');
+          }, 1600);
+        },
+        function () {
+          // Clipboard access can be refused outright. Saying so beats a button
+          // that looks like it worked and put nothing on the clipboard.
+          b.textContent = 'Press Ctrl+C';
+          selectText(b.closest('.vk-draft-row').querySelector('.vk-draft-v'));
+        },
+      );
+    });
+
+    return b;
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Older browsers, and any context where the async clipboard is blocked.
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy') ? resolve() : reject(new Error('refused'));
+      } catch (e) {
+        reject(e);
+      } finally {
+        ta.remove();
+      }
+    });
+  }
+
+  /** Last resort: put the text under the cursor so Ctrl+C works. */
+  function selectText(node) {
+    if (!node) return;
+    var range = document.createRange();
+    range.selectNodeContents(node);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   function addError(message, opts) {
     var n = el('div', 'vk-error');
     n.appendChild(document.createTextNode(message));
@@ -596,7 +709,12 @@
 
     var status = addStatus('Thinking');
     var bubble = null;
+    // `answer` is what the CURRENT bubble shows; `spoken` is everything the
+    // assistant said this turn. They diverge the moment a draft card splits
+    // the reply into two bubbles, and conflating them is how the text before
+    // the card would vanish from the history that gets resent next turn.
     var answer = '';
+    var spoken = '';
 
     controller = new AbortController();
 
@@ -657,6 +775,7 @@
               bubble = addAgent();
             }
             answer += data.text;
+            spoken += data.text;
             bubble.update(answer);
           } else if (event === 'tool') {
             status.textContent = '';
@@ -664,6 +783,14 @@
             status.appendChild(el('span', null, toolLabel(data.name)));
           } else if (event === 'asset') {
             emit('asset', data.assets || []);
+          } else if (event === 'draft') {
+            status.remove();
+            (data.drafts || []).forEach(addDraft);
+            // The answer continues after the card, so a fresh bubble is needed
+            // — otherwise the model's explanation appends to the bubble that
+            // was open before the draft and reads as part of it.
+            bubble = null;
+            answer = '';
           } else if (event === 'error') {
             status.remove();
             addError(data.message, { retry: data.code === 'upstream_busy' });
@@ -673,8 +800,8 @@
 
       status.remove();
 
-      if (answer.trim()) {
-        history.push({ role: 'assistant', content: answer });
+      if (spoken.trim()) {
+        history.push({ role: 'assistant', content: spoken });
         saveHistory();
         // The server indexed this conversation on the turn it just handled, so
         // a brand-new chat only becomes listable now. The rail refreshes on
@@ -768,7 +895,7 @@
    * was said. Replaying from there rather than from sessionStorage is what
    * makes a chat openable on a second machine at all.
    */
-  function openChat(id, turns) {
+  function openChat(id, turns, drafts) {
     if (controller) controller.abort();
 
     history = [];
@@ -785,6 +912,14 @@
     }
 
     repaint();
+
+    // Drafts come back after the transcript, at the end. Their exact position
+    // in the conversation is not recorded, and pretending to know it would put
+    // an email above the message that asked for it. Listed at the bottom they
+    // are plainly "what this conversation wrote", which is what a rep coming
+    // back to it wants.
+    (drafts || []).forEach(addDraft);
+
     emit('session', id);
     input.focus();
   }
@@ -872,5 +1007,12 @@
     on: on,
   };
 
-  window.VikatChatInternals = { splitTags: splitTags, renderBody: renderBody, emitForTest: emit };
+  window.VikatChatInternals = {
+    splitTags: splitTags,
+    renderBody: renderBody,
+    emitForTest: emit,
+    // The card is what a rep actually touches, so it is drivable from a test
+    // without having to fake a whole streamed turn.
+    addDraft: addDraft,
+  };
 })();

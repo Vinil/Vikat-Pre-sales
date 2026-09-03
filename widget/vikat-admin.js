@@ -306,6 +306,101 @@
       .catch(function () {});
   }
 
+  // --- Positioning ---------------------------------------------------------
+
+  var posMax = 24000;
+
+  function posCount() {
+    var n = $('#pos-content').value.length;
+    $('#pos-count').textContent =
+      n + ' / ' + posMax.toLocaleString() + ' characters' + (n >= posMax ? ' — at the limit' : '');
+  }
+
+  function showPositioning(r) {
+    if (typeof r.content === 'string') $('#pos-content').value = r.content;
+    if (r.sourceName) $('#pos-source').value = r.sourceName;
+    if (r.maxChars) posMax = r.maxChars;
+    if (r.accepts) $('#pos-accepts').textContent = 'Accepts ' + r.accepts.join(', ') + '.';
+
+    $('#pos-meta').textContent = r.updatedAt
+      ? 'Last saved ' + fmtDate(r.updatedAt) + (r.updatedBy ? ' by ' + r.updatedBy : '') + '.'
+      : 'Nothing saved yet — the assistant is answering from the knowledge base alone.';
+
+    posCount();
+  }
+
+  function loadPositioning() {
+    return api('/admin/positioning').then(showPositioning);
+  }
+
+  $('#pos-content').addEventListener('input', posCount);
+
+  $('#pos-file').addEventListener('change', function () {
+    var input = $('#pos-file');
+    if (!input.files || !input.files[0]) return;
+
+    var body = new FormData();
+    body.append('file', input.files[0]);
+
+    var status = $('#pos-status');
+    status.textContent = 'Reading ' + input.files[0].name + '…';
+
+    // Not through api(): that helper JSON-encodes its body, and multipart must
+    // set its own boundary.
+    fetch(ENDPOINT + '/admin/positioning', { method: 'POST', credentials: 'include', body: body })
+      .then(function (res) {
+        return res.json().then(function (payload) { return { res: res, payload: payload }; });
+      })
+      .then(function (r) {
+        if (!r.res.ok) throw new Error((r.payload && r.payload.error) || 'Could not read that file');
+
+        // Fills the box. Deliberately does NOT save: this text governs every
+        // answer the assistant gives, and nothing should govern every answer
+        // without a person having read it.
+        $('#pos-content').value = r.payload.content || '';
+        $('#pos-source').value = r.payload.sourceName || '';
+        posCount();
+
+        status.textContent = r.payload.note || 'Read. Check it, then Save.';
+        (r.payload.warnings || []).forEach(function (w) { toast(w, true); });
+      })
+      .catch(function (err) {
+        status.textContent = '';
+        toast(err.message || 'Could not read that file', true);
+      })
+      .finally(function () {
+        input.value = '';
+      });
+  });
+
+  $('#pos-save').addEventListener('click', function () {
+    var btn = $('#pos-save');
+    btn.disabled = true;
+
+    api('/admin/positioning', {
+      method: 'PUT',
+      body: { content: $('#pos-content').value, sourceName: $('#pos-source').value },
+    })
+      .then(function (r) {
+        toast(r.note || 'Saved.');
+        showPositioning(r);
+      })
+      .catch(function () {})
+      .finally(function () { btn.disabled = false; });
+  });
+
+  $('#pos-clear').addEventListener('click', function () {
+    // A wrong positioning statement governing every answer is worse than none,
+    // so clearing has to be one obvious action rather than select-all-delete.
+    if (!window.confirm('Clear the positioning statement? The assistant will answer from the knowledge base alone.')) {
+      return;
+    }
+    $('#pos-content').value = '';
+    $('#pos-source').value = '';
+    posCount();
+    $('#pos-save').click();
+  });
+
   // --- Upload --------------------------------------------------------------
 
   function loadUploadTargets() {
@@ -668,7 +763,7 @@
 
         // Independent, and kept that way: a throw in one used to take the
         // rest of the sequence with it.
-        [loadKnowledge, loadUploadTargets, loadSharePoint, loadUsers].forEach(function (load) {
+        [loadKnowledge, loadPositioning, loadUploadTargets, loadSharePoint, loadUsers].forEach(function (load) {
           try {
             load();
           } catch (err) {

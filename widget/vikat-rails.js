@@ -131,7 +131,7 @@
     // assets come with it, for the same reason.
     api('/chats/' + encodeURIComponent(id))
       .then(function (r) {
-        window.VikatChat.open(id, r.turns || []);
+        window.VikatChat.open(id, r.turns || [], r.drafts || []);
         resetAssets();
         addAssets(r.assets || []);
       })

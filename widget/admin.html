@@ -207,6 +207,44 @@
   <!-- Knowledge -->
   <section class="panel" id="panel-knowledge" role="tabpanel" aria-labelledby="tab-knowledge">
     <div class="card">
+      <h2>Positioning &amp; differentiation</h2>
+      <p class="sub">
+        What Vikat is, and why a buyer chooses it over the alternative. The assistant leads with this and
+        it <strong>outranks</strong> anything in the knowledge base that disagrees — including a deck the sync
+        indexed last night. Upload a document to fill the box, read what it pulled out, then save.
+        <span id="pos-meta" class="hint" style="display:inline"></span>
+      </p>
+
+      <div class="row row-2">
+        <div>
+          <label for="pos-file">Upload a document or deck</label>
+          <input type="file" id="pos-file">
+          <p class="hint" id="pos-accepts"></p>
+        </div>
+        <div>
+          <label for="pos-source">Where it came from (optional)</label>
+          <input type="text" id="pos-source" placeholder="Vikat_Positioning_v4.pptx" autocomplete="off">
+          <p class="hint">Filled in for you by an upload. Shown to nobody but you.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="pos-content">Positioning statement</label>
+          <textarea id="pos-content" rows="16"
+            placeholder="Who we are for. What we do that the alternatives do not. The three things a buyer should remember. What we are deliberately NOT."></textarea>
+          <p class="hint" id="pos-count"></p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="primary" id="pos-save">Save</button>
+        <button type="button" id="pos-clear">Clear</button>
+        <span id="pos-status" class="hint" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Upload a document</h2>
       <p class="sub">
         A deck, brief, one-pager or PDF. Its text is read and added to the assistant's knowledge straight

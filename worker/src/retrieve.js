@@ -13,6 +13,7 @@
  */
 
 import { KNOWLEDGE, KNOWLEDGE_TOKENS, KNOWLEDGE_META } from './knowledge.js';
+import { POSITIONING_KEY, positioningBlock } from './positioning.js';
 
 /** Every page in the compiled base, for retiring superseded uploads. */
 const COMPILED_PAGES = new Set(KNOWLEDGE.map((c) => c.page));
@@ -66,6 +67,20 @@ function escapeAttr(s) {
 export async function retrieve(query, sessionContext = {}) {
   void query;
 
+  // Positioning is not retrieved, it is ALWAYS present. Everything below
+  // answers a question; this answers the question behind every question, and a
+  // rep can get every product fact right and still lose the deal by framing us
+  // as the cheap version of a competitor. Reaching the model on only the turns
+  // where a search happened to surface it would be no use.
+  let positioning = '';
+  if (sessionContext.storage) {
+    try {
+      positioning = positioningBlock(await sessionContext.storage.getSetting(POSITIONING_KEY));
+    } catch (err) {
+      console.error('[retrieve] positioning unavailable:', err?.message || err);
+    }
+  }
+
   // Admin-authored entries are merged at request time, so a correction typed
   // into the panel is live on the next message rather than the next deploy.
   // They come last: later entries read as the more recent word on a subject,
@@ -94,7 +109,8 @@ export async function retrieve(query, sessionContext = {}) {
     }
   }
 
-  return format([...KNOWLEDGE, ...runtime]);
+  const base = format([...KNOWLEDGE, ...runtime]);
+  return positioning ? `${positioning}\n\n${base}` : base;
 }
 
 /**

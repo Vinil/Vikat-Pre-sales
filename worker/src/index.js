@@ -205,6 +205,21 @@ function isToolSchemaRejection(err) {
  * cannot start a conversation because of one optional field is worse than one
  * that starts without the field.
  */
+/**
+ * Is this the API refusing the request because the conversation is too long?
+ *
+ * The direct consequence of removing the per-message character limit: a rep
+ * can now paste an entire RFP, and after a few of those the whole conversation
+ * no longer fits the model's context. That comes back as a flat 400, which
+ * without this reads as "Something went wrong. Retry" — advice that cannot
+ * work, because the retry sends the same oversized conversation again.
+ */
+function isContextOverflow(err) {
+  if (err?.status !== 400) return false;
+  const message = String(err?.message || '');
+  return /prompt is too long|context.{0,20}(window|length)|too many tokens|maximum.{0,20}tokens/i.test(message);
+}
+
 function isUnsupportedParameter(err, name) {
   if (err?.status !== 400) return false;
   const message = String(err?.message || '');
@@ -313,6 +328,8 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
        * the record of the turn.
        */
       const turnAssets = [];
+      /** Outreach drafts this turn wrote. Stored for the same reason assets are. */
+      const turnDrafts = [];
 
       /**
        * File the pages a research turn read, as assets.
@@ -537,6 +554,16 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               turnAssets.push(...assets);
               send('asset', { assets });
             }
+
+            // A draft is shown as its own card with copy buttons, so it is
+            // sent as its own event rather than left in the answer text. Kept
+            // with the turn too: a rep who comes back to a conversation
+            // tomorrow needs the email they wrote, not a note that one existed.
+            const drafts = result.effect && result.effect.drafts;
+            if (Array.isArray(drafts) && drafts.length) {
+              turnDrafts.push(...drafts);
+              send('draft', { drafts });
+            }
           }
 
           convo.push({ role: 'user', content: results });
@@ -576,11 +603,16 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         console.error('[chat] stream failed:', err?.status || '', err?.message || err);
 
         const isOverloaded = err?.status === 429 || err?.status === 529;
+        const isTooLong = isContextOverflow(err);
         send('error', {
-          message: isOverloaded
-            ? 'The assistant is busy right now. Try again in a moment.'
-            : `Something went wrong. Retry, and if it persists flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
-          code: isOverloaded ? 'upstream_busy' : 'upstream_error',
+          message: isTooLong
+            ? 'This conversation has grown past what the assistant can hold at once. ' +
+              'Start a new chat and paste just the part you need answered — nothing you have been told is lost, ' +
+              'the earlier conversation stays in your list.'
+            : isOverloaded
+              ? 'The assistant is busy right now. Try again in a moment.'
+              : `Something went wrong. Retry, and if it persists flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
+          code: isTooLong ? 'context_full' : isOverloaded ? 'upstream_busy' : 'upstream_error',
           // Admins get the upstream reason. Everyone here is a colleague, and
           // the alternative is what actually happened the first time this
           // broke: someone reading Worker logs to recover one line of text.
@@ -598,6 +630,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               agentResponse: fullText,
               toolCalls,
               assets: turnAssets,
+              drafts: turnDrafts,
             })
             .catch((e) => console.error('[chat] appendLog failed:', e?.message || e)),
         );
@@ -836,6 +869,11 @@ export default {
           }
         }
 
+        // Drafts are NOT deduped and NOT flattened away from their turn: a
+        // sequence is three deliberately different emails, and two touches
+        // that happen to open the same way are still two touches.
+        const drafts = logs.flatMap((l) => (l.drafts || []).filter((d) => d && d.body));
+
         return json(
           {
             sessionId: chatId,
@@ -846,6 +884,7 @@ export default {
               toolCalls: (l.toolCalls || []).map((c) => c.name),
             })),
             assets,
+            drafts,
           },
           200,
           cors,

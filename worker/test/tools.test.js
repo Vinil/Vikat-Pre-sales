@@ -29,7 +29,7 @@ async function withFetch(stub, fn) {
 test('the internal tool set is defined', () => {
   assert.deepEqual(
     TOOL_DEFINITIONS.map((t) => t.name).sort(),
-    ['ask_expert', 'create_document', 'find_collateral', 'flag_content_gap', 'log_prospect'],
+    ['ask_expert', 'create_document', 'draft_outreach', 'find_collateral', 'flag_content_gap', 'log_prospect'],
   );
 });
 
@@ -63,9 +63,14 @@ test('a tool is strict unless its handler validates the input itself', () => {
   // conversation, including ones that never touched the tool.
   //
   // create_document runs normaliseSpec(); log_prospect runs
-  // normaliseProspect(). An exemption is a debt, not a shortcut: whatever
-  // strict would have guaranteed, the handler now owes.
-  const VALIDATES_ITS_OWN_INPUT = new Set(['create_document', 'log_prospect']);
+  // normaliseProspect(); draft_outreach runs normaliseDraft(). An exemption is
+  // a debt, not a shortcut: whatever strict would have guaranteed, the handler
+  // now owes.
+  //
+  // draft_outreach is exempt for the budget reason too. It carries a
+  // four-value enum, and every enum value is an alternative the constrained
+  // grammar has to admit — the multiplier that took production down.
+  const VALIDATES_ITS_OWN_INPUT = new Set(['create_document', 'log_prospect', 'draft_outreach']);
 
   for (const t of TOOL_DEFINITIONS) {
     if (VALIDATES_ITS_OWN_INPUT.has(t.name)) {

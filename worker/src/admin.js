@@ -16,6 +16,7 @@
 import { ROLES, resolveRole, wouldLeaveNoAdmin } from './roles.js';
 import { documentStoreStatus, listLibraries, uploadDocument } from './documentStore.js';
 import { ingest, SUPPORTED_EXTENSIONS } from './ingest.js';
+import { POSITIONING_KEY, POSITIONING_MAX_CHARS } from './positioning.js';
 import { retrievalStatus } from './retrieve.js';
 import { collateralCount } from './collateral.js';
 
@@ -376,6 +377,131 @@ async function handleUpload(request, url, ctx) {
 
 // --- Users ----------------------------------------------------------------
 
+/**
+ * Positioning and differentiation — the one document that outranks the rest.
+ *
+ * Everything else in the knowledge base answers a question. This answers the
+ * question BEHIND every question: what we actually are, and why a buyer would
+ * choose us over the alternative. A rep can get every product fact right and
+ * still lose the deal by positioning us as the cheaper version of a competitor,
+ * so this is not one more entry in a pile of entries — retrieve.js puts it
+ * ahead of the knowledge base and the prompt tells the model it wins.
+ *
+ * Stored as ONE editable text rather than as chunks. An upload fills the field;
+ * the admin then reads it, fixes what the extractor mangled, and saves. That
+ * ordering is deliberate: this text governs every answer the assistant gives,
+ * and nothing should govern every answer without a person having read it.
+ */
+async function handlePositioning(request, url, ctx) {
+  const { storage, user, cors, cfg, env } = ctx;
+
+  if (request.method === 'GET') {
+    const saved = (await storage.getSetting(POSITIONING_KEY)) || null;
+    return json(
+      {
+        content: saved?.content || '',
+        updatedBy: saved?.updatedBy || null,
+        updatedAt: saved?.updatedAt || null,
+        sourceName: saved?.sourceName || null,
+        maxChars: POSITIONING_MAX_CHARS,
+        accepts: SUPPORTED_EXTENSIONS,
+      },
+      200,
+      cors,
+    );
+  }
+
+  // A file: read it and hand the text BACK, without saving. The admin reviews
+  // it in the field and saves separately.
+  if (request.method === 'POST') {
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return json({ error: 'Send the file as multipart/form-data.' }, 400, cors);
+    }
+
+    const file = form.get('file');
+    if (!file || typeof file.arrayBuffer !== 'function') {
+      return json({ error: 'No file was attached.' }, 400, cors);
+    }
+
+    const fileName = clean(file.name || 'upload').slice(0, 180);
+    const extension = extensionOf(fileName);
+    if (!SUPPORTED_EXTENSIONS.includes(extension)) {
+      return json(
+        { error: `${extension || 'That file'} cannot be read. Accepted: ${SUPPORTED_EXTENSIONS.join(', ')}.` },
+        400,
+        cors,
+      );
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.byteLength > cfg.MAX_DOCUMENT_BYTES) {
+      return json({ error: `That file is larger than ${Math.round(cfg.MAX_DOCUMENT_BYTES / 1024)}KB.` }, 400, cors);
+    }
+
+    const read = await ingest(bytes, fileName, { env, cfg });
+    if (!read.ok) return json({ error: read.error, warnings: read.warnings }, 422, cors);
+
+    // Chunk boundaries are for retrieval; this is one document a person is
+    // about to read, so it is rejoined with its headings intact.
+    const content = read.chunks
+      .map((c) => `## ${c.section}\n\n${c.content}`)
+      .join('\n\n')
+      .slice(0, POSITIONING_MAX_CHARS);
+
+    return json(
+      {
+        content,
+        sourceName: fileName,
+        warnings: read.warnings,
+        reader: read.reader,
+        usage: read.usage || null,
+        // Said plainly, because the field looks saved the moment it is filled.
+        note: `Read ${fileName}. Check it, then Save — nothing has changed for the assistant yet.`,
+      },
+      200,
+      cors,
+    );
+  }
+
+  if (request.method !== 'PUT') {
+    return json({ error: 'Use GET, POST or PUT.', code: 'method_not_allowed' }, 405, cors);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Send JSON.' }, 400, cors);
+  }
+
+  const content = clean(body.content).slice(0, POSITIONING_MAX_CHARS);
+
+  // Saving nothing is how you TURN IT OFF, and it has to be possible: a wrong
+  // positioning statement governing every answer is worse than none.
+  const saved = await storage.saveSetting(
+    POSITIONING_KEY,
+    { content, sourceName: clean(body.sourceName).slice(0, 180) || null },
+    user.email,
+  );
+
+  return json(
+    {
+      content: saved.content,
+      updatedBy: saved.updatedBy,
+      updatedAt: saved.updatedAt,
+      sourceName: saved.sourceName,
+      note: content
+        ? 'Saved. The assistant leads with this from the next message on.'
+        : 'Cleared. The assistant will answer from the knowledge base alone.',
+    },
+    200,
+    cors,
+  );
+}
+
 async function handleUsers(request, url, ctx) {
   const { storage, user, cors, cfg } = ctx;
 
@@ -514,6 +640,8 @@ export async function handleAdmin(request, url, ctx) {
       return handleKnowledge(request, url, ctx);
     case '/admin/upload':
       return handleUpload(request, url, ctx);
+    case '/admin/positioning':
+      return handlePositioning(request, url, ctx);
     case '/admin/sharepoint':
       return handleSharePoint(request, url, ctx);
     case '/admin/users':
