@@ -18,15 +18,27 @@
 // --- Colour ---------------------------------------------------------------
 
 /**
- * The primary palette. Navy anchors everything; teal and green are accents,
- * at roughly 70 navy / 20 teal / 10 green.
+ * The primary palette, read off the Vikat_Overview template rather than
+ * transcribed by hand — every value below is one the deck actually uses, in
+ * descending order of how much of it there is. Cream is the ground, not an
+ * accent: it is the most-used colour in the template by a wide margin, and
+ * generated decks were rendering half their slides on white.
+ *
+ * Navy anchors the type; teal, green and violet are accents, roughly
+ * 70 navy / 20 teal / 10 everything else.
  */
 export const COLOR = {
   navy: '#022258',
   deepNavy: '#01163A',
-  circuitTeal: '#34968D',
-  signalGreen: '#5AB172',
+  midNavy: '#1C3B66',
+  circuitTeal: '#14736D',
+  brightTeal: '#28B5AE',
+  paleTeal: '#7FD4CD',
+  signalGreen: '#2E7044',
+  violet: '#5B4FC0',
+  paleViolet: '#B3A9F5',
   cream: '#F6F1E4',
+  sand: '#DCD6C6',
   white: '#FFFFFF',
 };
 
@@ -36,16 +48,16 @@ export const COLOR = {
  */
 export const INK = {
   strong: '#022258',
-  body: '#2C3E5E',
-  muted: '#6B7A93',
-  rule: '#DFE4EC',
+  body: '#4A5B74',
+  muted: '#5F6C80',
+  rule: '#DCD6C6',
 };
 
 /** Text colours for use on navy. */
 export const ON_NAVY = {
   strong: '#FFFFFF',
-  body: '#C7D2E4',
-  muted: '#8DA0BE',
+  body: '#B9C6D9',
+  muted: '#8FA6C4',
 };
 
 /**

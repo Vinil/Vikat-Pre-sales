@@ -14,20 +14,24 @@
 
 <style>
   :root {
-    --bg: #050507;
-    --sf: #111318;
-    --sf2: #171a21;
-    --w: #f2f4fa;
-    --w80: rgba(242,244,250,.8);
-    --w60: rgba(242,244,250,.6);
-    --w40: rgba(242,244,250,.4);
-    --w20: rgba(242,244,250,.2);
-    --w08: rgba(242,244,250,.08);
-    --w04: rgba(242,244,250,.04);
-    --cyan: #00d4ff;
-    --violet: #6e56ff;
-    --green: #00e68a;
-    --orange: #ff7a45;
+    /* The Vikat palette, read off the Vikat_Overview template: cream ground,
+       navy ink, teal and violet accents. The --w* names still mean what they
+       always meant — the strongest text colour down to the faintest rule —
+       they just describe ink on cream now instead of white on black. */
+    --bg: #F6F1E4;
+    --sf: #FFFFFF;
+    --sf2: #EFE9DA;
+    --w: #022258;
+    --w80: rgba(2,34,88,.86);
+    --w60: rgba(2,34,88,.66);
+    --w40: rgba(2,34,88,.46);
+    --w20: rgba(2,34,88,.18);
+    --w08: rgba(2,34,88,.1);
+    --w04: rgba(2,34,88,.05);
+    --cyan: #14736D;
+    --violet: #5B4FC0;
+    --green: #2E7044;
+    --orange: #B4531F;
     --mono: 'IBM Plex Mono','SF Mono',Consolas,monospace;
   }
 
@@ -58,7 +62,7 @@
     padding: 0 clamp(14px, 2.5vw, 28px);
     height: 56px;
     border-bottom: 1px solid var(--w08);
-    background: rgba(5,5,7,.96);
+    background: rgba(246,241,228,.96);
   }
 
   .logo { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
@@ -114,7 +118,7 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    background: rgba(242, 244, 250, 0.015);
+    background: rgba(2, 34, 88, 0.02);
   }
   .rail-l { border-right: 1px solid var(--w08); }
   .rail-r { border-left: 1px solid var(--w08); }

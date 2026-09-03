@@ -480,10 +480,59 @@
     };
   }
 
+  /**
+   * What the assistant is doing, and how long it has been doing it.
+   *
+   * A pulsing dot says "something is happening" for about four seconds and
+   * "this has hung" for every second after that. A research turn legitimately
+   * runs for a minute — searching, reading, then building a deck — and during
+   * most of it there is no text to stream, so the rep is staring at a dot with
+   * no way to tell a working assistant from a dead one.
+   *
+   * So: the current activity in words, a clock that keeps moving, and past a
+   * minute an explicit reassurance that a long turn is normal. The clock is
+   * the part that matters — a number going up is proof of life in a way an
+   * animation is not, because an animation keeps playing after the tab has
+   * stopped receiving anything.
+   */
   function addStatus(text) {
     var n = el('div', 'vk-status');
     n.appendChild(el('span', 'vk-dot'));
-    n.appendChild(el('span', null, text));
+
+    var label = el('span', 'vk-status-t', text);
+    var clock = el('span', 'vk-status-c', '');
+    n.appendChild(label);
+    n.appendChild(clock);
+
+    var started = Date.now();
+    var timer = setInterval(tick, 1000);
+
+    function tick() {
+      var secs = Math.round((Date.now() - started) / 1000);
+      if (secs < 2) {
+        clock.textContent = '';
+        return;
+      }
+      clock.textContent =
+        secs < 60
+          ? secs + 's'
+          : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's · long turns are normal, it is still going';
+    }
+
+    // The DOM node is what callers hold, so the timer has to be cleared when
+    // that node leaves — otherwise every turn leaves an interval running and
+    // a long session accumulates them.
+    var remove = n.remove.bind(n);
+    n.remove = function () {
+      clearInterval(timer);
+      remove();
+    };
+
+    n.say = function (what) {
+      label.textContent = what;
+      scroll();
+    };
+
     log.appendChild(n);
     scroll();
     return n;
@@ -785,9 +834,9 @@
             spoken += data.text;
             bubble.update(answer);
           } else if (event === 'tool') {
-            status.textContent = '';
-            status.appendChild(el('span', 'vk-dot'));
-            status.appendChild(el('span', null, toolLabel(data.name)));
+            // Rebuilding the node here used to throw the clock away with it,
+            // which reset the one signal that a long turn is still moving.
+            status.say(toolLabel(data.name));
           } else if (event === 'asset') {
             emit('asset', data.assets || []);
           } else if (event === 'reset') {

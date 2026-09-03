@@ -543,12 +543,18 @@ export async function runTool(call, ctx) {
           ? `Filed in SharePoint at ${result.sharePointUrl}.`
           : `NOT filed in SharePoint (${result.filingReason}). Say so — the rep should know this copy is theirs alone and expires.`;
 
+        // What the file actually looks like, checked rather than assumed. The
+        // rep hears it from the assistant instead of discovering it on a
+        // screen in front of a customer.
+        const looks = result.inspection ? `\nOn checking the file: ${result.inspection}\n` : '';
+
         return {
           content:
             `Built ${result.fileName} — ${result.sections} section(s), ${Math.round(result.sizeBytes / 1024)}KB. ` +
-            `Download link: ${result.downloadPath}\n${filing}\n\n` +
+            `Download link: ${result.downloadPath}\n${filing}\n${looks}\n` +
             `Give the rep the download link as a markdown link on the file name, and the SharePoint link too if there is one. ` +
-            `State the disclosure label printed on it: "${result.disclosureLabel}". Do not restate the document's contents — they have it.`,
+            `State the disclosure label printed on it: "${result.disclosureLabel}". Do not restate the document's contents — they have it. ` +
+            `If the check above flagged anything, say it in one line and offer to rebuild that part — do not pass it on silently.`,
           effect: {
             format: result.format,
             sections: result.sections,

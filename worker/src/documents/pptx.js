@@ -172,6 +172,70 @@ function footer(spec, onDark, pageLabel) {
   );
 }
 
+/**
+ * Settle a slide's content into the space it has.
+ *
+ * Every layout below composes downward from the top margin, which is the
+ * natural way to write them and produces a deck where the words huddle in the
+ * top four-tenths and the bottom half is empty. On a projector that reads as
+ * unfinished — and it was, on every slide of every deck this has produced.
+ *
+ * So the shapes are laid out first and placed second: the block is measured,
+ * then shifted into the band between the top margin and the footer. Not dead
+ * centre — a shade above it, which is where the eye expects the weight of a
+ * composed page to sit.
+ *
+ * String surgery on the XML rather than a parameter threaded through nine
+ * layout functions: the offsets are already written, and rewriting them in one
+ * place cannot be forgotten by the tenth layout somebody adds later.
+ *
+ * @param {string[]} shapes  Content shapes, in document order.
+ * @param {number} reserveBottom  Space the footer needs, in inches.
+ */
+function settle(shapes, reserveBottom = 0.75) {
+  const body = shapes.filter(Boolean);
+  if (!body.length) return body.join('');
+
+  const boxes = body.map(boxOf).filter(Boolean);
+  if (!boxes.length) return body.join('');
+
+  const top = Math.min(...boxes.map((b) => b.y));
+  const bottom = Math.max(...boxes.map((b) => b.y + b.cy));
+
+  const bandTop = M.top;
+  const bandBottom = SLIDE.heightIn - M.bottom - reserveBottom;
+  const slack = bandBottom - bandTop - (bottom - top);
+
+  // Nothing to give. A slide that already fills its band is left exactly
+  // where its layout put it — shifting it up would crop the top.
+  if (slack <= 0.05) return body.join('');
+
+  const shift = bandTop + slack * 0.42 - top;
+  if (Math.abs(shift) < 0.02) return body.join('');
+
+  return body.map((shape) => shiftY(shape, shift)).join('');
+}
+
+/** The first offset/extent pair in a shape, in inches. */
+function boxOf(shape) {
+  const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(shape);
+  const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(shape);
+  if (!off) return null;
+  return {
+    y: Number(off[2]) / 914400,
+    cy: ext ? Number(ext[2]) / 914400 : 0,
+  };
+}
+
+/** Move every offset in a shape down by `inches`. */
+function shiftY(shape, inches) {
+  const delta = Math.round(inches * 914400);
+  return shape.replace(/<a:off x="(-?\d+)" y="(-?\d+)"\/>/g, (_, x, y) => {
+    const moved = Math.max(0, Number(y) + delta);
+    return `<a:off x="${x}" y="${moved}"/>`;
+  });
+}
+
 function slideXml(shapes, background) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -237,10 +301,12 @@ function coverSlide(spec, meta, fonts) {
       },
     ]),
 
-    footer(spec, false, meta.date),
   ];
 
-  return slideXml(shapes.join(''), bg(COLOR.white));
+  // The gradient band is bled to the slide edge, so it is placed rather than
+  // settled — it has no business drifting toward the middle.
+  const [band, ...block] = shapes;
+  return slideXml(band + settle(block, 1.1) + footer(spec, false, meta.date), bg(COLOR.cream));
 }
 
 /**
@@ -300,8 +366,7 @@ function statSlide(spec, section, meta, pageLabel) {
 
   if (section.body) shapes.push(captionAt(section.body, M.top + 3.95, CONTENT_WIDTH * 0.8));
 
-  shapes.push(footer(spec, false, pageLabel));
-  return slideXml(shapes, bg(COLOR.cream));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 /**
@@ -353,8 +418,7 @@ function barsSlide(spec, section, meta, pageLabel) {
     );
   });
 
-  shapes.push(footer(spec, false, pageLabel));
-  return slideXml(shapes, bg(COLOR.cream));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 /** A sequence of named stages, left to right, with the flow made visible. */
@@ -397,8 +461,7 @@ function chainSlide(spec, section, meta, pageLabel) {
     }
   });
 
-  shapes.push(footer(spec, false, pageLabel));
-  return slideXml(shapes, bg(COLOR.cream));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 /** Stops along a single rule — a calendar, a phase plan, a sequence in time. */
@@ -432,8 +495,7 @@ function timelineSlide(spec, section, meta, pageLabel) {
     );
   });
 
-  shapes.push(footer(spec, false, pageLabel));
-  return slideXml(shapes, bg(COLOR.cream));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 /** Two states side by side, the second one carrying the weight. */
@@ -474,8 +536,7 @@ function splitSlide(spec, section, meta, pageLabel) {
     ]),
   );
 
-  shapes.push(footer(spec, false, pageLabel));
-  return slideXml(shapes, bg(COLOR.cream));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 /** One sentence, full bleed on navy. The slide a presenter stops talking on. */
@@ -495,8 +556,7 @@ function quoteSlide(spec, section, meta, pageLabel) {
     );
   }
 
-  shapes.push(footer(spec, true, pageLabel));
-  return slideXml(shapes, bg(COLOR.deepNavy));
+  return slideXml(settle(shapes) + footer(spec, true, pageLabel), bg(COLOR.deepNavy));
 }
 
 const DRAWN = {
@@ -572,9 +632,10 @@ function contentSlide(spec, section, meta, pageLabel, fonts) {
     );
   }
 
-  shapes.push(footer(spec, false, pageLabel));
-
-  return slideXml(shapes.join(''), bg(COLOR.white));
+  // Cream, like every other slide. Three grounds in one deck — white for
+  // prose, cream for drawn, navy for a quote — read as three decks stapled
+  // together, and the template this follows is cream throughout.
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 function closingSlide(spec, meta) {
