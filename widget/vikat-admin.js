@@ -69,24 +69,91 @@
 
     if (!res.ok) {
       if (res.status === 401) {
-        toast('Your session expired. Reloading…', true);
-        setTimeout(function () { location.reload(); }, 1500);
+        signInAgain(payload);
       } else if (res.status === 403) {
-        renderForbidden();
+        // The server says WHY. It knows whether this is the wrong account, a
+        // missing role, or an identity provider that never sent an email
+        // address, and those need different things done about them.
+        renderForbidden(payload && payload.error);
       } else {
         toast((payload && payload.error) || ('Request failed (' + res.status + ')'), true);
       }
       throw new Error((payload && payload.error) || res.status);
     }
 
+    clearReauth();
     return payload;
   }
 
-  function renderForbidden() {
-    document.querySelector('main').innerHTML =
-      '<h1>Not available</h1>' +
-      '<p class="lede">Your account does not have administrator access to the sales assistant. ' +
-      'Ask an existing admin to grant it.</p>';
+  /**
+   * Reload once, and only for a rejection a fresh sign-in can actually fix.
+   *
+   * This used to fire on EVERY 401 and always reload. When the cause was
+   * something signing in again cannot change — the wrong account, a
+   * misconfigured audience — the reload produced the identical rejection and
+   * scheduled another one. An admin who had just signed in successfully sat
+   * watching "Your session expired. Reloading…" every second and a half.
+   */
+  var reloading = false;
+  var TRIED = 'vikat.admin.reauth';
+
+  function signInAgain(payload) {
+    var message = (payload && payload.error) || 'Sign in with your Vikat account.';
+
+    // `retry: 'never'` means the server has already established that another
+    // round trip lands in the same place.
+    if (payload && payload.retry === 'never') {
+      renderForbidden(message);
+      return;
+    }
+
+    // Reloading is worth ONE attempt, and the record of that attempt has to
+    // survive the reload to be worth anything. A wrong CF_ACCESS_AUD rejects a
+    // perfectly good Access cookie as an invalid token — a real 401 that a
+    // real sign-in cannot fix: reload, same cookie, same rejection, reload. An
+    // in-memory flag resets on every page load and would leave that loop
+    // spinning exactly as before.
+    var tried = false;
+    try {
+      tried = sessionStorage.getItem(TRIED) === '1';
+    } catch (e) {
+      // Storage blocked. Better never to auto-reload than to loop; the
+      // message still says what to do.
+      tried = true;
+    }
+
+    if (tried || reloading) {
+      clearReauth();
+      renderForbidden(
+        message +
+          ' Signing in again did not help, so this is not a stale session — ask whoever deployed ' +
+          'the assistant to check the Cloudflare Access application.',
+      );
+      return;
+    }
+
+    reloading = true;
+    try { sessionStorage.setItem(TRIED, '1'); } catch (e) { /* the one attempt still happens */ }
+    toast(message + ' Reloading…', true);
+    setTimeout(function () { location.reload(); }, 1500);
+  }
+
+  /** A call that succeeded means the sign-in worked; forget the attempt. */
+  function clearReauth() {
+    try { sessionStorage.removeItem(TRIED); } catch (e) { /* nothing to clear */ }
+  }
+
+  function renderForbidden(message) {
+    document.querySelector('main').textContent = '';
+    var h = document.createElement('h1');
+    h.textContent = 'Not available';
+    var p = document.createElement('p');
+    p.className = 'lede';
+    p.textContent =
+      message ||
+      'Your account does not have administrator access to the sales assistant. Ask an existing admin to grant it.';
+    document.querySelector('main').appendChild(h);
+    document.querySelector('main').appendChild(p);
   }
 
   function fmtDate(iso) {

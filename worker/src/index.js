@@ -636,6 +636,70 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
 // --- Entry point ----------------------------------------------------------
 
+/**
+ * What a rejected sign-in should tell the person looking at it.
+ *
+ * Every one of these used to come back as the same sentence, and the panel
+ * turned that into "Your session expired. Reloading…" — then reloaded, got the
+ * same rejection, and reloaded again, forever. A loop is what you get when the
+ * remedy offered has nothing to do with the cause, so each cause now names
+ * itself and says whether signing in again is even the right move.
+ */
+export function authFailure(auth, cfg) {
+  switch (auth.reason) {
+    case 'misconfigured':
+    case 'dev_auth_disabled':
+      return {
+        error: 'The assistant is not configured correctly. Flag this to whoever deployed it.',
+        code: 'misconfigured',
+        reason: auth.reason,
+        retry: 'never',
+      };
+
+    case 'domain_not_allowed': {
+      // The one that looks exactly like an expired session and is not one:
+      // sign-in SUCCEEDED, with an account this deployment does not accept.
+      // Reloading re-runs the same successful sign-in and fails identically.
+      const allowed = (cfg.ALLOWED_EMAIL_DOMAINS || []).map((d) => `@${d}`).join(' or ');
+      return {
+        error:
+          `You are signed in as ${auth.email || 'an account'}, which this assistant does not accept. ` +
+          (allowed ? `Sign in with your ${allowed} account instead.` : 'Use your work account instead.'),
+        code: 'forbidden',
+        reason: auth.reason,
+        retry: 'never',
+      };
+    }
+
+    case 'no_email_claim':
+      return {
+        error:
+          'Your sign-in did not include an email address, so the assistant cannot tell who you are. ' +
+          'Flag this to whoever deployed it — the identity provider needs to release the email claim.',
+        code: 'forbidden',
+        reason: auth.reason,
+        retry: 'never',
+      };
+
+    default:
+      // no_access_token, invalid_token, no_bearer_token: a fresh sign-in is
+      // genuinely the fix, so this is the only case worth reloading for.
+      return {
+        error: 'Sign in with your Vikat account to use the sales assistant.',
+        code: 'unauthorized',
+        reason: auth.reason,
+        retry: 'signin',
+      };
+  }
+}
+
+/** 401 only where signing in again can help. */
+export function authStatus(auth) {
+  if (auth.reason === 'misconfigured' || auth.reason === 'dev_auth_disabled') return 503;
+  if (auth.reason === 'domain_not_allowed' || auth.reason === 'no_email_claim') return 403;
+  return 401;
+}
+
 export default {
   /**
    * @param {Request} request
@@ -696,20 +760,7 @@ export default {
     if (isProtected) {
       const auth = await authenticate(request, env, cfg);
 
-      if (!auth.ok) {
-        const misconfigured = auth.reason === 'misconfigured' || auth.reason === 'dev_auth_disabled';
-        return json(
-          {
-            error: misconfigured
-              ? 'The assistant is not configured correctly. Flag this to whoever deployed it.'
-              : 'Sign in with your Vikat account to use the sales assistant.',
-            code: misconfigured ? 'misconfigured' : 'unauthorized',
-            reason: auth.reason,
-          },
-          misconfigured ? 503 : 401,
-          cors,
-        );
-      }
+      if (!auth.ok) return json(authFailure(auth, cfg), authStatus(auth), cors);
 
       const storage = createStorage(env, cfg);
       const { role, source } = await resolveRole(auth.user, storage, cfg);

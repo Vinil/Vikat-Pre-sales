@@ -167,7 +167,11 @@ export async function authenticate(request, env, cfg) {
 
         const email = emailFrom(payload);
         if (!email) return { ok: false, reason: 'no_email_claim' };
-        if (!domainAllowed(email, cfg)) return { ok: false, reason: 'domain_not_allowed' };
+        // The email rides along on the rejection. Signing in AGAIN with the
+        // same account cannot fix a domain mismatch, so the person has to be
+        // told which account they are actually signed in as — otherwise the
+        // only symptom is a session that looks expired the moment it is made.
+        if (!domainAllowed(email, cfg)) return { ok: false, reason: 'domain_not_allowed', email };
 
         return {
           ok: true,
@@ -193,7 +197,7 @@ export async function authenticate(request, env, cfg) {
 
         const email = emailFrom(payload);
         if (!email) return { ok: false, reason: 'no_email_claim' };
-        if (!domainAllowed(email, cfg)) return { ok: false, reason: 'domain_not_allowed' };
+        if (!domainAllowed(email, cfg)) return { ok: false, reason: 'domain_not_allowed', email };
 
         return {
           ok: true,

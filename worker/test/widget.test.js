@@ -760,6 +760,152 @@ async function openAdminUsers({ lagList = false } = {}) {
   return admin;
 }
 
+/** admin.html where every API call is rejected the way the server rejects it. */
+async function openAdminRejected(status, body) {
+  const page = await browser.newPage();
+  let reloads = 0;
+  page.on('framenavigated', () => { reloads += 1; });
+
+  await page.route('**/admin/**', (route) =>
+    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }),
+  );
+
+  await page.goto(`file://${ADMIN_HTML}`);
+  return { page, reloads: () => reloads };
+}
+
+test('being signed in with the wrong account does not put the panel in a reload loop', async () => {
+  // What an admin actually saw: they signed in successfully, and the panel
+  // said "Your session expired. Reloading…" every second and a half forever.
+  // Nothing had expired — the account simply was not one this deployment
+  // accepts, and reloading re-ran the same successful sign-in.
+  const { page, reloads } = await openAdminRejected(403, {
+    error: 'You are signed in as someone@gmail.com, which this assistant does not accept. Sign in with your @vikat.ai account instead.',
+    code: 'forbidden',
+    reason: 'domain_not_allowed',
+    retry: 'never',
+  });
+
+  await page.waitForFunction(() => /does not accept/.test(document.body.textContent), null, { timeout: 5000 });
+
+  const before = reloads();
+  await page.waitForTimeout(2500); // longer than the 1500ms the loop reloaded on
+  assert.equal(reloads(), before, 'the panel must settle, not reload');
+
+  const shown = await page.textContent('main');
+  assert.match(shown, /someone@gmail\.com/, 'and it has to name the account, or there is nothing to act on');
+  assert.ok(!/expired/i.test(shown), 'nothing expired; saying so sent people to the wrong problem');
+
+  await page.close();
+});
+
+test('a 401 that a fresh sign-in cannot fix reloads once, then stops', async () => {
+  // The loop that survives a page load. A wrong CF_ACCESS_AUD rejects a
+  // perfectly good Access cookie as an invalid token: a genuine 401, so the
+  // panel reloads — and Access hands back the same cookie, which is rejected
+  // identically. An in-memory "already reloading" flag resets on every load
+  // and does nothing about it.
+  const page = await browser.newPage();
+  let loads = 0;
+
+  await page.route('**/admin/**', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'Sign in with your Vikat account to use the sales assistant.',
+        code: 'unauthorized',
+        reason: 'invalid_token',
+        retry: 'signin',
+      }),
+    }),
+  );
+
+  page.on('load', () => { loads += 1; });
+  await page.goto(`file://${ADMIN_HTML}`);
+
+  // The one reload it is allowed. Driven rather than waited for, so the test
+  // does not depend on the 1500ms timer firing inside a headless page.
+  await page.waitForFunction(() => /Reloading/.test(document.body.textContent), null, { timeout: 5000 });
+  await page.reload();
+
+  await page.waitForFunction(() => /did not help/.test(document.body.textContent), null, { timeout: 5000 });
+
+  const shown = await page.textContent('main');
+  assert.match(shown, /not a stale session/i, 'the second failure has to stop and say what is really wrong');
+  assert.match(shown, /Cloudflare Access/i, 'and point at the thing that can actually be changed');
+
+  await page.close();
+});
+
+test('signing in successfully clears the record of the attempt', async () => {
+  // Otherwise one bad load poisons the next real session: the marker would
+  // still be set, and the next genuine expiry would refuse to reload.
+  const page = await browser.newPage();
+  let fail = true;
+
+  await page.route('**/admin/**', (route) => {
+    if (fail) {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Sign in.', code: 'unauthorized', reason: 'invalid_token', retry: 'signin' }),
+      });
+    }
+    const url = route.request().url();
+    const body = url.includes('/admin/summary')
+      ? { you: { email: 'boss@vikat.ai', role: 'admin', roleSource: 'bootstrap' } }
+      : { entries: [], users: [], libraries: [] };
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+
+  await page.goto(`file://${ADMIN_HTML}`);
+  await page.waitForFunction(() => /Reloading/.test(document.body.textContent), null, { timeout: 5000 });
+
+  fail = false;
+  await page.reload();
+  await page.waitForFunction(
+    () => document.querySelector('#whoami').textContent.includes('boss@vikat.ai'),
+    null,
+    { timeout: 5000 },
+  );
+
+  const marker = await page.evaluate(() => sessionStorage.getItem('vikat.admin.reauth'));
+  assert.equal(marker, null, 'a working session must not leave the next expiry unable to recover');
+
+  await page.close();
+});
+
+test('a 401 the server marks unfixable is not reloaded for either', async () => {
+  // Defence in depth. The server sends 403 for these today, but the panel must
+  // not depend on the server always picking the right status to avoid looping.
+  const { page, reloads } = await openAdminRejected(401, {
+    error: 'You are signed in as someone@gmail.com, which this assistant does not accept.',
+    code: 'forbidden',
+    reason: 'domain_not_allowed',
+    retry: 'never',
+  });
+
+  await page.waitForFunction(() => /does not accept/.test(document.body.textContent), null, { timeout: 5000 });
+  const before = reloads();
+  await page.waitForTimeout(2500);
+  assert.equal(reloads(), before, 'retry:never means never, whatever the status code says');
+
+  await page.close();
+});
+
+test('a 401 the server says is worth a retry still offers one, once', async () => {
+  const { page } = await openAdminRejected(401, {
+    error: 'Sign in with your Vikat account to use the sales assistant.',
+    code: 'unauthorized',
+    reason: 'no_access_token',
+    retry: 'signin',
+  });
+
+  await page.waitForFunction(() => /Reloading/.test(document.body.textContent), null, { timeout: 5000 });
+  await page.close();
+});
+
 test('a granted user appears even when the directory has not listed them yet', async () => {
   // Workers KV is eventually consistent for LIST specifically: a put is
   // visible to a get immediately, but the key takes a while to show up in a

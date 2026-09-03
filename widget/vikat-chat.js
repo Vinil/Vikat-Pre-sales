@@ -622,8 +622,15 @@
         if (res.status === 401) {
           addError(
             payload.error || 'Your session has expired.',
-            { reload: true },
+            // Only offered where a fresh sign-in is actually the fix. The
+            // server says so; see authFailure() in the Worker.
+            payload.retry === 'never' ? {} : { reload: true },
           );
+        } else if (res.status === 403) {
+          // The wrong account, or one without access. Neither a reload nor a
+          // retry changes anything, and offering one sends the rep round a
+          // loop instead of to whoever can grant them access.
+          addError(payload.error || 'Your account does not have access to the sales assistant.');
         } else if (res.status === 429) {
           addError(payload.error || 'Rate limit reached. Try again shortly.');
         } else {
