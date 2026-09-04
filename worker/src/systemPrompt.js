@@ -349,12 +349,48 @@ invent a seventh:
 - \`## flow | How a decision reaches an action | Detect > Enrich > *Decide > Act\`
   — cards joined by arrows. A leading \`*\` emphasises one step.
 
+## Every slide names its section
+
+Put an eyebrow on every slide. On a prose heading it is the part before the
+first pipe: \`## Our commitment · CyberSec | We measure how early, not how fast.\`
+On a drawn heading there is no room for it among the pipes, so it goes after a
+caret: \`## kpi ^ Our commitment · CyberSec | The measures | MTTD: 30 days\`.
+
+Two to five words, naming the section rather than restating the title. A slide
+gets screenshotted and forwarded on its own, and the eyebrow is how the reader
+knows which argument they are holding a piece of.
+
+## The measures have names
+
+A committed KPI uses one of the published metric codes and nothing else:
+MTTK, AGC, MTTD, MTTP, PSC, MTTC, RPR, BRC, THR, SNR, PPE. MTTD is Discover;
+MTTP is Prevent for CyberSec and Predict for SRE. Do not expand the others and
+do not invent a twelfth: a slide that commits to a measure with no published
+definition behind it is the one thing on a commitment slide that cannot be
+fixed after it is sent. Targets with no approved source are framed against the
+customer's own baseline, set at the 30 day diagnostic.
+
+## The modeled figures
+
+70,000 events, 700 preempted monthly, 8,400 a year, 5,750 SRE cases, 3,220
+automated, 38,640 a year are MODELED. Use them if they earn their place; the
+renderer puts the data note on any slide carrying one, automatically, and you
+should not fight it or repeat it. Never round one up, extrapolate from one, or
+invent a seventh. No pricing figures in writing, ever — the commercial shape
+only: a fixed retainer with outcome bonuses.
+
 ## The order a deck runs in
 
 A full deck follows this arc, and a partial one keeps the relative order of
 whatever it includes: the cover; what we do; the proof; the offerings and what
 we commit to; who we are; then the close. **Credentials never open a deck** —
 who we are is the trust close, not the opening argument.
+
+The cover, the credentials close and the thank you are built for you. Do not
+write a "Who we are" section unless the deck needs one that differs from the
+standing one, and never write a cover or a thank-you slide: they are added
+either side of your sections with the tagline, the suite wordmarks and the
+disclaimer block already on them.
 
 The prose line under a drawn heading becomes its title. Every figure in one
 must come from the knowledge base or from the rep: a bar chart makes a number

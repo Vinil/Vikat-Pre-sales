@@ -244,11 +244,26 @@ export function parseLayout(headingText) {
   const parts = pipes(headingText);
   if (parts.length < 2) return null;
 
-  const kind = parts[0].toLowerCase();
+  // §3.1 puts an eyebrow above every content heading, and §3.5 makes it part
+  // of what a slide needs in order to stand alone once somebody screenshots
+  // it. A drawn heading has no room for one among the pipes, because every
+  // segment there is data, so it is written after a caret:
+  //
+  //   ## outcome ^ Our commitment | Skin in the game | LABEL | sentence.
+  //
+  // A caret rather than another pipe or a colon: neither appears in prose,
+  // and a colon is already a KPI's separator.
+  const [kindPart, ...eyebrowParts] = parts[0].split('^');
+  const kind = kindPart.trim().toLowerCase();
   if (!LAYOUTS.includes(kind)) return null;
 
-  const rest = parts.slice(1);
+  const eyebrow = eyebrowParts.join('^').trim();
+  const drawn = parseKind(kind, parts.slice(1));
+  return drawn && eyebrow ? { ...drawn, eyebrow } : drawn;
+}
 
+/** The per-layout half of parseLayout, once the kind and eyebrow are off. */
+function parseKind(kind, rest) {
   if (kind === 'stat') {
     // The number carries the slide; the caption says what it counts.
     return { layout: 'stat', value: rest[0], caption: rest.slice(1).join('. ') };
@@ -374,7 +389,7 @@ export function parseLayout(headingText) {
   }
 
   if (kind === 'quote') {
-    const line = rest.join(' — ');
+    const line = rest.join('. ');
     return line ? { layout: 'quote', line } : null;
   }
 

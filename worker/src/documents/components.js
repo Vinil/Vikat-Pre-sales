@@ -17,15 +17,25 @@
  * 01163A is a smudge.
  */
 
-import { CREAM, DARK, SUITE, GEOMETRY, FLOORS } from './house.js';
+import { CREAM, DARK, SUITE, SUITE_WORDMARKS, GEOMETRY, FLOORS } from './house.js';
 
 const EMU = 914400;
 const emu = (inches) => Math.round(inches * EMU);
 const pt = (points) => Math.round(points * 100);
 const hex = (c) => String(c).replace('#', '').toUpperCase();
 
+/**
+ * Shape ids, deliberately above the range pptx.js uses for its own.
+ *
+ * Reset per render, exactly as pptx.js resets its counter: the same spec has
+ * to produce the same bytes, and a module-level counter that only ever climbs
+ * makes the second render of a deck differ from the first in every id.
+ */
 let id = 5000;
 const nextId = () => (id += 1);
+
+/** Called once at the top of a render. */
+export const resetIds = () => { id = 5000; };
 
 const frame = ({ x, y, w, h }) =>
   `<a:off x="${emu(x)}" y="${emu(y)}"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/>`;
@@ -309,3 +319,88 @@ export function darkKpiCard(box, { metric, body }) {
 
 /** The margin every component is laid out inside. */
 export const CONTENT_X = GEOMETRY.marginX;
+
+// --- §4.3 cover and thank-you furniture -----------------------------------
+
+/**
+ * The wave motif: a thin bar sparkline with teal and purple accent clusters.
+ *
+ * §4.3 restricts it to the cover and the thank you slide, which is the whole
+ * reason it is a named component and not a loop somebody writes twice.
+ *
+ * The heights are fixed rather than random. A motif that comes out different
+ * on every deck is a texture, not a mark, and two decks side by side would
+ * show it.
+ */
+const WAVE = [
+  0.20, 0.34, 0.26, 0.52, 0.68, 0.44, 0.30, 0.22, 0.38, 0.60,
+  0.86, 1.00, 0.72, 0.46, 0.28, 0.20, 0.32, 0.50, 0.74, 0.92,
+  0.66, 0.40, 0.24, 0.18, 0.30, 0.48, 0.36, 0.22, 0.28, 0.20,
+];
+
+/** Which bars belong to the teal cluster, and which to the purple one. */
+const TEAL_CLUSTER = new Set([10, 11, 12, 13]);
+const PURPLE_CLUSTER = new Set([18, 19, 20, 21]);
+
+export function waveMotif(x, y, width, height, { onDark = true } = {}) {
+  const barWidth = (width / WAVE.length) * 0.55;
+  const step = width / WAVE.length;
+  const quiet = onDark ? DARK.hairline : CREAM.hairline;
+  const teal = onDark ? SUITE.sec.dark : SUITE.sec.light;
+  const purple = onDark ? SUITE.dev.dark : SUITE.dev.light;
+
+  return WAVE.map((fraction, i) => {
+    const h = Math.max(0.03, fraction * height);
+    const color = TEAL_CLUSTER.has(i) ? teal : PURPLE_CLUSTER.has(i) ? purple : quiet;
+    const n = nextId();
+    // Bars grow upward from a shared baseline, which is what makes it read as
+    // one line rather than a row of unrelated blocks.
+    return (
+      `<p:sp><p:nvSpPr><p:cNvPr id="${n}" name="wave${n}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>` +
+      `<p:spPr><a:xfrm>${frame({ x: x + i * step, y: y + height - h, w: barWidth, h })}</a:xfrm>` +
+      `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${solid(color)}<a:ln><a:noFill/></a:ln></p:spPr>` +
+      `<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>`
+    );
+  }).join('');
+}
+
+/**
+ * A suite wordmark on its own tile.
+ *
+ * §2.3 makes the wordmark two tone, prefix in ink and "Semantic" in the suite
+ * accent. §4.3 says marks sit on uniform white tiles, never raw on the
+ * background — which is also what makes ProSemantic usable on a dark cover:
+ * the instruction set gives it a light accent only (8A6000) and no dark
+ * variant, so the tile is not decoration here, it is what keeps the third
+ * wordmark legible and on palette.
+ */
+export function suiteTile({ x, y, w, h }, { prefix, accent }, { size = 13, onDark = true } = {}) {
+  const n = nextId();
+  const inner = 0.26;
+
+  const run = (t, color) =>
+    `<a:r><a:rPr lang="en-US" sz="${pt(size)}" b="1" spc="-20" dirty="0">${solid(color)}` +
+    `<a:latin typeface="Inter"/><a:cs typeface="Inter"/></a:rPr><a:t>${escapeXml(t)}</a:t></a:r>`;
+
+  return (
+    // dark: the tile is white, but it sits on a dark ground, and §4.3 puts
+    // shadows on light themes only.
+    card({ x, y, w, h }, { dark: onDark }) +
+    `<p:sp><p:nvSpPr><p:cNvPr id="${n}" name="suite${n}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
+    `<p:spPr><a:xfrm>${frame({ x: x + inner, y, w: w - inner * 2, h })}</a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>` +
+    `<p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="ctr"><a:noAutofit/></a:bodyPr>` +
+    `<a:lstStyle/><a:p><a:pPr algn="ctr"><a:buNone/></a:pPr>` +
+    run(prefix, CREAM.ink) + run('Semantic', accent) +
+    `</a:p></p:txBody></p:sp>`
+  );
+}
+
+/** All three suite wordmarks, evenly spaced across `width`. §3.4's cover. */
+export function suiteWordmarks(x, y, width, { tileHeight = 0.46, gap = 0.22, onDark = true } = {}) {
+  const n = SUITE_WORDMARKS.length;
+  const tileWidth = (width - gap * (n - 1)) / n;
+  return SUITE_WORDMARKS.map((suite, i) =>
+    suiteTile({ x: x + i * (tileWidth + gap), y, w: tileWidth, h: tileHeight }, suite, { onDark }),
+  ).join('');
+}

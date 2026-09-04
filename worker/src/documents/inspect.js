@@ -20,7 +20,9 @@
 
 import { unzipSync, strFromU8 } from 'fflate';
 import { SLIDE } from './ooxml.js';
-import { checkCopy, FINE_PRINT } from './house.js';
+import {
+  checkCopy, FINE_PRINT, DATA_NOTE, carriesModeledFigure, isMetricCode, METRIC_CODES,
+} from './house.js';
 
 const EMU = 914400;
 
@@ -106,9 +108,13 @@ function verticalGaps(boxes) {
  * Check a built .pptx and report what a rep would notice.
  *
  * @param {Uint8Array} bytes
+ * @param {{ sections?: Array<{ layout?: string }> }} [spec]
+ *        The spec it was built from, when the caller has it. The XML does not
+ *        say which layout drew a slide, so §3.3's rhythm rule can only be
+ *        checked from the other side.
  * @returns {{ slides: number, problems: string[], notes: string[] }}
  */
-export function inspectPptx(bytes) {
+export function inspectPptx(bytes, spec) {
   const problems = [];
   const notes = [];
 
@@ -173,6 +179,16 @@ export function inspectPptx(bytes) {
         `Slide ${n} is top-heavy — about ${gap.below.toFixed(1)}" of empty space sits under the content.`,
       );
     }
+
+    // §1.4. The modeled figures are a closed list, and each one obliges the
+    // data note ON THE SAME SLIDE — because the slide is what gets
+    // screenshotted and forwarded, and a modeled estimate read as a customer
+    // result is the one mistake here that costs a deal rather than a redraw.
+    if (carriesModeledFigure(words.join(' ')) && !xml.includes(DATA_NOTE.slice(0, 40))) {
+      problems.push(
+        `Slide ${n} carries a modeled figure without the data note beside it.`,
+      );
+    }
   });
 
   // §3.2: the fine print is on EVERY slide, cover and thank you included.
@@ -213,7 +229,59 @@ export function inspectPptx(bytes) {
     );
   }
 
+  problems.push(...metricNotes(spec));
+  notes.push(...rhythmNotes(spec));
+
   return { slides: slideNames.length, problems, notes };
+}
+
+/**
+ * §1.3: a committed KPI uses a code from the published metric system.
+ *
+ * A problem rather than a note, because the codes are a closed list and a
+ * slide that commits to "MTTX: 30 days" commits to a measure with no
+ * published definition behind it. That is the one thing on a commitment slide
+ * that cannot be fixed after it is sent.
+ */
+function metricNotes(spec) {
+  const bad = (spec?.sections || [])
+    .flatMap((s) => (s.layout === 'kpi' ? s.kpis || [] : []))
+    .map((k) => k.code)
+    .filter((code) => !isMetricCode(code));
+
+  if (!bad.length) return [];
+  return [
+    `${[...new Set(bad)].join(', ')} ${bad.length === 1 ? 'is not one' : 'are not'} of the published metric codes ` +
+      `(${METRIC_CODES.join(', ')}).`,
+  ];
+}
+
+/**
+ * §3.3: never place two identical layouts back to back.
+ *
+ * A note rather than a problem, because two prose slides in a row is
+ * sometimes genuinely what the content is, and a deck is not worth refusing
+ * over rhythm. Reported once per run rather than once per pair, so a deck of
+ * eight prose slides does not produce seven warnings saying the same thing.
+ *
+ * Consecutive slides with no layout at all count: two paragraphs in a row is
+ * the most common version of this, not two charts.
+ */
+function rhythmNotes(spec) {
+  const sections = spec?.sections;
+  if (!Array.isArray(sections) || sections.length < 2) return [];
+
+  const runs = [];
+  for (let i = 1; i < sections.length; i += 1) {
+    const here = sections[i].layout || 'prose';
+    if (here === (sections[i - 1].layout || 'prose')) runs.push(here);
+  }
+  if (!runs.length) return [];
+
+  const kinds = [...new Set(runs)].join(', ');
+  return [
+    `${runs.length} pair(s) of back to back ${kinds} slides — the house style alternates layout so the deck breathes.`,
+  ];
 }
 
 /**

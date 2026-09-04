@@ -187,3 +187,89 @@ export function checkCopy(copy) {
 
 /** Exported so a test can assert every listed word is in the instruction set. */
 export const WORDLISTS = { JARGON, DRAMATIC, RETIRED, FILLER, SELF_SUPERLATIVE };
+
+// --- §1.1 The positioning is fixed ----------------------------------------
+
+/** The one line positioning. Locked: it is not paraphrased on a cover. */
+export const POSITIONING_LINE = 'Personalized and Preemptive CyberSec and SRE.';
+
+/** §1.1. The deck tagline, which is not the same line as the company tagline. */
+export const DECK_TAGLINE = 'Earlier beats faster.';
+
+/**
+ * §2.3: suite wordmarks are two tone, prefix in ink and "Semantic" in the
+ * suite accent. Held as a pair rather than a string so a renderer cannot
+ * accidentally set the whole thing in one colour.
+ */
+export const SUITE_WORDMARKS = [
+  { prefix: 'Sec', accent: SUITE.sec.light },
+  { prefix: 'Dev', accent: SUITE.dev.light },
+  { prefix: 'Pro', accent: SUITE.pro.light },
+];
+
+/**
+ * §1.1 and §2.4, as the credentials close (§1.2 step 5). Every line here is
+ * approved standing copy from the instruction set: a slide about who we are is
+ * exactly where an invented capability would go unnoticed, so nothing on it is
+ * written fresh.
+ */
+export const WHO_WE_ARE = {
+  eyebrow: 'Who we are',
+  title: 'We are a solutions company, not another tool company.',
+  points: [
+    'We bring the platform, the process, and the people, and we contract for outcomes.',
+    'We layer alongside your toolchains. No replacement required.',
+    'Named Vikat engineers work inside your team and feed every incident, change, and decision ' +
+      'back into the graph. Your context never goes stale, so predictions get earlier every month.',
+  ],
+};
+
+/** §3.4. Composed from the four things the section names, in that order. */
+export const PATENTS_PENDING =
+  'Patents pending on the Semantic Context Plane and the Semantic Context Loop.';
+
+export const DISCLAIMER_BLOCK = [FINE_PRINT, PATENTS_PENDING, DATA_NOTE];
+
+// --- §1.3 The metric system ------------------------------------------------
+
+/**
+ * The named metric system, exactly as §1.3 lists it. A KPI slide may only use
+ * these codes.
+ *
+ * No expansions are stored, because the instruction set only expands two of
+ * them (MTTD is Discover, MTTP is Prevent for CyberSec and Predict for SRE).
+ * Filling in the other nine from what they look like they ought to stand for
+ * is how a deck ends up publishing a definition nobody agreed to.
+ */
+export const METRIC_CODES = [
+  'MTTK', 'AGC', 'MTTD', 'MTTP', 'PSC', 'MTTC', 'RPR', 'BRC', 'THR', 'SNR', 'PPE',
+];
+
+/** True if `code` is one of the published metric codes. Case sensitive: they are. */
+export const isMetricCode = (code) => METRIC_CODES.includes(String(code || '').trim());
+
+// --- §1.4 Modeled figures --------------------------------------------------
+
+/**
+ * The modeled figures §1.4 enumerates. Any of these on a slide obliges the
+ * data note on the same slide, and the list is closed because the section
+ * closes it: "never invent, round up, or extrapolate a metric".
+ */
+export const MODELED_FIGURES = ['70,000', '700', '8,400', '5,750', '3,220', '38,640'];
+
+/**
+ * Does this slide's text carry a modeled figure?
+ *
+ * Digit group separators are stripped from both sides first, because a model
+ * asked for "70,000 events" writes "70000" about a third of the time and the
+ * obligation is on the figure, not on its punctuation.
+ *
+ * The match is on a whole number rather than a run of digits: "700" is a
+ * substring of "8,700", and a note demanded of every slide with a large
+ * number on it is a note nobody reads.
+ */
+export function carriesModeledFigure(text) {
+  const flat = (s) => String(s || '').replace(/(\d),(?=\d{3}\b)/g, '$1');
+  const t = flat(text);
+  return MODELED_FIGURES.some((n) => new RegExp(`(^|\\D)${flat(n)}(\\D|$)`).test(t));
+}

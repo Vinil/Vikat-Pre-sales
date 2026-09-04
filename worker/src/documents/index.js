@@ -55,7 +55,7 @@ export async function createDocument(input, ctx) {
   // Look at what was built before handing it over. Reporting, never
   // rewriting: a deck a shade under a threshold is still a deck, and refusing
   // it would leave the rep with nothing five minutes before a call.
-  const inspection = spec.format === 'pptx' ? inspectPptx(bytes) : { problems: [], notes: [] };
+  const inspection = spec.format === 'pptx' ? inspectPptx(bytes, spec) : { problems: [], notes: [] };
 
   const fileName = fileNameFor(spec, isoDate);
   const contentType = CONTENT_TYPE[spec.format];

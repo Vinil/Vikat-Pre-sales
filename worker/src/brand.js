@@ -36,7 +36,16 @@ export const COLOR = {
   paleTeal: '#7FD4CD',
   signalGreen: '#2E7044',
   violet: '#5B4FC0',
+  // §4.1 of the presentation instruction set gives DevSemantic three values:
+  // 5B4FC0 on light, and 7C6FE8 or B3A9F5 on dark. The middle one was missing
+  // here, so a component that used it correctly failed the palette check.
+  midViolet: '#7C6FE8',
   paleViolet: '#B3A9F5',
+  // ProSemantic's accent, which §4.1 gives on light grounds only. The one
+  // warning colour, C08500, is the instruction set's too but appears nowhere
+  // in the template and nothing paints it, and a test ties this palette to the
+  // template rather than to the document.
+  amber: '#8A6000',
   cream: '#F6F1E4',
   sand: '#DCD6C6',
   white: '#FFFFFF',

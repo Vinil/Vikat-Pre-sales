@@ -178,13 +178,15 @@ test('a deck contains the parts PowerPoint requires to open it', () => {
   }
 });
 
-test('a deck is a cover, a slide per section, and a close', () => {
+test('a deck is a cover, a slide per section, who we are, and a close', () => {
+  // §3.4 makes the credentials close a required slide, so a three section
+  // deck is six slides rather than five.
   const parts = pptxParts(
     renderPptx(spec({ sections: [{ title: 'a' }, { title: 'b' }, { title: 'c' }] }), META, FONTS.metrics),
   );
   const slides = Object.keys(parts).filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k));
-  assert.equal(slides.length, 5, '3 sections + cover + close');
-  assert.match(parts['[Content_Types].xml'], /slide5\.xml/, 'content types must declare every slide');
+  assert.equal(slides.length, 6, '3 sections + cover + who we are + close');
+  assert.match(parts['[Content_Types].xml'], /slide6\.xml/, 'content types must declare every slide');
 });
 
 test('every slide carries the disclosure label', () => {
@@ -800,7 +802,7 @@ test('drawn slides obey the palette and the two typefaces', () => {
   // colour outside the brand would look designed and be wrong.
   const parts = pptxParts(renderPptx(drawnSpec(), META, FONTS.metrics));
   const slides = Object.entries(parts).filter(([name]) => /slide\d+\.xml$/.test(name));
-  assert.equal(slides.length, 8, 'cover, six drawn slides, closing');
+  assert.equal(slides.length, 9, 'cover, six drawn slides, who we are, closing');
 
   const allowed = new Set(PALETTE.map((c) => c.replace('#', '').toUpperCase()));
   for (const [name, xml] of slides) {
@@ -808,7 +810,10 @@ test('drawn slides obey the palette and the two typefaces', () => {
       assert.ok(allowed.has(value.toUpperCase()), `${name} uses ${value}, which is not in the palette`);
     }
     for (const [, face] of xml.matchAll(/typeface="([^"]+)"/g)) {
-      assert.ok(/^(Inter|JetBrains Mono)$/.test(face), `${name} uses ${face}`);
+      // Arial names the bullet glyph and sets no text, the same allowance the
+      // prose test makes. The credentials close is a bulleted slide, so a
+      // drawn deck now contains one.
+      assert.ok(/^(Inter|JetBrains Mono|Arial)$/.test(face), `${name} uses ${face}`);
     }
   }
 });

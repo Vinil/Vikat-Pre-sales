@@ -21,7 +21,10 @@ import { COLOR, INK, ON_NAVY, FONT, GRADIENT, WORDMARK, TAGLINE, copyrightLine, 
 import { DISCLOSURE_LABELS } from './spec.js';
 import { wrap } from './measure.js';
 import * as part from './ooxml.js';
-import { GEOMETRY, FLOORS, FINE_PRINT } from './house.js';
+import {
+  GEOMETRY, FLOORS, FINE_PRINT, DATA_NOTE, PATENTS_PENDING,
+  POSITIONING_LINE, DECK_TAGLINE, WHO_WE_ARE, carriesModeledFigure,
+} from './house.js';
 import * as comp from './components.js';
 
 const { emu, hex, xml, SLIDE } = part;
@@ -88,9 +91,14 @@ const solid = (color) => `<a:solidFill><a:srgbClr val="${hex(color)}"/></a:solid
  * is 30° here.
  */
 function gradientFill() {
+  // §3.3 says navy dominant, and evenly spaced stops are not: green through
+  // teal at the halfway mark leaves navy holding a third of the slide and the
+  // cover reads green. The stops are weighted so navy owns the back half.
+  const STOP_POSITIONS = [0, 34000, 72000];
+
   const stops = GRADIENT.stops
     .map((c, i) => {
-      const pos = Math.round((i / (GRADIENT.stops.length - 1)) * 100000);
+      const pos = STOP_POSITIONS[i] ?? Math.round((i / (GRADIENT.stops.length - 1)) * 100000);
       return `<a:gs pos="${pos}"><a:srgbClr val="${hex(c)}"/></a:gs>`;
     })
     .join('');
@@ -121,13 +129,19 @@ function text(box, runs, { align = 'l', anchor = 't' } = {}) {
       // An empty run still needs a paragraph so vertical rhythm survives.
       if (!body) return `<a:p><a:pPr algn="${align}"/><a:endParaRPr sz="${pt(size)}"/></a:p>`;
 
+      // §2.3: bullets are carried by small coloured dots. The ban is on the
+      // • character being typed into the copy at a line start — a real
+      // bullet, sized down and set in the accent, is what the rule asks for,
+      // and it was rendering navy at full size, which is the version that
+      // reads as a typed character.
       const bullet = r.bullet
-        ? `<a:buFont typeface="Arial"/><a:buChar char="•"/>`
+        ? `<a:buClr><a:srgbClr val="${hex(r.bulletColor || COLOR.circuitTeal)}"/></a:buClr>` +
+          `<a:buSzPct val="72000"/><a:buFont typeface="Arial"/><a:buChar char="•"/>`
         : '<a:buNone/>';
       const indent = r.bullet ? ' marL="228600" indent="-228600"' : '';
 
       return `<a:p><a:pPr algn="${align}"${indent}><a:lnSpc><a:spcPct val="${lineSpacing}"/></a:lnSpc>${before}${bullet}</a:pPr>` +
-        `<a:r><a:rPr lang="en-US" sz="${pt(size)}" b="${font.weight >= 700 ? 1 : 0}" spc="${spacing}" dirty="0">` +
+        `<a:r><a:rPr lang="en-US" sz="${pt(size)}" b="${font.weight >= 700 ? 1 : 0}"${r.italic ? ' i="1"' : ''} spc="${spacing}" dirty="0">` +
         `${solid(r.color)}<a:latin typeface="${font.family}"/><a:cs typeface="${font.family}"/></a:rPr>` +
         `<a:t>${body}</a:t></a:r></a:p>`;
     })
@@ -136,6 +150,39 @@ function text(box, runs, { align = 'l', anchor = 't' } = {}) {
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="t${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
 <p:spPr><a:xfrm>${frame(box)}</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
 <p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="${anchor}"><a:noAutofit/></a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
+}
+
+/**
+ * Several runs on ONE line, in different colours.
+ *
+ * text() gives every run its own paragraph, which is right for a stack of
+ * lines and wrong for a two tone wordmark: §2.3 wants "Sec" in ink and
+ * "Semantic" in the suite accent, side by side, as one word. Two text boxes
+ * cannot do that without hard-coding the width of the first.
+ */
+function inlineText(box, runs, { align = 'l', anchor = 't' } = {}) {
+  const id = nextId();
+
+  const body = runs
+    .filter((r) => r.text)
+    .map((r) => {
+      const font = FONT[r.role] || FONT.body;
+      const spacing = track(r.tracking ?? 0, r.size);
+      return (
+        `<a:r><a:rPr lang="en-US" sz="${pt(r.size)}" b="${font.weight >= 700 ? 1 : 0}"` +
+        `${r.italic ? ' i="1"' : ''} spc="${spacing}" dirty="0">${solid(r.color)}` +
+        `<a:latin typeface="${font.family}"/><a:cs typeface="${font.family}"/></a:rPr>` +
+        `<a:t>${xml(r.text)}</a:t></a:r>`
+      );
+    })
+    .join('');
+
+  const lineSpacing = Math.round((runs[0]?.lineHeight ?? 1.2) * 100000);
+
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="t${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+<p:spPr><a:xfrm>${frame(box)}</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
+<p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="${anchor}"><a:noAutofit/></a:bodyPr><a:lstStyle/>` +
+    `<a:p><a:pPr algn="${align}"><a:lnSpc><a:spcPct val="${lineSpacing}"/></a:lnSpc><a:buNone/></a:pPr>${body}</a:p></p:txBody></p:sp>`;
 }
 
 /**
@@ -277,8 +324,23 @@ const bg = (color) =>
 
 // --- Layouts --------------------------------------------------------------
 
+/**
+ * The cover, to §3.4: gradient, logo, tagline, suite wordmarks.
+ *
+ * It is a real gradient ground rather than the thin band this used to draw.
+ * §3.3 allows the brand gradient on exactly two slides, the cover and the
+ * thank you, and using a tenth of the allowance on both was a way of obeying
+ * the letter of a rule whose point is that the two ends of a deck look
+ * different from its middle.
+ *
+ * The suite wordmarks sit on white tiles. That is §4.3's rule for marks, and
+ * it is also the only way the third one works here: the instruction set gives
+ * ProSemantic a light accent and no dark variant, so amber on navy would be
+ * either illegible or off palette, and there is no third option that keeps
+ * both.
+ */
 function coverSlide(spec, meta, fonts) {
-  const titleWidth = CONTENT_WIDTH * 0.82;
+  const titleWidth = CONTENT_WIDTH * 0.78;
 
   // A long title steps down a size rather than wrapping to four lines. Chosen
   // by measuring, so the step happens when the text actually overflows two
@@ -288,14 +350,25 @@ function coverSlide(spec, meta, fonts) {
   ) || SIZE.coverTitle - 11;
 
   const titleHeight = heightOf(spec.title, fonts.display, titleSize, titleWidth, 1.06, -0.03);
-  const coverTitleTop = 2.55;
+  const coverTitleTop = 2.5;
 
   const shapes = [
-    // The gradient is a band, not the whole ground: a full-bleed gradient
-    // behind body text is what the "covers and dividers only" rule is
-    // guarding against.
-    rect({ x: 0, y: 0, w: SLIDE.widthIn, h: 0.22 }, gradientFill()),
-    wordmark(M.left, 0.85, false),
+    rect({ x: 0, y: 0, w: SLIDE.widthIn, h: SLIDE.heightIn }, gradientFill()),
+    wordmark(M.left, 0.8, true),
+
+    text({ x: M.left, y: 1.62, w: CONTENT_WIDTH, h: 0.3 }, [
+      {
+        text: eyebrowCase(spec.audience ? `Prepared for ${spec.audience}` : meta.date),
+        role: 'eyebrow',
+        size: SIZE.eyebrow,
+        tracking: 0.12,
+        lineHeight: 1,
+        // §4.1 gives SecSemantic a light variant for dark grounds. 14736D is
+        // the LIGHT-theme accent and disappears into the teal end of the
+        // gradient — which is exactly what it did.
+        color: COLOR.paleTeal,
+      },
+    ]),
 
     text({ x: M.left, y: coverTitleTop, w: titleWidth, h: titleHeight }, [
       {
@@ -304,33 +377,41 @@ function coverSlide(spec, meta, fonts) {
         size: titleSize,
         tracking: -0.03,
         lineHeight: 1.06,
-        color: COLOR.navy,
+        color: ON_NAVY.strong,
       },
     ]),
 
     spec.subtitle
-      ? text({ x: M.left, y: coverTitleTop + titleHeight + 0.55, w: CONTENT_WIDTH * 0.72, h: 0.9 }, [
-          { text: spec.subtitle, role: 'body', size: SIZE.coverSub, lineHeight: 1.45, color: INK.body },
+      ? text({ x: M.left, y: coverTitleTop + titleHeight + 0.34, w: CONTENT_WIDTH * 0.66, h: 0.7 }, [
+          { text: spec.subtitle, role: 'body', size: SIZE.coverSub, lineHeight: 1.45, color: ON_NAVY.body },
         ])
       : '',
 
-    text({ x: M.left, y: 1.7, w: CONTENT_WIDTH, h: 0.3 }, [
-      {
-        text: eyebrowCase(spec.audience ? `Prepared for ${spec.audience}` : meta.date),
-        role: 'eyebrow',
-        size: SIZE.eyebrow,
-        tracking: 0.12,
-        lineHeight: 1,
-        color: COLOR.circuitTeal,
-      },
-    ]),
-
+    // §1.2: the cover carries the positioning line plus the tagline. Locked
+    // copy, both of them, so they are constants rather than something a deck
+    // gets to paraphrase.
+    inlineText(
+      { x: M.left, y: coverTitleTop + titleHeight + (spec.subtitle ? 1.06 : 0.34), w: CONTENT_WIDTH * 0.8, h: 0.34 },
+      [
+        { text: `${POSITIONING_LINE} `, role: 'body', size: SIZE.coverSub, lineHeight: 1.3, color: ON_NAVY.body },
+        { text: DECK_TAGLINE, role: 'heading', size: SIZE.coverSub, lineHeight: 1.3, color: COLOR.paleTeal },
+      ],
+    ),
   ];
 
-  // The gradient band is bled to the slide edge, so it is placed rather than
-  // settled — it has no business drifting toward the middle.
-  const [band, ...block] = shapes;
-  return slideXml(band + settle(block, 1.1) + footer(spec, false, meta.date), bg(COLOR.cream));
+  // The gradient ground and the furniture that hangs off the slide edges are
+  // placed, not settled: they have no business drifting toward the middle.
+  const [ground, ...block] = shapes;
+  return (
+    slideXml(
+      ground +
+        comp.waveMotif(M.left, 5.66, CONTENT_WIDTH, 0.4, { onDark: true }) +
+        comp.suiteWordmarks(M.left, 6.24, CONTENT_WIDTH * 0.52, { onDark: true }) +
+        settle(block, 2.2) +
+        footer(spec, true, meta.date),
+      bg(COLOR.deepNavy),
+    )
+  );
 }
 
 /**
@@ -368,17 +449,51 @@ function heightOf(text, metrics, sizePt, widthIn, lineHeight, tracking = 0) {
  *
  * @returns {{ shapes: string[], nextY: number }}
  */
-function drawnHead(title, fonts) {
+function drawnHead(section, fonts) {
+  const { eyebrow, title } = section;
   const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
-  if (!title) return { shapes, nextY: M.top + 0.55 };
 
-  const h = heightOf(title, fonts.display, SIZE.slideTitle, CONTENT_WIDTH * 0.8, 1.15, -0.02) || 0.75;
-  shapes.push(
-    text({ x: M.left, y: M.top + 0.42, w: CONTENT_WIDTH * 0.8, h }, [
-      { text: title, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
-    ]),
-  );
-  return { shapes, nextY: M.top + 0.42 + h + 0.45 };
+  // §3.1: eyebrow at y 0.38, mono bold, tracked. §3.5 makes it part of what a
+  // slide needs to stand on its own — the drawn layouts had no way to carry
+  // one at all, so every chart in every deck shipped without the line that
+  // says which section it belongs to.
+  let y = M.top + 0.32;
+  if (eyebrow) {
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH, h: 0.28 }, [
+        { text: eyebrowCase(eyebrow), role: 'eyebrow', size: SIZE.eyebrow, tracking: 0.12, lineHeight: 1, color: COLOR.circuitTeal },
+      ]),
+    );
+    y += 0.42;
+  } else {
+    y = M.top + 0.42;
+  }
+
+  if (title) {
+    const h = heightOf(title, fonts.display, SIZE.slideTitle, CONTENT_WIDTH * 0.8, 1.15, -0.02) || 0.75;
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.8, h }, [
+        { text: title, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
+      ]),
+    );
+    y += h + 0.18;
+  }
+
+  // §3.1's subtitle, and §3.5's "at least one line of supporting context".
+  // A prose line written under a drawn heading used to go nowhere: the title
+  // came off the pipes, the body was parsed, and no drawn layout rendered it.
+  // The rep saw a sentence in their own request and not on the slide.
+  if (section.body) {
+    const h = heightOf(section.body, fonts.body, GEOMETRY.subtitle.size, CONTENT_WIDTH * 0.72, 1.4);
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.72, h }, [
+        { text: section.body, role: 'body', size: GEOMETRY.subtitle.size, lineHeight: 1.4, color: INK.body },
+      ]),
+    );
+    y += h + 0.1;
+  }
+
+  return { shapes, nextY: y + (title || section.body ? 0.27 : 0.13) };
 }
 
 /** The caption line under a drawing, in the muted ink prose uses. */
@@ -396,22 +511,37 @@ function captionAt(textValue, y, width) {
  */
 function statSlide(spec, section, meta, pageLabel, fonts) {
   const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+  let top = M.top + 0.55;
+
+  if (section.eyebrow) {
+    shapes.push(
+      text({ x: M.left, y: M.top + 0.32, w: CONTENT_WIDTH, h: 0.28 }, [
+        { text: eyebrowCase(section.eyebrow), role: 'eyebrow', size: SIZE.eyebrow, tracking: 0.12, lineHeight: 1, color: COLOR.circuitTeal },
+      ]),
+    );
+    top = M.top + 0.86;
+  }
 
   shapes.push(
-    text({ x: M.left, y: M.top + 0.55, w: CONTENT_WIDTH, h: 2.1 }, [
+    text({ x: M.left, y: top, w: CONTENT_WIDTH, h: 2.1 }, [
       { text: section.value, role: 'display', size: 96, tracking: -0.04, lineHeight: 1, color: COLOR.navy },
     ]),
   );
 
+  // The number's box is 2.1 tall, so everything under it moves by exactly the
+  // height the eyebrow took. Leaving these fixed put the caption through the
+  // bottom of the digits.
+  const drop = top - (M.top + 0.55);
+
   if (section.caption) {
     shapes.push(
-      text({ x: M.left, y: M.top + 2.75, w: CONTENT_WIDTH * 0.7, h: 1.1 }, [
+      text({ x: M.left, y: M.top + 2.75 + drop, w: CONTENT_WIDTH * 0.7, h: 1.1 }, [
         { text: section.caption, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.2, color: COLOR.circuitTeal },
       ]),
     );
   }
 
-  if (section.body) shapes.push(captionAt(section.body, M.top + 3.95, CONTENT_WIDTH * 0.8));
+  if (section.body) shapes.push(captionAt(section.body, M.top + 3.95 + drop, CONTENT_WIDTH * 0.8));
 
   return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
@@ -424,7 +554,7 @@ function statSlide(spec, section, meta, pageLabel, fonts) {
  * overstate anything.
  */
 function barsSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   let y = head.nextY - 0.1;
 
@@ -471,7 +601,7 @@ function barsSlide(spec, section, meta, pageLabel, fonts) {
 
 /** A sequence of named stages, left to right, with the flow made visible. */
 function chainSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   let y = head.nextY - 0.1;
 
@@ -515,7 +645,7 @@ function chainSlide(spec, section, meta, pageLabel, fonts) {
 
 /** Stops along a single rule — a calendar, a phase plan, a sequence in time. */
 function timelineSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   let y = head.nextY - 0.1;
 
@@ -565,7 +695,7 @@ function timelineSlide(spec, section, meta, pageLabel, fonts) {
 
 /** Two states side by side, the second one carrying the weight. */
 function splitSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   let y = head.nextY - 0.1;
 
@@ -654,7 +784,7 @@ function quoteSlide(spec, section, meta, pageLabel, fonts) {
 // built twice is a stat tile that looks different on two slides of one deck.
 
 function tilesSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   const y = head.nextY + 0.15;
 
@@ -662,15 +792,23 @@ function tilesSlide(spec, section, meta, pageLabel, fonts) {
   const gap = 0.28;
   const w = (CONTENT_WIDTH - gap * (n - 1)) / n;
 
+  // A fixed tile height left three quarters of an inch of white under the
+  // longest caption and twice that under the shortest. The tallest caption
+  // sets the height and all of them share it, so the row still lines up.
+  const captionHeight = Math.max(
+    ...section.tiles.map((t) => heightOf(t.caption, fonts.body, 9, w - 0.44, 1.35)),
+  );
+  const h = Math.max(1.16, 0.78 + captionHeight + 0.24);
+
   section.tiles.forEach((tile, i) => {
-    shapes.push(comp.statTile({ x: M.left + i * (w + gap), y, w, h: 1.72 }, tile));
+    shapes.push(comp.statTile({ x: M.left + i * (w + gap), y, w, h }, tile));
   });
 
   return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 function tableSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   let y = head.nextY + 0.1;
 
@@ -691,7 +829,7 @@ function tableSlide(spec, section, meta, pageLabel, fonts) {
  * is a target nobody can hold anyone to.
  */
 function kpiSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   let y = head.nextY + 0.12;
 
@@ -711,7 +849,10 @@ function kpiSlide(spec, section, meta, pageLabel, fonts) {
 }
 
 function outcomeSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  // asText() hands the band's sentence to pdf.js as the section body, which is
+  // right there and wrong here: drawing it as a subtitle as well printed the
+  // sentence twice on one slide, once in grey and once in the band under it.
+  const head = drawnHead({ ...section, body: '' }, fonts);
   const shapes = [...head.shapes];
 
   // §4.4: at most one filled accent band per slide. It is the focal point, so
@@ -722,14 +863,14 @@ function outcomeSlide(spec, section, meta, pageLabel, fonts) {
 }
 
 function paradigmSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   shapes.push(comp.paradigmStrip(M.left, head.nextY + 0.3, CONTENT_WIDTH, section));
   return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 function flowSlide(spec, section, meta, pageLabel, fonts) {
-  const head = drawnHead(section.title, fonts);
+  const head = drawnHead(section, fonts);
   const shapes = [...head.shapes];
   shapes.push(comp.flow(M.left, head.nextY + 0.35, CONTENT_WIDTH, section.steps, { emphasis: section.emphasis }));
   return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
@@ -862,25 +1003,93 @@ function contentSlide(spec, section, meta, pageLabel, fonts) {
   return slideXml(settle(laid.shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
+/**
+ * The thank you, to §3.4: the full disclaimer block.
+ *
+ * Trademarks, patents pending, the modeled data disclaimer, confidentiality.
+ * All four, on the last slide, because this is the one a rep forwards on its
+ * own more often than any other and the four things it must carry are the
+ * four things nobody puts back by hand.
+ */
 function closingSlide(spec, meta) {
   const shapes = [
-    rect({ x: 0, y: 0, w: SLIDE.widthIn, h: 0.22 }, gradientFill()),
-    wordmark(M.left, 1.5, true),
+    rect({ x: 0, y: 0, w: SLIDE.widthIn, h: SLIDE.heightIn }, gradientFill()),
+    wordmark(M.left, 1.3, true),
 
-    text({ x: M.left, y: 2.9, w: CONTENT_WIDTH * 0.8, h: 1.2 }, [
-      { text: TAGLINE, role: 'display', size: SIZE.sectionTitle, tracking: -0.03, lineHeight: 1.1, color: ON_NAVY.strong },
+    text({ x: M.left, y: 2.5, w: CONTENT_WIDTH * 0.8, h: 1.0 }, [
+      { text: DECK_TAGLINE, role: 'display', size: SIZE.sectionTitle, tracking: -0.03, lineHeight: 1.1, color: ON_NAVY.strong },
     ]),
 
-    text({ x: M.left, y: 4.4, w: CONTENT_WIDTH * 0.7, h: 0.9 }, [
-      { text: meta.preparedBy, role: 'body', size: SIZE.body, lineHeight: 1.5, color: ON_NAVY.body },
-      { text: copyrightLine(meta.year), role: 'body', size: SIZE.footer, lineHeight: 1.5, color: ON_NAVY.muted, spaceBefore: 8 },
+    text({ x: M.left, y: 3.62, w: CONTENT_WIDTH * 0.62, h: 0.5 }, [
+      { text: POSITIONING_LINE, role: 'body', size: SIZE.coverSub, lineHeight: 1.4, color: ON_NAVY.body },
     ]),
+
+    text({ x: M.left, y: 4.34, w: CONTENT_WIDTH * 0.7, h: 0.4 }, [
+      { text: meta.preparedBy, role: 'body', size: SIZE.body, lineHeight: 1.4, color: ON_NAVY.body },
+    ]),
+
+    // The disclaimer block. Set small and italic, the way a legal line is set,
+    // so it is present and readable without competing with the tagline.
+    text({ x: M.left, y: 4.96, w: CONTENT_WIDTH * 0.74, h: 1.0 }, [
+      { text: PATENTS_PENDING, role: 'body', size: FLOORS.label, lineHeight: 1.45, color: ON_NAVY.muted, italic: true },
+      { text: DATA_NOTE, role: 'body', size: FLOORS.label, lineHeight: 1.45, color: ON_NAVY.muted, italic: true, spaceBefore: 5 },
+    ]),
+
+    comp.waveMotif(M.left, 6.28, CONTENT_WIDTH, 0.34, { onDark: true }),
 
     footer(spec, true, meta.date),
   ];
 
   return slideXml(shapes.join(''), bg(COLOR.deepNavy));
 }
+
+/**
+ * §1.2 step 5 and §3.4: the credentials close, before the thank you.
+ *
+ * Every line on it is approved standing copy from the instruction set. That
+ * is the point: a slide about who we are is precisely where an invented
+ * capability, a client name, or a certification would go unnoticed, because
+ * it is the one slide nobody fact-checks against a source. So nothing on it
+ * is written fresh, here or by the model.
+ */
+function whoWeAreSlide(spec, meta, pageLabel, fonts) {
+  return contentSlide(
+    spec,
+    { eyebrow: WHO_WE_ARE.eyebrow, title: WHO_WE_ARE.title, body: '', points: WHO_WE_ARE.points },
+    meta,
+    pageLabel,
+    fonts,
+  );
+}
+
+/** Does the deck already say who we are? Then the standing slide is redundant. */
+const isCredentials = (section) =>
+  /\bwho we are\b|\babout (us|vikat)\b|\bcredentials\b/i.test(String(section?.title || '') + ' ' + String(section?.eyebrow || ''));
+
+/**
+ * §1.4: a slide carrying a modeled figure carries the data note beside it.
+ *
+ * Added after the fact rather than by each layout, because the obligation is
+ * on the figure and every layout can show one. A rule enforced in eleven
+ * places is a rule the twelfth layout will not have.
+ */
+function withDataNote(slideMarkup) {
+  const note = text(
+    { x: M.left, y: GEOMETRY.finePrint.y - 0.54, w: SLIDE.widthIn - M.left - M.right - 1.6, h: 0.26 },
+    [{ text: DATA_NOTE, role: 'body', size: FLOORS.label, lineHeight: 1.2, color: INK.muted, italic: true }],
+  );
+  return slideMarkup.replace('</p:spTree>', `${note}</p:spTree>`);
+}
+
+/** All the words a section will put on its slide, for the §1.4 check. */
+const sectionText = (s) =>
+  [s.title, s.body, s.tag, s.sentence, s.from, s.to, ...(s.points || []), ...(s.steps || []), ...(s.stops || [])]
+    .filter(Boolean)
+    .concat((s.tiles || []).map((t) => `${t.value} ${t.caption}`))
+    .concat((s.kpis || []).map((k) => `${k.code} ${k.target}`))
+    .concat((s.bars || []).map((b) => `${b.label} ${b.value}`))
+    .concat((s.rows || []).flat())
+    .join(' ');
 
 // --- Entry point ----------------------------------------------------------
 
@@ -897,18 +1106,26 @@ function closingSlide(spec, meta) {
  */
 export function renderPptx(spec, meta, fonts) {
   shapeId = 1;
+  comp.resetIds();
 
   const date = meta.isoDate.slice(0, 10);
   const year = Number(date.slice(0, 4));
   const context = { date, year, preparedBy: `Prepared by ${meta.preparedBy}` };
 
+  // §3.4 makes the credentials close a required slide, unless the deck
+  // already has one of its own — two "who we are" slides is worse than none.
+  const wantsWhoWeAre = spec.format === 'pptx' && !spec.sections.some(isCredentials);
+  const total = spec.sections.length + 2 + (wantsWhoWeAre ? 1 : 0);
+
   const slides = [
     coverSlide(spec, context, fonts),
     ...spec.sections.map((s, i) => {
-      const label = `${i + 2} / ${spec.sections.length + 2}`;
+      const label = `${i + 2} / ${total}`;
       const draw = s.layout && DRAWN[s.layout];
-      return draw ? draw(spec, s, context, label, fonts) : contentSlide(spec, s, context, label, fonts);
+      const built = draw ? draw(spec, s, context, label, fonts) : contentSlide(spec, s, context, label, fonts);
+      return carriesModeledFigure(sectionText(s)) ? withDataNote(built) : built;
     }),
+    ...(wantsWhoWeAre ? [whoWeAreSlide(spec, context, `${total - 1} / ${total}`, fonts)] : []),
     closingSlide(spec, context),
   ];
 
