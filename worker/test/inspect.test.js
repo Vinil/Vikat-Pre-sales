@@ -16,7 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { zipSync, strToU8 } from 'fflate';
+import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 
 import { renderPptx } from '../src/documents/pptx.js';
 import { normaliseSpec } from '../src/documents/spec.js';
@@ -82,6 +82,24 @@ test('the deck is one ground, not several', () => {
     !report.notes.some((n) => /different backgrounds/.test(n)),
     'white for prose, cream for drawn and navy for a quote read as three decks stapled together',
   );
+});
+
+test('a titled chart puts its title on the slide', () => {
+  // Parsing a title is not the same as drawing one. bars, chain and timeline
+  // rendered as a bare rule above a drawing, and a slide with a chart and no
+  // heading is one the presenter explains from memory.
+  const bytes = build({
+    ...DECK,
+    content: '## bars | Where the response time goes | MTTR 71 | Alert noise 90',
+  });
+
+  const files = unzipSync(bytes);
+  const slides = Object.keys(files)
+    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .map((n) => strFromU8(files[n]))
+    .join('');
+
+  assert.match(slides, /Where the response time goes/, 'the heading never reached the slide');
 });
 
 // --- the check has to bite --------------------------------------------------

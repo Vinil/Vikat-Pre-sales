@@ -334,6 +334,29 @@ function heightOf(text, metrics, sizePt, widthIn, lineHeight, tracking = 0) {
 // reads in two seconds from the back of a room instead of being a paragraph
 // the presenter reads aloud.
 
+/**
+ * The rule and, when there is one, the heading a drawn slide is titled with.
+ *
+ * bars, chain and timeline had no title slot at all, so they rendered as a
+ * bare green rule above a drawing — a slide the presenter has to explain from
+ * memory, which is not what a drawing is for. The rule alone is kept for the
+ * layouts that genuinely caption themselves further down, like stat.
+ *
+ * @returns {{ shapes: string[], nextY: number }}
+ */
+function drawnHead(title, fonts) {
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
+  if (!title) return { shapes, nextY: M.top + 0.55 };
+
+  const h = heightOf(title, fonts.display, SIZE.slideTitle, CONTENT_WIDTH * 0.8, 1.15, -0.02) || 0.75;
+  shapes.push(
+    text({ x: M.left, y: M.top + 0.42, w: CONTENT_WIDTH * 0.8, h }, [
+      { text: title, role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: COLOR.navy },
+    ]),
+  );
+  return { shapes, nextY: M.top + 0.42 + h + 0.45 };
+}
+
 /** The caption line under a drawing, in the muted ink prose uses. */
 function captionAt(textValue, y, width) {
   return text({ x: M.left, y, w: width, h: 0.5 }, [
@@ -347,7 +370,7 @@ function captionAt(textValue, y, width) {
  * 96pt is larger than anything else in the deck on purpose: a stat slide that
  * hedges its own headline is a paragraph with extra whitespace.
  */
-function statSlide(spec, section, meta, pageLabel) {
+function statSlide(spec, section, meta, pageLabel, fonts) {
   const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
 
   shapes.push(
@@ -376,9 +399,10 @@ function statSlide(spec, section, meta, pageLabel) {
  * legible — and labelled with the real figure, so the scaling can never
  * overstate anything.
  */
-function barsSlide(spec, section, meta, pageLabel) {
-  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
-  let y = M.top + 0.45;
+function barsSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  let y = head.nextY - 0.1;
 
   if (section.body) {
     shapes.push(
@@ -422,9 +446,10 @@ function barsSlide(spec, section, meta, pageLabel) {
 }
 
 /** A sequence of named stages, left to right, with the flow made visible. */
-function chainSlide(spec, section, meta, pageLabel) {
-  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
-  let y = M.top + 0.45;
+function chainSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  let y = head.nextY - 0.1;
 
   if (section.body) {
     shapes.push(
@@ -465,9 +490,10 @@ function chainSlide(spec, section, meta, pageLabel) {
 }
 
 /** Stops along a single rule — a calendar, a phase plan, a sequence in time. */
-function timelineSlide(spec, section, meta, pageLabel) {
-  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
-  let y = M.top + 0.45;
+function timelineSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  let y = head.nextY - 0.1;
 
   if (section.body) {
     shapes.push(
@@ -499,9 +525,10 @@ function timelineSlide(spec, section, meta, pageLabel) {
 }
 
 /** Two states side by side, the second one carrying the weight. */
-function splitSlide(spec, section, meta, pageLabel) {
-  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
-  let y = M.top + 0.45;
+function splitSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  let y = head.nextY - 0.1;
 
   if (section.body) {
     shapes.push(
@@ -540,7 +567,7 @@ function splitSlide(spec, section, meta, pageLabel) {
 }
 
 /** One sentence, full bleed on navy. The slide a presenter stops talking on. */
-function quoteSlide(spec, section, meta, pageLabel) {
+function quoteSlide(spec, section, meta, pageLabel, fonts) {
   const shapes = [
     rect({ x: M.left, y: M.top + 0.3, w: 0.7, h: 0.07 }, solid(COLOR.signalGreen)),
     text({ x: M.left, y: M.top + 0.9, w: CONTENT_WIDTH * 0.88, h: 3.2 }, [
@@ -683,7 +710,7 @@ export function renderPptx(spec, meta, fonts) {
     ...spec.sections.map((s, i) => {
       const label = `${i + 2} / ${spec.sections.length + 2}`;
       const draw = s.layout && DRAWN[s.layout];
-      return draw ? draw(spec, s, context, label) : contentSlide(spec, s, context, label, fonts);
+      return draw ? draw(spec, s, context, label, fonts) : contentSlide(spec, s, context, label, fonts);
     }),
     closingSlide(spec, context),
   ];

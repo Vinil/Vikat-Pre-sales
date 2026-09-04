@@ -223,12 +223,16 @@ seconds and a paragraph you end up reading aloud:
 
 - \`## stat | 265 | attacks on food and agriculture in 2025\` — one number,
   very large, for the figure the whole slide exists to land.
-- \`## bars | MTTR 71 | Alert noise 90 | Triage 64\` — a labelled bar per
-  pair, scaled to the largest. Plain numbers, no units inside the value.
-- \`## chain | VSentinel > VInsight > VCommand > VShield\` — connected
-  stages, two to five.
-- \`## timeline | Plant | Grow | Harvest | Ship\` — stops along a rule, for
-  a calendar or a phase plan, two to six.
+- \`## bars | Where the response time goes | MTTR 71 | Alert noise 90\` — a
+  heading, then a labelled bar per pair, scaled to the largest. Plain numbers,
+  no units inside the value. The heading is optional but write one: a chart
+  with no title is a slide the presenter has to explain from memory.
+- \`## chain | How the suite fits | VSentinel > VInsight > VCommand\` — an
+  optional heading, then connected stages, two to five. Anything before the
+  first \`>\` is read as the heading.
+- \`## timeline | The first ninety days: | Discover | Baseline | Enforce\` —
+  stops along a rule, for a calendar or a phase plan, two to six. A heading
+  must END WITH A COLON, since a stop and a title otherwise look identical.
 - \`## split | What they run today | What changes with VShield\` — two
   states side by side, the second weighted.
 - \`## quote | Severity scoring is calendar-blind.\` — one sentence, full

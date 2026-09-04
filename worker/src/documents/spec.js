@@ -174,10 +174,15 @@ function asText(drawn) {
     return { title: [drawn.value, drawn.caption].filter(Boolean).join(' — '), points: [] };
   }
   if (drawn.layout === 'bars') {
-    return { title: '', points: drawn.bars.map((b) => `${b.label} — ${b.value}`) };
+    return { title: drawn.title || '', points: drawn.bars.map((b) => `${b.label} — ${b.value}`) };
   }
   if (drawn.layout === 'chain') {
-    return { title: drawn.steps.join(' → '), points: [] };
+    // With a heading the steps become points, so both survive into a PDF.
+    // Without one the steps ARE the heading, which is how this has always
+    // read and how every existing deck still parses.
+    return drawn.title
+      ? { title: drawn.title, points: [drawn.steps.join(' → ')] }
+      : { title: drawn.steps.join(' → '), points: [] };
   }
   if (drawn.layout === 'timeline') {
     // A COPY. Sharing the array meant a bullet parsed after the heading was
@@ -216,23 +221,40 @@ export function parseLayout(headingText) {
   }
 
   if (kind === 'bars') {
-    const bars = rest.map(bar).filter(Boolean).slice(0, 6);
-    return bars.length >= 2 ? { layout: 'bars', bars } : null;
+    // A leading segment that is not itself a bar is the slide's heading.
+    // bar() needs "label number", so anything without a trailing number
+    // cannot be data — which makes the title unambiguous rather than
+    // positional, and leaves every existing deck parsing exactly as before.
+    const title = bar(rest[0]) ? '' : rest[0];
+    const data = title ? rest.slice(1) : rest;
+
+    const bars = data.map(bar).filter(Boolean).slice(0, 6);
+    return bars.length >= 2 ? { layout: 'bars', bars, ...(title ? { title } : {}) } : null;
   }
 
   if (kind === 'chain') {
-    const steps = rest
+    // Steps are joined by ">", so a first segment with no arrow in it is a
+    // heading rather than a step.
+    const title = rest.length > 1 && !/[>→]/.test(rest[0]) ? rest[0] : '';
+    const data = title ? rest.slice(1) : rest;
+
+    const steps = data
       .join(' | ')
       .split(/>|→/)
       .map((s) => s.trim())
       .filter(Boolean)
       .slice(0, 5);
-    return steps.length >= 2 ? { layout: 'chain', steps } : null;
+    return steps.length >= 2 ? { layout: 'chain', steps, ...(title ? { title } : {}) } : null;
   }
 
   if (kind === 'timeline') {
-    const stops = rest.slice(0, 6);
-    return stops.length >= 2 ? { layout: 'timeline', stops } : null;
+    // Stops are plain words, so nothing in the data distinguishes a heading
+    // from a stop. A heading is taken only when it is written as one — ending
+    // in a colon — which keeps every existing deck parsing unchanged.
+    const heading = /:$/.test(rest[0] || '');
+    const title = heading ? rest[0].replace(/:$/, '') : '';
+    const stops = (heading ? rest.slice(1) : rest).slice(0, 6);
+    return stops.length >= 2 ? { layout: 'timeline', stops, ...(title ? { title } : {}) } : null;
   }
 
   if (kind === 'split') {
@@ -311,9 +333,9 @@ export function parseSections(markdown) {
 /** The fields each layout carries, so nothing else rides along. */
 function drawnFields(s) {
   if (s.layout === 'stat') return { value: clean(s.value, 12, false), caption: clean(s.caption, 90, false) };
-  if (s.layout === 'bars') return { bars: s.bars };
-  if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)) };
-  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 20, false)) };
+  if (s.layout === 'bars') return { bars: s.bars, title: clean(s.title, LIMITS.sectionTitleChars, true) };
+  if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
+  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 20, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'split') return { left: clean(s.left, 60, false), right: clean(s.right, 60, false) };
   if (s.layout === 'quote') return { line: clean(s.line, 120, false) };
   return {};

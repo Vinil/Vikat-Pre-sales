@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
 import { PDFDocument } from 'pdf-lib';
 
-import { normaliseSpec, parseSections, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
+import { normaliseSpec, parseSections, parseLayout, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
 import { renderPdf } from '../src/documents/pdf.js';
 import { renderDocx } from '../src/documents/docx.js';
@@ -724,6 +724,53 @@ test('a bullet after a timeline does not become a sixth stop', () => {
   const timeline = drawnSpec().sections[1];
   assert.equal(timeline.stops.length, 5);
   assert.ok(!timeline.stops.some((s) => /medium CVE/.test(s)));
+});
+
+test('a chart can be titled, and the title is not mistaken for data', () => {
+  // bars, chain and timeline had no title slot, so they rendered as a bare
+  // rule above a drawing — a slide the presenter explains from memory.
+  const bars = parseLayout('bars | Where the response time goes | MTTR 71 | Alert noise 90');
+  assert.equal(bars.title, 'Where the response time goes');
+  assert.equal(bars.bars.length, 2, 'and the heading is not counted as a bar');
+
+  const chain = parseLayout('chain | How the suite fits | VSentinel > VInsight > VCommand');
+  assert.equal(chain.title, 'How the suite fits');
+  assert.equal(chain.steps.length, 3);
+
+  // A timeline stop and a title look identical, so a title must be written as
+  // one. Anything else stays a stop, and every existing deck parses unchanged.
+  const timeline = parseLayout('timeline | The first ninety days: | Discover | Baseline | Enforce');
+  assert.equal(timeline.title, 'The first ninety days');
+  assert.equal(timeline.stops.length, 3);
+});
+
+test('an untitled chart still parses exactly as it always did', () => {
+  // Every deck written before the title slot existed has to keep working.
+  const bars = parseLayout('bars | MTTR 71 | Alert noise 90 | Triage 64');
+  assert.equal(bars.bars.length, 3, 'no bar may be eaten as a heading');
+  assert.ok(!bars.title);
+
+  const chain = parseLayout('chain | VSentinel > VInsight > VCommand');
+  assert.equal(chain.steps.length, 3);
+  assert.ok(!chain.title);
+
+  const timeline = parseLayout('timeline | Plant | Grow | Harvest');
+  assert.equal(timeline.stops.length, 3, 'a stop without a colon is a stop');
+  assert.ok(!timeline.title);
+});
+
+test('a titled chart keeps its data in the text a PDF reads', () => {
+  // pdf.js knows nothing about layouts. Before, the title of a titled chain
+  // replaced the steps entirely and they vanished from the PDF.
+  const { spec } = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## chain | How the suite fits | VSentinel > VInsight > VCommand',
+  });
+
+  const [section] = spec.sections;
+  assert.equal(section.title, 'How the suite fits');
+  assert.ok(section.points.join(' ').includes('VSentinel'), 'the steps must survive into text');
 });
 
 test('every layout still carries its content as text, for renderers that cannot draw', () => {
