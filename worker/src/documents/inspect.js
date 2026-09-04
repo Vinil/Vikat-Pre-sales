@@ -20,6 +20,7 @@
 
 import { unzipSync, strFromU8 } from 'fflate';
 import { SLIDE } from './ooxml.js';
+import { checkCopy, FINE_PRINT } from './house.js';
 
 const EMU = 914400;
 
@@ -125,12 +126,14 @@ export function inspectPptx(bytes) {
   if (!slideNames.length) return { slides: 0, problems: ['The deck has no slides.'], notes };
 
   const grounds = new Map();
+  const allCopy = [];
 
   slideNames.forEach((name, i) => {
     const n = i + 1;
     const xml = strFromU8(files[name]);
     const boxes = shapesOf(xml);
     const words = wordsOf(xml);
+    allCopy.push(...words);
 
     const ground = groundOf(xml);
     if (ground) grounds.set(ground, (grounds.get(ground) || 0) + 1);
@@ -171,6 +174,33 @@ export function inspectPptx(bytes) {
       );
     }
   });
+
+  // §3.2: the fine print is on EVERY slide, cover and thank you included.
+  // Checked once for the deck rather than per slide, because a deck missing
+  // it on one slide and a deck missing it on all of them are the same fix.
+  const withFinePrint = slideNames.filter((name) =>
+    strFromU8(files[name]).includes(FINE_PRINT.slice(0, 40)),
+  ).length;
+  if (withFinePrint < slideNames.length) {
+    problems.push(
+      `${slideNames.length - withFinePrint} slide(s) are missing the fine print, which the house style puts on every slide.`,
+    );
+  }
+
+  // §2, checked against everything the deck actually says. The renderer
+  // controls the furniture; these are the model's own words, and a rule the
+  // model is merely asked to follow holds most of the time — which is how a
+  // deck with an em dash in it reaches a customer.
+  // Checked against EVERY run, furniture included, not the filtered set the
+  // completeness checks use. "Does this slide say anything" has to ignore the
+  // footer; "is there a dash anywhere in this file" must not — the disclosure
+  // label had one, printed on every slide, and the filter hid it.
+  const everything = slideNames
+    .flatMap((name) => [...strFromU8(files[name]).matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]))
+    .join(' ');
+  const copy = checkCopy(everything);
+  problems.push(...copy.problems);
+  notes.push(...copy.notes);
 
   // One ground, plus at most one deliberate contrast — a full-bleed navy
   // quote earns its place. A third means the layouts disagree with each

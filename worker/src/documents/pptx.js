@@ -21,6 +21,7 @@ import { COLOR, INK, ON_NAVY, FONT, GRADIENT, WORDMARK, TAGLINE, copyrightLine, 
 import { DISCLOSURE_LABELS } from './spec.js';
 import { wrap } from './measure.js';
 import * as part from './ooxml.js';
+import { GEOMETRY, FLOORS, FINE_PRINT } from './house.js';
 
 const { emu, hex, xml, SLIDE } = part;
 
@@ -38,20 +39,25 @@ const track = (em, sizePt) => Math.round(em * sizePt * 100);
  * belongs to a full-bleed web hero and would not fit a slide title.
  */
 const BASE_PT = 18;
+// §3.1 and §4.2. The floors are floors: nothing here may go below them, and
+// the fitting pass in contentSlide() is clamped so shrinking cannot either.
 const SIZE = {
   coverTitle: 40,
-  coverSub: 17,
+  coverSub: GEOMETRY.subtitle.size,
   sectionTitle: 32,
-  slideTitle: 27,
+  slideTitle: GEOMETRY.title.size,
   body: BASE_PT,
   point: BASE_PT,
-  eyebrow: 12,
-  footer: 10,
+  eyebrow: GEOMETRY.eyebrow.size,
+  footer: FLOORS.finePrint,
   wordmark: 20,
 };
 
 /** Margins. Generous space is part of the type system, not a nicety. */
-const M = { left: 0.85, right: 0.85, top: 0.7, bottom: 0.55 };
+// §3.1: MX = 0.6 both sides. The vertical margins are this renderer's own —
+// the instruction set fixes element positions rather than a top margin — and
+// are set so the eyebrow lands on its stated y.
+const M = { left: GEOMETRY.marginX, right: GEOMETRY.marginX, top: GEOMETRY.eyebrow.y, bottom: 0.55 };
 const CONTENT_WIDTH = SLIDE.widthIn - M.left - M.right;
 
 // --- Shape helpers --------------------------------------------------------
@@ -157,17 +163,34 @@ function wordmark(x, y, onDark) {
 }
 
 /** The standing footer: what this is, and what may be done with it. */
+/**
+ * The footer, to §3.2: fine print, disclosure, tag, page number.
+ *
+ * Every slide carries all of it, cover and closing included. The fine print is
+ * the trademark line reproduced exactly — "exactly" is the rule, so it is a
+ * constant rather than a template — and the completeness contract (§3.5) turns
+ * on it: a slide gets screenshotted and forwarded without the deck, and the
+ * footer is how a reader knows who is claiming what they are reading.
+ */
 function footer(spec, onDark, pageLabel) {
   const label = DISCLOSURE_LABELS[spec.disclosure];
   const color = onDark ? ON_NAVY.muted : INK.muted;
-  const y = SLIDE.heightIn - M.bottom - 0.2;
+  const faint = onDark ? ON_NAVY.muted : INK.muted;
 
   return (
-    text({ x: M.left, y, w: CONTENT_WIDTH - 1.2, h: 0.3 }, [
-      { text: eyebrowCase(label), role: 'eyebrow', size: SIZE.footer, tracking: 0.12, lineHeight: 1, color },
+    // §3.2: fine print bottom left at y 7.16, 6.5pt — the type floor, not
+    // below it.
+    text({ x: GEOMETRY.marginX, y: GEOMETRY.finePrint.y, w: SLIDE.widthIn - GEOMETRY.marginX * 2 - 1.6, h: 0.24 }, [
+      { text: FINE_PRINT, role: 'body', size: FLOORS.finePrint, lineHeight: 1.1, color: faint },
     ]) +
-    text({ x: SLIDE.widthIn - M.right - 1.2, y, w: 1.2, h: 0.3 }, [
-      { text: pageLabel, role: 'eyebrow', size: SIZE.footer, tracking: 0.12, lineHeight: 1, color },
+    // The disclosure sits above it. Not in the instruction set, and kept:
+    // this assistant produces drafts that a rep must not send unreviewed, and
+    // that is a fact about this deck rather than about the house style.
+    text({ x: GEOMETRY.marginX, y: GEOMETRY.finePrint.y - 0.26, w: SLIDE.widthIn - GEOMETRY.marginX * 2 - 1.6, h: 0.24 }, [
+      { text: eyebrowCase(label), role: 'eyebrow', size: GEOMETRY.tag.size, tracking: 0.12, lineHeight: 1, color },
+    ]) +
+    text({ x: GEOMETRY.pageNumber.x - 0.9, y: GEOMETRY.tag.y, w: 0.9, h: 0.3 }, [
+      { text: pageLabel, role: 'eyebrow', size: GEOMETRY.pageNumber.size, tracking: 0.12, lineHeight: 1, color },
     ], { align: 'r' })
   );
 }

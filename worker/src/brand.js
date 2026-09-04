@@ -210,10 +210,29 @@ export const DESCRIPTOR = 'The Agent Semantics Company';
 const EMOJI_RE =
   /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu;
 
-/** Strip anything the brand does not permit in generated copy. */
+/**
+ * Strip anything the house style does not permit in generated copy.
+ *
+ * Dashes are the addition, and they are not cosmetic: the instruction set
+ * (§2.3) bans em and en dashes outright in customer-facing copy, and §5 makes
+ * "zero dashes in the extracted text" its own QA gate. A model asked not to
+ * use them will mostly not use them, and mostly is how one reaches a customer.
+ *
+ * Rewritten rather than deleted. A dash between clauses is doing a comma's
+ * work, and a dash between numbers is doing "to". Neither substitution can
+ * turn a sentence into a different sentence, which is what matters when the
+ * text is already written and nobody is going to re-read it.
+ */
 export function brandSafe(text) {
   return String(text || '')
     .replace(EMOJI_RE, '')
+    // A range: 2020–2024, 5–10 minutes.
+    .replace(/(\d)\s*[—–]\s*(\d)/g, '$1 to $2')
+    // Between clauses, spaced or not.
+    .replace(/\s*[—–]\s*/g, ', ')
+    // The rewrite can double a comma that was already there.
+    .replace(/,\s*,/g, ',')
+    .replace(/\s+,/g, ',')
     // Straight quotes read as code; the brand sets prose, not terminal output.
     .replace(/(^|[\s(\[])"(?=\S)/g, '$1“')
     .replace(/"/g, '”')

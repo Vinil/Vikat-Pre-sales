@@ -171,10 +171,12 @@ function bar(text) {
  */
 function asText(drawn) {
   if (drawn.layout === 'stat') {
-    return { title: [drawn.value, drawn.caption].filter(Boolean).join(' — '), points: [] };
+    // A colon, not an em dash: §2.3 bans them in customer-facing copy, and
+    // the renderer's own joins reach the slide exactly as the model's words do.
+    return { title: [drawn.value, drawn.caption].filter(Boolean).join(': '), points: [] };
   }
   if (drawn.layout === 'bars') {
-    return { title: drawn.title || '', points: drawn.bars.map((b) => `${b.label} — ${b.value}`) };
+    return { title: drawn.title || '', points: drawn.bars.map((b) => `${b.label}: ${b.value}`) };
   }
   if (drawn.layout === 'chain') {
     // With a heading the steps become points, so both survive into a PDF.
@@ -217,7 +219,7 @@ export function parseLayout(headingText) {
 
   if (kind === 'stat') {
     // The number carries the slide; the caption says what it counts.
-    return { layout: 'stat', value: rest[0], caption: rest.slice(1).join(' — ') };
+    return { layout: 'stat', value: rest[0], caption: rest.slice(1).join('. ') };
   }
 
   if (kind === 'bars') {
@@ -385,8 +387,11 @@ function clean(value, max, asHeading) {
  */
 export const DISCLOSURE_LABELS = {
   external_ok: 'Cleared for customers',
-  internal_only: 'Internal only — not for customer distribution',
-  needs_approval: 'Draft — needs approval before it leaves Vikat',
+  // Colons, not em dashes. §2.3 bans them in anything customer-facing, and
+  // this label is printed on every slide — the renderer's own furniture is
+  // held to the rule exactly as the model's words are.
+  internal_only: 'Internal only: not for customer distribution',
+  needs_approval: 'Draft: needs approval before it leaves Vikat',
 };
 
 /** A short filename that sorts by date and says what it is. */

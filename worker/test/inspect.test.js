@@ -32,7 +32,7 @@ const DECK = {
   disclosure: 'internal_only',
   content: [
     '## context | Why now for Astec',
-    'Astec runs plants across three continents, and the line stopping is the only outage that matters.',
+    'Astec runs plants across three continents, and a stopped line is the outage that matters.',
     '- Agents are already reading production telemetry',
     '',
     '## stat | 265 | attacks on manufacturing and industrials in 2025',
