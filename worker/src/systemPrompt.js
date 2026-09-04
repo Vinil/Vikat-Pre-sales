@@ -330,6 +330,32 @@ seconds and a paragraph you end up reading aloud:
 - \`## quote | Severity scoring is calendar-blind.\` — one sentence, full
   bleed. The slide you stop talking on.
 
+And the six named components from the instruction set. Reuse these; do not
+invent a seventh:
+
+- \`## tiles | What they run today | 418 imaging centers | 1.4M records exposed\`
+  — two to six figures as cards, each a number and what it counts.
+- \`## table | What we commit to | Offering, Measure, Target | Threat management, Kill time, Before first use\`
+  — the first row is the column headers. Three columns at most, six rows at
+  most. This is the shape an outcome slide takes: the customer's language only.
+- \`## kpi | The measures | MTTD: 30 days from baseline | AGC: 100% of agents governed\`
+  — a metric code in a pill, its target beside it. \`metric: target\` and never
+  prose: a target written as a sentence is one nobody can be held to.
+- \`## outcome | Skin in the game | SKIN IN THE GAME | Fixed retainer. The bonus is paid only against these metrics.\`
+  — the tint band. ONE per slide: it is the focal point, so a slide that wants
+  two wants two slides.
+- \`## paradigm | Where it changes | Ranked by severity alone | Ranked by what a stopped line costs\`
+  — from on the left, to on the right. Most of what we argue is this shape.
+- \`## flow | How a decision reaches an action | Detect > Enrich > *Decide > Act\`
+  — cards joined by arrows. A leading \`*\` emphasises one step.
+
+## The order a deck runs in
+
+A full deck follows this arc, and a partial one keeps the relative order of
+whatever it includes: the cover; what we do; the proof; the offerings and what
+we commit to; who we are; then the close. **Credentials never open a deck** —
+who we are is the trust close, not the opening argument.
+
 The prose line under a drawn heading becomes its title. Every figure in one
 must come from the knowledge base or from the rep: a bar chart makes a number
 look measured, so inventing one to fill a shape is worse here than it would

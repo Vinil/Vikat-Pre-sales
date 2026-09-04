@@ -22,6 +22,7 @@ import { DISCLOSURE_LABELS } from './spec.js';
 import { wrap } from './measure.js';
 import * as part from './ooxml.js';
 import { GEOMETRY, FLOORS, FINE_PRINT } from './house.js';
+import * as comp from './components.js';
 
 const { emu, hex, xml, SLIDE } = part;
 
@@ -646,8 +647,102 @@ function quoteSlide(spec, section, meta, pageLabel, fonts) {
   return slideXml(settle(shapes) + footer(spec, true, pageLabel), bg(COLOR.deepNavy));
 }
 
+// --- §4.3 component layouts ------------------------------------------------
+//
+// Each of these is assembled from components.js rather than drawing its own
+// rectangles. "Reuse, do not invent" is the section heading, and a stat tile
+// built twice is a stat tile that looks different on two slides of one deck.
+
+function tilesSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  const y = head.nextY + 0.15;
+
+  const n = section.tiles.length;
+  const gap = 0.28;
+  const w = (CONTENT_WIDTH - gap * (n - 1)) / n;
+
+  section.tiles.forEach((tile, i) => {
+    shapes.push(comp.statTile({ x: M.left + i * (w + gap), y, w, h: 1.72 }, tile));
+  });
+
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
+function tableSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  let y = head.nextY + 0.1;
+
+  shapes.push(comp.tableHeader(M.left, y, CONTENT_WIDTH, section.columns));
+  y += 0.36;
+
+  for (const row of section.rows) {
+    shapes.push(comp.tableRow(M.left, y, CONTENT_WIDTH, row));
+    y += comp.TABLE_ROW_HEIGHT + 0.12;
+  }
+
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
+/**
+ * §1.3: a metric code in a pill, its target beside it. `metric: target`, never
+ * prose — the format is the doctrine, because a target written as a sentence
+ * is a target nobody can hold anyone to.
+ */
+function kpiSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  let y = head.nextY + 0.12;
+
+  for (const { code, target } of section.kpis) {
+    shapes.push(comp.metricPill(M.left, y, code));
+    shapes.push(
+      comp.label({ x: M.left + 1.24, y: y + 0.06, w: CONTENT_WIDTH - 1.24, h: 0.32 }, target, {
+        size: 12,
+        color: INK.strong,
+        lineHeight: 1.2,
+      }),
+    );
+    y += 0.56;
+  }
+
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
+function outcomeSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+
+  // §4.4: at most one filled accent band per slide. It is the focal point, so
+  // nothing else on this slide competes with it.
+  shapes.push(comp.outcomeBand(M.left, head.nextY + 0.3, CONTENT_WIDTH, section));
+
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
+function paradigmSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  shapes.push(comp.paradigmStrip(M.left, head.nextY + 0.3, CONTENT_WIDTH, section));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
+function flowSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section.title, fonts);
+  const shapes = [...head.shapes];
+  shapes.push(comp.flow(M.left, head.nextY + 0.35, CONTENT_WIDTH, section.steps, { emphasis: section.emphasis }));
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
 const DRAWN = {
   stat: statSlide,
+  tiles: tilesSlide,
+  table: tableSlide,
+  kpi: kpiSlide,
+  outcome: outcomeSlide,
+  paradigm: paradigmSlide,
+  flow: flowSlide,
   bars: barsSlide,
   chain: chainSlide,
   timeline: timelineSlide,

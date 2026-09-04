@@ -13,6 +13,7 @@
  */
 
 import { brandSafe, sentenceCase } from '../brand.js';
+import { DENSITY } from './house.js';
 
 /** Formats the assistant can produce. */
 export const FORMATS = ['pptx', 'pdf', 'docx'];
@@ -134,7 +135,15 @@ export function normaliseSpec(input) {
  * because it exists, rather than because the content is that shape, is worse
  * than a paragraph.
  */
-export const LAYOUTS = ['stat', 'bars', 'chain', 'timeline', 'split', 'quote'];
+const DENSITY_CARDS = DENSITY.cards;
+const DENSITY_ROWS = DENSITY.rows;
+const DENSITY_COLUMNS = DENSITY.columns;
+
+export const LAYOUTS = [
+  'stat', 'bars', 'chain', 'timeline', 'split', 'quote',
+  // §4.3, the named components. Reuse, do not invent.
+  'tiles', 'table', 'kpi', 'outcome', 'paradigm', 'flow',
+];
 
 /** Split "a | b | c" into trimmed, non-empty parts. */
 function pipes(text) {
@@ -185,6 +194,29 @@ function asText(drawn) {
     return drawn.title
       ? { title: drawn.title, points: [drawn.steps.join(' → ')] }
       : { title: drawn.steps.join(' → '), points: [] };
+  }
+  if (drawn.layout === 'tiles') {
+    return { title: drawn.title || '', points: drawn.tiles.map((t) => `${t.value}: ${t.caption}`) };
+  }
+  if (drawn.layout === 'table') {
+    return {
+      title: drawn.title || drawn.columns.join(', '),
+      points: drawn.rows.map((r) => r.join(', ')),
+    };
+  }
+  if (drawn.layout === 'kpi') {
+    return { title: drawn.title || '', points: drawn.kpis.map((k) => `${k.code}: ${k.target}`) };
+  }
+  if (drawn.layout === 'outcome') {
+    return { title: drawn.title || drawn.tag, body: drawn.sentence, points: [] };
+  }
+  if (drawn.layout === 'paradigm') {
+    return { title: drawn.title || '', points: [`From: ${drawn.from}`, `To: ${drawn.to}`] };
+  }
+  if (drawn.layout === 'flow') {
+    return drawn.title
+      ? { title: drawn.title, points: [drawn.steps.join(' > ')] }
+      : { title: drawn.steps.join(' > '), points: [] };
   }
   if (drawn.layout === 'timeline') {
     // A COPY. Sharing the array meant a bullet parsed after the heading was
@@ -257,6 +289,84 @@ export function parseLayout(headingText) {
     const title = heading ? rest[0].replace(/:$/, '') : '';
     const stops = (heading ? rest.slice(1) : rest).slice(0, 6);
     return stops.length >= 2 ? { layout: 'timeline', stops, ...(title ? { title } : {}) } : null;
+  }
+
+  if (kind === 'tiles') {
+    // §4.3 stat tiles: "tiles | Heading | 418 centers | 1.4M records".
+    // A tile is a figure and what it counts, so anything without a leading
+    // number is the slide's heading.
+    const isTile = (t) => /^[\d£$€]/.test(t.trim());
+    const title = isTile(rest[0]) ? '' : rest[0];
+    const tiles = (title ? rest.slice(1) : rest)
+      .map((t) => {
+        const m = /^(\S+)\s+(.*)$/.exec(t.trim());
+        return m ? { value: m[1], caption: m[2] } : null;
+      })
+      .filter(Boolean)
+      .slice(0, DENSITY_CARDS);
+
+    return tiles.length >= 2 ? { layout: 'tiles', tiles, ...(title ? { title } : {}) } : null;
+  }
+
+  if (kind === 'table') {
+    // "table | Heading / Offering, Measure, Target / row / row". §1.3 asks for
+    // exactly this shape on an outcome slide: the customer's language only.
+    const title = /,/.test(rest[0]) ? '' : rest[0];
+    const body = title ? rest.slice(1) : rest;
+    const rows = body.map((r) => r.split(',').map((c) => c.trim()).filter(Boolean)).filter((r) => r.length >= 2);
+    if (rows.length < 2) return null;
+
+    const columns = rows[0].slice(0, DENSITY_COLUMNS);
+    const data = rows.slice(1).map((r) => r.slice(0, columns.length)).slice(0, DENSITY_ROWS);
+    return data.length ? { layout: 'table', columns, rows: data, ...(title ? { title } : {}) } : null;
+  }
+
+  if (kind === 'kpi') {
+    // §1.3: metric codes in pills, and `metric: target` never prose.
+    const title = /:/.test(rest[0]) ? '' : rest[0];
+    const lines = (title ? rest.slice(1) : rest)
+      .map((l) => {
+        const at = l.indexOf(':');
+        return at === -1 ? null : { code: l.slice(0, at).trim(), target: l.slice(at + 1).trim() };
+      })
+      .filter((k) => k && k.code && k.target)
+      .slice(0, DENSITY_ROWS);
+
+    return lines.length ? { layout: 'kpi', kpis: lines, ...(title ? { title } : {}) } : null;
+  }
+
+  if (kind === 'outcome') {
+    // §4.3 outcome band: "outcome | Heading | SKIN IN THE GAME | sentence."
+    if (rest.length < 2) return null;
+    const sentence = rest[rest.length - 1];
+    const tag = rest[rest.length - 2];
+    const title = rest.length > 2 ? rest[0] : '';
+    return { layout: 'outcome', tag, sentence, ...(title ? { title } : {}) };
+  }
+
+  if (kind === 'paradigm') {
+    // §4.3 from/to. "paradigm | Heading | ranked by severity | ranked by cost"
+    if (rest.length < 2) return null;
+    const to = rest[rest.length - 1];
+    const from = rest[rest.length - 2];
+    const title = rest.length > 2 ? rest[0] : '';
+    return { layout: 'paradigm', from, to, ...(title ? { title } : {}) };
+  }
+
+  if (kind === 'flow') {
+    // §4.3 flow diagram. Same shape as chain, with an emphasised step marked
+    // by a leading asterisk: "flow | Heading | Detect > *Decide > Act".
+    const title = rest.length > 1 && !/[>→]/.test(rest[0]) ? rest[0] : '';
+    const raw = (title ? rest.slice(1) : rest)
+      .join(' | ')
+      .split(/>|→/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+
+    const emphasis = raw.findIndex((x) => x.startsWith('*'));
+    const steps = raw.map((x) => x.replace(/^\*/, '').trim());
+    return steps.length >= 2 ? { layout: 'flow', steps, emphasis, ...(title ? { title } : {}) } : null;
   }
 
   if (kind === 'split') {
@@ -345,6 +455,46 @@ function drawnFields(s) {
   if (s.layout === 'bars') return { bars: s.bars, title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 20, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
+  if (s.layout === 'tiles') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      tiles: s.tiles.map((t) => ({ value: clean(t.value, 12, false), caption: clean(t.caption, 90, false) })),
+    };
+  }
+  if (s.layout === 'table') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      columns: s.columns.map((c) => clean(c, 24, false)),
+      rows: s.rows.map((r) => r.map((c) => clean(c, 70, false))),
+    };
+  }
+  if (s.layout === 'kpi') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      kpis: s.kpis.map((k) => ({ code: clean(k.code, 12, false), target: clean(k.target, 70, false) })),
+    };
+  }
+  if (s.layout === 'outcome') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      tag: clean(s.tag, 24, false),
+      sentence: clean(s.sentence, 180, false),
+    };
+  }
+  if (s.layout === 'paradigm') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      from: clean(s.from, 80, false),
+      to: clean(s.to, 80, false),
+    };
+  }
+  if (s.layout === 'flow') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      steps: s.steps.map((x) => clean(x, 24, false)),
+      emphasis: Number.isInteger(s.emphasis) ? s.emphasis : -1,
+    };
+  }
   if (s.layout === 'split') return { left: clean(s.left, 60, false), right: clean(s.right, 60, false) };
   if (s.layout === 'quote') return { line: clean(s.line, 120, false) };
   return {};
