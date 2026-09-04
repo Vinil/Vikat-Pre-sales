@@ -152,8 +152,10 @@ export function inspectPptx(bytes) {
       }
     }
 
+    // 18% let a slide with one line of text on it through — a quote filling
+    // an eighth of a navy slide measured 18.2% and passed.
     const covered = coverage(boxes);
-    if (covered < 0.18) {
+    if (covered < 0.26) {
       notes.push(`Slide ${n} is sparse — its content fills about ${Math.round(covered * 100)}% of the slide.`);
     }
 

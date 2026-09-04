@@ -515,21 +515,44 @@
       }
       clock.textContent =
         secs < 60
-          ? secs + 's'
-          : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's · long turns are normal, it is still going';
+          ? ' · ' + secs + 's'
+          : ' · ' + Math.floor(secs / 60) + 'm ' + (secs % 60) + 's · long turns are normal, still going';
     }
 
     // The DOM node is what callers hold, so the timer has to be cleared when
     // that node leaves — otherwise every turn leaves an interval running and
     // a long session accumulates them.
-    var remove = n.remove.bind(n);
+    var detach = n.remove.bind(n);
+
+    /** Off the screen, still counting. */
+    n.hide = detach;
+
+    /** Off the screen and done. The interval dies with it. */
     n.remove = function () {
       clearInterval(timer);
-      remove();
+      detach();
     };
 
     n.say = function (what) {
       label.textContent = what;
+      n.show();
+    };
+
+    /**
+     * Put it back if it has been taken off.
+     *
+     * The turn is not over when the first sentence arrives. The model says
+     * "let me research them and pull collateral", the indicator came off to
+     * make way for that bubble, and then the searches ran in total silence
+     * until the answer — which is the exact hang the indicator exists to rule
+     * out, with the indicator sitting detached and being told about every
+     * tool call it could no longer show.
+     *
+     * Re-appended at the END of the log so it trails the answer so far,
+     * rather than reappearing above it.
+     */
+    n.show = function () {
+      if (!n.isConnected) log.appendChild(n);
       scroll();
     };
 
@@ -827,15 +850,19 @@
         buffer = parseFrames(buffer, function (event, data) {
           if (event === 'text') {
             if (!bubble) {
-              status.remove();
+              // Detached, not destroyed: the turn may well go back to work
+              // after this sentence, and then it has to be shown again.
+              status.hide();
               bubble = addAgent();
             }
             answer += data.text;
             spoken += data.text;
             bubble.update(answer);
           } else if (event === 'tool') {
-            // Rebuilding the node here used to throw the clock away with it,
-            // which reset the one signal that a long turn is still moving.
+            // say() re-attaches. Rebuilding the node here used to throw the
+            // clock away with it, which reset the one signal that a long turn
+            // is still moving — and the clock counts the TURN, so it keeps
+            // running across every tool call rather than restarting on each.
             status.say(toolLabel(data.name));
           } else if (event === 'asset') {
             emit('asset', data.assets || []);
@@ -1083,5 +1110,6 @@
     // The card is what a rep actually touches, so it is drivable from a test
     // without having to fake a whole streamed turn.
     addDraft: addDraft,
+    addStatus: addStatus,
   };
 })();

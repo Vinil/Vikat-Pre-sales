@@ -332,7 +332,14 @@ export function parseSections(markdown) {
 
 /** The fields each layout carries, so nothing else rides along. */
 function drawnFields(s) {
-  if (s.layout === 'stat') return { value: clean(s.value, 12, false), caption: clean(s.caption, 90, false) };
+  if (s.layout === 'stat') {
+    // 90 characters cut a real caption mid-parenthesis and left an ellipsis
+    // on the slide — "…in a single 2025 breach (HHS filing,…" — which reads
+    // as a bug, because it is one. A caption is one sentence saying what the
+    // number counts, and one sentence is routinely longer than 90 characters
+    // once it carries its source.
+    return { value: clean(s.value, 12, false), caption: clean(s.caption, 200, false) };
+  }
   if (s.layout === 'bars') return { bars: s.bars, title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 20, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };

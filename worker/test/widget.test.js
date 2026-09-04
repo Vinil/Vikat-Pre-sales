@@ -445,6 +445,73 @@ test('half-written markup mid-stream degrades to text', async () => {
   assert.match(await html('**bol'), /\*\*bol/, 'an unclosed bold stays visible');
 });
 
+// --- the working indicator -------------------------------------------------
+
+test('the indicator comes back when the turn goes back to work', async () => {
+  // Reported twice as "still not on". It was on — for the first moment only.
+  // The model says "let me research them and pull collateral", the indicator
+  // came off to make way for that bubble, and every tool call after it was
+  // announced to a node no longer in the document. Silence until the answer,
+  // which is the exact hang the indicator exists to rule out.
+  const page = await widgetPage();
+
+  await page.evaluate(() => {
+    window.__s = window.VikatChatInternals.addStatus('Thinking');
+  });
+  await page.waitForSelector('.vk-status');
+
+  // First sentence arrives: off the screen, still counting.
+  await page.evaluate(() => window.__s.hide());
+  assert.equal(await page.$$eval('.vk-status', (n) => n.length), 0);
+
+  // A tool starts. This is where it went quiet.
+  await page.evaluate(() => window.__s.say('Searching the web'));
+  await page.waitForSelector('.vk-status', { timeout: 5000 });
+
+  assert.match(await page.textContent('.vk-status'), /Searching the web/);
+  await page.close();
+});
+
+test('the clock measures the turn, not the last time it was shown', async () => {
+  // A rep watching a two-minute turn needs a number that keeps climbing. A
+  // clock that restarts on every tool call says "5s" forever and proves
+  // nothing about whether anything is moving.
+  const page = await widgetPage();
+  await page.evaluate(() => { window.__s = window.VikatChatInternals.addStatus('Thinking'); });
+  await page.waitForTimeout(2600);
+
+  const before = await page.textContent('.vk-status-c');
+  await page.evaluate(() => { window.__s.hide(); window.__s.say('Building the document'); });
+  await page.waitForTimeout(1200);
+
+  const after = await page.textContent('.vk-status-c');
+  assert.ok(before.trim(), `no clock at all: "${before}"`);
+  assert.notEqual(after.trim(), '', 'the clock vanished when the turn resumed');
+
+  // STRICTLY greater. A frozen clock reads as a working one for exactly as
+  // long as nobody watches it, and >= let a stopped interval pass.
+  assert.ok(
+    Number(/(\d+)s/.exec(after)?.[1] || 0) > Number(/(\d+)s/.exec(before)?.[1] || 0),
+    `the clock stopped: ${before} then ${after}`,
+  );
+  await page.close();
+});
+
+test('removing it for good stops the clock', async () => {
+  // Every turn leaves an interval behind otherwise, and a long session
+  // accumulates one per message.
+  const page = await widgetPage();
+  const running = await page.evaluate(async () => {
+    const s = window.VikatChatInternals.addStatus('Thinking');
+    s.remove();
+    const c = s.querySelector('.vk-status-c').textContent;
+    await new Promise((r) => setTimeout(r, 2400));
+    return c === s.querySelector('.vk-status-c').textContent;
+  });
+  assert.ok(running, 'the interval kept ticking on a removed node');
+  await page.close();
+});
+
 // --- outreach drafts -------------------------------------------------------
 
 const DRAFT = {

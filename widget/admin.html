@@ -12,24 +12,30 @@
 
 <style>
   :root {
-    /* The Vikat palette, read off the Vikat_Overview template: cream ground,
-       navy ink, teal and violet accents. The --w* names still mean what they
-       always meant — the strongest text colour down to the faintest rule —
-       they just describe ink on cream now instead of white on black. */
-    --bg: #F6F1E4;
+    /* The Vikat palette, read off the Vikat_Overview template — but a deck is
+       one flat cream page and an app is not. A workspace, a rail and a
+       composer that share one colour give the eye nothing to hold onto, so
+       the cream is used as a SCALE: rails and chrome sit back in sand, the
+       conversation comes forward in the lightest tone, and cards sit on white.
+       The borders are the template's own sand, which is what keeps it Vikat
+       rather than a generic beige. */
+    --bg: #FBF8F1;
+    --shell: #E7DFCC;
     --sf: #FFFFFF;
-    --sf2: #EFE9DA;
+    --sf2: #F1EADA;
+    --line: #D2CAB4;
     --w: #022258;
     --w80: rgba(2,34,88,.86);
     --w60: rgba(2,34,88,.66);
-    --w40: rgba(2,34,88,.46);
-    --w20: rgba(2,34,88,.18);
-    --w08: rgba(2,34,88,.1);
-    --w04: rgba(2,34,88,.05);
+    --w40: rgba(2,34,88,.5);
+    --w20: rgba(2,34,88,.2);
+    --w08: rgba(2,34,88,.12);
+    --w04: rgba(2,34,88,.06);
     --cyan: #14736D;
     --violet: #5B4FC0;
     --green: #2E7044;
     --orange: #B4531F;
+    --red: #A5292B;
     --red: #A5292B;
     --mono: 'IBM Plex Mono','SF Mono',Consolas,monospace;
   }
@@ -49,7 +55,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: 20px;
     padding: 0 clamp(20px,5vw,48px); height: 68px;
     border-bottom: 1px solid var(--w08);
-    background: rgba(246,241,228,.96);
+    background: var(--shell);
     position: sticky; top: 0; z-index: 10;
   }
   .logo { display: flex; align-items: center; gap: 10px; }

@@ -128,7 +128,7 @@
   gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--vk-w08);
-  background: rgba(246, 241, 228, 0.96);
+  background: #E7DFCC;
 }
 
 .vk-mark {
@@ -369,28 +369,76 @@
 
 /* ── Status rows ────────────────────────────────────────────── */
 
+/* The working indicator.
+
+   This was an 11px mono line at 46% opacity, alone in a wide cream panel. It
+   was RENDERING the whole time and a rep reported twice that it was not there
+   — which is the same thing as not being there. A signal that answers "has
+   this hung" has to be the most obvious thing on an otherwise empty screen,
+   so it is a card with a moving bar, at reading size, in the brand teal. */
 .vk-status {
-  align-self: flex-start;
+  align-self: stretch;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-family: var(--vk-mono);
-  font-size: 11px;
-  letter-spacing: 0.4px;
-  color: var(--vk-w40);
+  gap: 10px;
+  margin: 2px 0;
+  padding: 11px 14px;
+  border: 1px solid var(--vk-cyan);
+  border-radius: 12px;
+  background: rgba(20, 115, 109, 0.07);
+  font-size: 13.5px;
+  color: var(--vk-cyan);
+  overflow: hidden;
+  position: relative;
+}
+
+/* A bar that travels. An opacity pulse is easy to read as a static dot at a
+   glance; something moving across the card is not. */
+.vk-status::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 32%;
+  background: var(--vk-cyan);
+  opacity: 0.75;
+  animation: vk-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes vk-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+
+.vk-status-t {
+  font-weight: 600;
+}
+
+.vk-status-c {
+  color: var(--vk-w60);
+  font-variant-numeric: tabular-nums;
 }
 
 .vk-dot {
-  width: 5px;
-  height: 5px;
+  flex: none;
+  width: 9px;
+  height: 9px;
   border-radius: 100px;
   background: var(--vk-cyan);
   animation: vk-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes vk-pulse {
-  0%, 100% { opacity: 0.25; }
+  0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
+}
+
+/* Someone who has asked not to see motion still needs to know it is working,
+   so the card stays and only the movement stops. */
+@media (prefers-reduced-motion: reduce) {
+  .vk-status::after { animation: none; width: 100%; opacity: 0.3; }
+  .vk-dot { animation: none; }
 }
 
 .vk-error {
@@ -458,7 +506,7 @@
   gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--vk-w08);
-  background: rgba(246, 241, 228, 0.96);
+  background: #E7DFCC;
 }
 
 .vk-input {
@@ -513,7 +561,7 @@
 
 .vk-foot {
   padding: 0 12px 10px;
-  background: rgba(246, 241, 228, 0.96);
+  background: #E7DFCC;
   font-family: var(--vk-mono);
   font-size: 9.5px;
   letter-spacing: 0.5px;

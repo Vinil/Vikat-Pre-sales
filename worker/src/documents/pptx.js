@@ -509,13 +509,28 @@ function timelineSlide(spec, section, meta, pageLabel, fonts) {
   shapes.push(rect({ x: M.left, y: y + 0.5, w: CONTENT_WIDTH, h: 0.045 }, solid(INK.rule)));
 
   const n = section.stops.length;
-  const step = CONTENT_WIDTH / n;
+  // Spread across the rule, not stepped along it. `CONTENT_WIDTH / n` put the
+  // last stop at n-1/n of the way and left a hand's width of rule pointing at
+  // nothing — a line that stops before its own end reads as a rendering bug.
+  const step = n > 1 ? CONTENT_WIDTH / (n - 1) : 0;
+  const labelWidth = n > 1 ? Math.min(step - 0.2, 2.6) : CONTENT_WIDTH;
 
   section.stops.forEach((stop, i) => {
+    // The MARKER sits where the stop is; only its label is pulled back, and
+    // only for the last one, so the text ends at the rule instead of running
+    // past it. Clamping the marker too bunched the final stops together.
     const x = M.left + i * step;
-    shapes.push(rect({ x, y: y + 0.34, w: 0.16, h: 0.36 }, solid(i === n - 1 ? COLOR.signalGreen : COLOR.circuitTeal)));
+    // The final label is sized to its own text before being pulled back, so
+    // it sits under its marker rather than a column-width to the left of it.
+    const own = i === n - 1
+      ? Math.min(labelWidth, fonts.display.widthOf(stop, 15, -0.01) / 72 + 0.06)
+      : labelWidth;
+    const labelX = Math.min(x, M.left + CONTENT_WIDTH - own);
+
+    shapes.push(rect({ x: Math.min(x, M.left + CONTENT_WIDTH - 0.16), y: y + 0.34, w: 0.16, h: 0.36 },
+      solid(i === n - 1 ? COLOR.signalGreen : COLOR.circuitTeal)));
     shapes.push(
-      text({ x, y: y + 0.92, w: step - 0.2, h: 0.8 }, [
+      text({ x: labelX, y: y + 0.92, w: own, h: 0.8 }, [
         { text: stop, role: 'display', size: 15, tracking: -0.01, lineHeight: 1.2, color: COLOR.navy },
       ]),
     );
@@ -543,7 +558,19 @@ function splitSlide(spec, section, meta, pageLabel, fonts) {
 
   const gap = 0.4;
   const colW = (CONTENT_WIDTH - gap) / 2;
-  const colH = 2.5;
+
+  // Sized to the words, not fixed at 2.5in. A fixed height gave two big
+  // rectangles with one line of text at the top and a hand's width of empty
+  // colour beneath — which is what "What the stack sees today | What
+  // SecSemantic adds" looked like on a slide a rep opened.
+  const inner = colW - 0.56;
+  const colH = Math.max(
+    1.15,
+    0.9 + Math.max(
+      heightOf(section.left, fonts.display, 20, inner, 1.25, -0.01),
+      heightOf(section.right, fonts.display, 20, inner, 1.25, -0.01),
+    ),
+  );
 
   // Left is the status quo, in outline; right is the change, filled. The
   // asymmetry is the argument.
@@ -570,9 +597,19 @@ function splitSlide(spec, section, meta, pageLabel, fonts) {
 function quoteSlide(spec, section, meta, pageLabel, fonts) {
   const shapes = [
     rect({ x: M.left, y: M.top + 0.3, w: 0.7, h: 0.07 }, solid(COLOR.signalGreen)),
-    text({ x: M.left, y: M.top + 0.9, w: CONTENT_WIDTH * 0.88, h: 3.2 }, [
-      { text: section.line, role: 'display', size: 44, tracking: -0.03, lineHeight: 1.18, color: ON_NAVY.strong },
-    ]),
+    // Sized to fill: a short line gets the big treatment, a long one steps
+    // down until it fits. One line at a fixed 44pt left two thirds of a navy
+    // slide empty and read as an unfinished slide rather than a deliberate one.
+    (() => {
+      const w = CONTENT_WIDTH * 0.9;
+      const size = [72, 60, 52, 44, 36].find(
+        (pt) => heightOf(section.line, fonts.display, pt, w, 1.14, -0.03) <= 3.4,
+      ) || 36;
+      const h = heightOf(section.line, fonts.display, size, w, 1.14, -0.03);
+      return text({ x: M.left, y: M.top + 0.9, w, h }, [
+        { text: section.line, role: 'display', size, tracking: -0.03, lineHeight: 1.14, color: ON_NAVY.strong },
+      ]);
+    })(),
   ];
 
   if (section.body) {
@@ -595,74 +632,116 @@ const DRAWN = {
   quote: quoteSlide,
 };
 
+/**
+ * The band a slide's content has to live inside.
+ *
+ * Everything above the footer and below the top margin. Composing past it does
+ * not clip — PowerPoint and LibreOffice both render the overflow — so a slide
+ * with one bullet too many puts that bullet through the footer and off the
+ * bottom of the screen. Which is what shipped: four slides of a twelve-slide
+ * deck, text colliding with the disclosure line.
+ */
+const BODY_BAND = SLIDE.heightIn - M.top - M.bottom - 0.55;
+
+/**
+ * Type sizes to try, largest first.
+ *
+ * Shrinking is the first answer because it costs nothing a reader notices at
+ * 15pt; dropping content is the last, because a rep asked for those words.
+ */
+const FIT_STEPS = [1, 0.94, 0.88, 0.82, 0.76, 0.7];
+
 function contentSlide(spec, section, meta, pageLabel, fonts) {
   const width = CONTENT_WIDTH * 0.88;
-  const shapes = [
-    // A short rule in Signal Green, the 10% accent, anchoring the title.
-    rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen)),
-  ];
 
-  let y = M.top + 0.32;
+  /** Lay the slide out at a given type scale, with a given number of points. */
+  const compose = (scale, points) => {
+    const titleSize = Math.round(SIZE.slideTitle * Math.max(scale, 0.78));
+    const bodySize = Math.round(SIZE.body * scale);
+    const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(COLOR.signalGreen))];
 
-  if (section.eyebrow) {
-    shapes.push(
-      text({ x: M.left, y, w: CONTENT_WIDTH, h: 0.28 }, [
-        { text: eyebrowCase(section.eyebrow), role: 'eyebrow', size: SIZE.eyebrow, tracking: 0.12, lineHeight: 1, color: COLOR.circuitTeal },
-      ]),
-    );
-    y += 0.42;
+    let y = M.top + 0.32;
+
+    if (section.eyebrow) {
+      shapes.push(
+        text({ x: M.left, y, w: CONTENT_WIDTH, h: 0.28 }, [
+          { text: eyebrowCase(section.eyebrow), role: 'eyebrow', size: SIZE.eyebrow, tracking: 0.12, lineHeight: 1, color: COLOR.circuitTeal },
+        ]),
+      );
+      y += 0.42;
+    }
+
+    if (section.title) {
+      const h = heightOf(section.title, fonts.display, titleSize, width, 1.1, -0.03);
+      shapes.push(
+        text({ x: M.left, y, w: width, h }, [
+          { text: section.title, role: 'display', size: titleSize, tracking: -0.03, lineHeight: 1.1, color: COLOR.navy },
+        ]),
+      );
+      y += h + 0.3 * scale;
+    }
+
+    if (section.body) {
+      const h = heightOf(section.body, fonts.body, bodySize, width * 0.98, 1.5);
+      shapes.push(
+        text({ x: M.left, y, w: width * 0.98, h }, [
+          { text: section.body, role: 'body', size: bodySize, lineHeight: 1.5, color: INK.body },
+        ]),
+      );
+      y += h + 0.34 * scale;
+    }
+
+    if (points.length) {
+      // Bullets are indented, so they wrap in a narrower column than body copy.
+      const pointWidth = width * 0.98 - 0.25;
+      const lead = 10 * scale;
+      const gap = lead / 72;
+
+      const height = points.reduce(
+        (n, p) => n + heightOf(p, fonts.body, bodySize, pointWidth, 1.45) + gap,
+        0,
+      );
+
+      shapes.push(
+        text(
+          { x: M.left, y, w: width * 0.98, h: height },
+          points.map((p, i) => ({
+            text: p,
+            role: 'body',
+            size: bodySize,
+            lineHeight: 1.45,
+            color: INK.strong,
+            bullet: true,
+            spaceBefore: i === 0 ? 0 : lead,
+          })),
+        ),
+      );
+      y += height;
+    }
+
+    return { shapes, height: y - M.top };
+  };
+
+  // Shrink first. Shrinking absorbs even the worst a section is ALLOWED to be
+  // — every field at its cap — so the drop below never runs today, and is
+  // kept as the guard for the day somebody raises LIMITS.points. When it does
+  // run, the LAST point goes rather than the first: a slide's opening bullet
+  // is the one it was written around. A test holds the worst legal case, and
+  // fails here rather than in a deck a rep has already sent.
+  let laid = null;
+  let points = section.points;
+
+  for (const scale of FIT_STEPS) {
+    laid = compose(scale, points);
+    if (laid.height <= BODY_BAND) break;
   }
 
-  if (section.title) {
-    const h = heightOf(section.title, fonts.display, SIZE.slideTitle, width, 1.1, -0.03);
-    shapes.push(
-      text({ x: M.left, y, w: width, h }, [
-        { text: section.title, role: 'display', size: SIZE.slideTitle, tracking: -0.03, lineHeight: 1.1, color: COLOR.navy },
-      ]),
-    );
-    y += h + 0.3;
+  while (laid.height > BODY_BAND && points.length > 1) {
+    points = points.slice(0, -1);
+    laid = compose(FIT_STEPS[FIT_STEPS.length - 1], points);
   }
 
-  if (section.body) {
-    const h = heightOf(section.body, fonts.body, SIZE.body, width * 0.98, 1.5);
-    shapes.push(
-      text({ x: M.left, y, w: width * 0.98, h }, [
-        { text: section.body, role: 'body', size: SIZE.body, lineHeight: 1.5, color: INK.body },
-      ]),
-    );
-    y += h + 0.34;
-  }
-
-  if (section.points.length) {
-    // Bullets are indented, so they wrap in a narrower column than body copy.
-    const pointWidth = width * 0.98 - 0.25;
-    const gap = 10 / 72;
-
-    const height = section.points.reduce(
-      (n, p) => n + heightOf(p, fonts.body, SIZE.point, pointWidth, 1.45) + gap,
-      0,
-    );
-
-    shapes.push(
-      text(
-        { x: M.left, y, w: width * 0.98, h: height },
-        section.points.map((p, i) => ({
-          text: p,
-          role: 'body',
-          size: SIZE.point,
-          lineHeight: 1.45,
-          color: INK.strong,
-          bullet: true,
-          spaceBefore: i === 0 ? 0 : 10,
-        })),
-      ),
-    );
-  }
-
-  // Cream, like every other slide. Three grounds in one deck — white for
-  // prose, cream for drawn, navy for a quote — read as three decks stapled
-  // together, and the template this follows is cream throughout.
-  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+  return slideXml(settle(laid.shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
 function closingSlide(spec, meta) {

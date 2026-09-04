@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 
 import { renderPptx } from '../src/documents/pptx.js';
-import { normaliseSpec } from '../src/documents/spec.js';
+import { normaliseSpec, LIMITS } from '../src/documents/spec.js';
 import { loadFonts } from '../src/documents/fonts.js';
 import { inspectPptx, inspectionSummary } from '../src/documents/inspect.js';
 import { SLIDE } from '../src/documents/ooxml.js';
@@ -100,6 +100,67 @@ test('a titled chart puts its title on the slide', () => {
     .join('');
 
   assert.match(slides, /Where the response time goes/, 'the heading never reached the slide');
+});
+
+/**
+ * A real slide from a real deck, at the length that broke it.
+ *
+ * A rep opened a twelve-slide deck and found text running through the footer
+ * and off the bottom of four of them. Composing past the band does not clip —
+ * PowerPoint and LibreOffice both render the overflow — so nothing failed,
+ * it just looked broken.
+ */
+const OVERFLOWING = [
+  '## context | The Security Context Plane',
+  'SecSemantic builds the system of record for consequence: a continuously computed graph, three',
+  'coordinates per entity, drawn from the stack RadNet already runs.',
+  '- Business Domain: clinical system ownership, patient data classification, HIPAA workflows, AI agent authorization scope across all 418 centers',
+  '- Attack Surface: DeepHealth agent inventory, API connections, identity and access patterns, behavioral baselines per agent class',
+  '- Threat Behavior: healthcare-targeted ransomware groups, credential abuse campaigns, imaging sector TTPs updated continuously from live feeds',
+  '- Outcome: triage ordered by reach and worth, not queue position and shift time. The board pack priced in dollars, not CVSS scores',
+].join('\n');
+
+test('a slide with more copy than fits is made to fit', () => {
+  const report = inspectPptx(build({ ...DECK, content: OVERFLOWING }));
+
+  assert.deepEqual(
+    report.problems,
+    [],
+    'this exact content ran through the footer and off the slide in a deck a rep opened',
+  );
+});
+
+test('fitting shrinks before it drops anything', () => {
+  // A rep asked for those words. Type comes down first; a bullet comes off
+  // only when the smallest size still will not hold it.
+  const bytes = build({ ...DECK, content: OVERFLOWING });
+  const files = unzipSync(bytes);
+  const slides = Object.keys(files)
+    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .map((n) => strFromU8(files[n]))
+    .join('');
+
+  for (const keyword of ['Business Domain', 'Attack Surface', 'Threat Behavior', 'Outcome']) {
+    assert.ok(slides.includes(keyword), `${keyword} was dropped rather than fitted`);
+  }
+});
+
+test('the worst a section is allowed to be still fits on a slide', () => {
+  // Every field at its cap: the longest title, the longest body, the most
+  // points at the longest each. Shrinking absorbs even this — which is what
+  // makes the drop path below a guard rather than a routine step.
+  //
+  // The test that matters if anyone raises LIMITS.points or pointChars: it
+  // fails here rather than in a deck a rep has already sent.
+  const filler = (n) => 'considerable '.repeat(Math.ceil(n / 13)).slice(0, n).trim();
+  const content = [
+    `## context | ${filler(LIMITS.sectionTitleChars)}`,
+    filler(LIMITS.sectionBodyChars),
+    ...Array.from({ length: LIMITS.points }, () => `- ${filler(LIMITS.pointChars)}`),
+  ].join('\n');
+
+  const report = inspectPptx(build({ ...DECK, content }));
+  assert.deepEqual(report.problems, [], JSON.stringify(report));
 });
 
 // --- the check has to bite --------------------------------------------------
