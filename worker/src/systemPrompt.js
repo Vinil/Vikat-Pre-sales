@@ -348,6 +348,21 @@ invent a seventh:
   — from on the left, to on the right. Most of what we argue is this shape.
 - \`## flow | How a decision reaches an action | Detect > Enrich > *Decide > Act\`
   — cards joined by arrows. A leading \`*\` emphasises one step.
+- \`## logos | Who runs on it | Contoso Imaging, Northwind Health | Fabrikam\`
+  — names on uniform tiles. **Only organisations the knowledge base or the rep
+  named to you, in this conversation.** There is no check on this in the code
+  and there cannot be one: a plausible customer name on a customer-facing
+  slide is the single worst thing you can produce, and it is invisible to
+  everyone except the customer who knows it is false.
+
+And one slide that leaves the cream ground:
+
+- \`## suite | SecSemantic | Where the kill time goes | Kill time: cut before first use | Coverage: every agent, every domain\`
+  — the deep dive: navy, the suite wordmark set two tone, and \`metric: line\`
+  cards under it. SecSemantic and DevSemantic only, because those are the two
+  the house style gives a dark accent. Detail and impact live here; nothing
+  else in the deck goes dark, so one or two of these is a change of pace and
+  five is a different deck.
 
 ## Every slide names its section
 

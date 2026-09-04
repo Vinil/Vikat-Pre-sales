@@ -19,7 +19,8 @@ import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 
 import {
   POSITIONING_LINE, DECK_TAGLINE, WHO_WE_ARE, PATENTS_PENDING, DATA_NOTE,
-  METRIC_CODES, MODELED_FIGURES, SUITE_WORDMARKS, carriesModeledFigure, isMetricCode,
+  METRIC_CODES, MODELED_FIGURES, SUITE_WORDMARKS, WORDMARK_TAG, DARK_SUITES,
+  DARK, carriesModeledFigure, isMetricCode,
 } from '../src/documents/house.js';
 import { renderPptx } from '../src/documents/pptx.js';
 import { normaliseSpec, parseLayout } from '../src/documents/spec.js';
@@ -238,6 +239,77 @@ test('an outcome band is not also printed as a subtitle', () => {
 
 test('a caret in a heading that is not a layout is still not a layout', () => {
   assert.equal(parseLayout('not a layout ^ Something | a | b'), null);
+});
+
+// --- §3.2 the wordmark tag ------------------------------------------------
+
+test('the wordmark tag is on every slide', () => {
+  // §3.2 lists three things along the bottom of every slide. The renderer drew
+  // the fine print and the page number and not this one, for every deck it has
+  // ever produced.
+  const { bytes } = build('## context | A heading\nSome context.');
+  for (const [i, slide] of slides(bytes).entries()) {
+    assert.ok(textOf(slide).includes(WORDMARK_TAG), `slide ${i + 1} has no wordmark tag`);
+  }
+});
+
+// --- §3.3 the suite deep dive ---------------------------------------------
+
+test('a suite deep dive is navy, tagged, and two tone', () => {
+  const { bytes } = build(
+    '## suite ^ The detail | SecSemantic | Where the kill time goes | Kill time: cut before first use',
+  );
+  const slide = slides(bytes).find((sl) => textOf(sl).includes('Where the kill time goes'));
+  assert.ok(slide, 'the deep dive did not render');
+
+  // §3.3: dark navy is reserved for these.
+  assert.match(slide, new RegExp(`<p:bg>[\\s\\S]*?${DARK.bg.replace('#', '')}`, 'i'));
+
+  // §3.2: the tag swaps on a dark suite slide.
+  assert.ok(textOf(slide).includes(DARK_SUITES.secsemantic.tag), 'the footer tag did not swap');
+  assert.ok(!textOf(slide).includes(WORDMARK_TAG), 'both tags are on the slide');
+
+  // §2.3: two tone, so the mark is two runs.
+  assert.match(slide, /<a:t>Sec<\/a:t>/);
+  assert.match(slide, /<a:t>Semantic<\/a:t>/);
+});
+
+test('only the suites with a dark accent get a dark slide', () => {
+  // §4.1 gives ProSemantic a light accent and no dark variant, so a dark
+  // ProSemantic slide is either illegible or off palette. It falls through to
+  // prose rather than being rendered in a colour nobody approved.
+  assert.equal(parseLayout('suite | ProSemantic | A heading | Metric: a line'), null);
+  assert.ok(parseLayout('suite | DevSemantic | A heading | Metric: a line'));
+});
+
+test('a deep dive does not give the deck a third ground', () => {
+  // The inspector calls out a deck with more than two backgrounds. The dark
+  // slide has to be the SAME navy as the cover and the close, or every deck
+  // with a deep dive in it ships with a warning on it.
+  const { spec, bytes } = build(
+    [
+      '## suite ^ The detail | SecSemantic | Where the kill time goes | Kill time: cut before first use',
+      '',
+      '## context | A heading',
+      'Some supporting context for it.',
+    ].join('\n'),
+  );
+  const report = inspectPptx(bytes, spec);
+  assert.ok(!report.notes.some((n) => /backgrounds/.test(n)), JSON.stringify(report.notes));
+});
+
+// --- §4.3 logo tiles -------------------------------------------------------
+
+test('logos are names on tiles, never raw on the ground', () => {
+  const { bytes } = build('## logos ^ In production | Who runs on it | Contoso Imaging, Northwind Health');
+  const slide = slides(bytes).find((sl) => textOf(sl).includes('Contoso Imaging'));
+
+  assert.ok(slide, 'the logos slide did not render');
+  assert.ok(textOf(slide).includes('Northwind Health'));
+
+  // A tile is a card, and §4.3's card is a rounded rect. Two names, two tiles.
+  const tiles = [...slide.matchAll(/prstGeom prst="roundRect"/g)].length;
+  assert.ok(tiles >= 2, `${tiles} tiles for two names`);
 });
 
 // --- §3.3 rhythm ----------------------------------------------------------

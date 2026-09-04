@@ -22,8 +22,9 @@ import { DISCLOSURE_LABELS } from './spec.js';
 import { wrap } from './measure.js';
 import * as part from './ooxml.js';
 import {
-  GEOMETRY, FLOORS, FINE_PRINT, DATA_NOTE, PATENTS_PENDING,
-  POSITIONING_LINE, DECK_TAGLINE, WHO_WE_ARE, carriesModeledFigure,
+  GEOMETRY, FLOORS, FINE_PRINT, DATA_NOTE, PATENTS_PENDING, WORDMARK_TAG,
+  POSITIONING_LINE, DECK_TAGLINE, WHO_WE_ARE, DARK, SUITE, DENSITY,
+  carriesModeledFigure,
 } from './house.js';
 import * as comp from './components.js';
 
@@ -220,7 +221,7 @@ function wordmark(x, y, onDark) {
  * on it: a slide gets screenshotted and forwarded without the deck, and the
  * footer is how a reader knows who is claiming what they are reading.
  */
-function footer(spec, onDark, pageLabel) {
+function footer(spec, onDark, pageLabel, tag = WORDMARK_TAG) {
   const label = DISCLOSURE_LABELS[spec.disclosure];
   const color = onDark ? ON_NAVY.muted : INK.muted;
   const faint = onDark ? ON_NAVY.muted : INK.muted;
@@ -237,6 +238,12 @@ function footer(spec, onDark, pageLabel) {
     text({ x: GEOMETRY.marginX, y: GEOMETRY.finePrint.y - 0.26, w: SLIDE.widthIn - GEOMETRY.marginX * 2 - 1.6, h: 0.24 }, [
       { text: eyebrowCase(label), role: 'eyebrow', size: GEOMETRY.tag.size, tracking: 0.12, lineHeight: 1, color },
     ]) +
+    // §3.2's wordmark tag, right aligned, left of the page number. It was
+    // missing entirely: the section lists three things on the bottom of every
+    // slide and the renderer drew two of them.
+    text({ x: 9.3, y: GEOMETRY.tag.y, w: 2.5, h: 0.3 }, [
+      { text: tag, role: 'eyebrow', size: GEOMETRY.tag.size, tracking: 0.12, lineHeight: 1, color },
+    ], { align: 'r' }) +
     text({ x: GEOMETRY.pageNumber.x - 0.9, y: GEOMETRY.tag.y, w: 0.9, h: 0.3 }, [
       { text: pageLabel, role: 'eyebrow', size: GEOMETRY.pageNumber.size, tracking: 0.12, lineHeight: 1, color },
     ], { align: 'r' })
@@ -876,8 +883,130 @@ function flowSlide(spec, section, meta, pageLabel, fonts) {
   return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
 }
 
+/**
+ * §3.3's suite deep dive: the one slide licensed off the cream ground.
+ *
+ * "Dark navy slides are reserved for suite deep dives (detail and impact)" is
+ * a reservation, not a permission, so this is the only layout that renders on
+ * navy apart from the cover and the thank you — and it earns it by being the
+ * slide where the detail actually lives.
+ *
+ * drawnHead() is not reused: it paints navy on cream, which on this ground is
+ * a hole rather than a heading.
+ */
+function suiteSlide(spec, section, meta, pageLabel, fonts) {
+  const key = section.suite.toLowerCase().startsWith('dev') ? 'dev' : 'sec';
+  const accent = SUITE[key].darkAlt;
+  const tag = `VIKAT  ${section.suite.toUpperCase()}`;
+
+  const shapes = [rect({ x: M.left, y: M.top + 0.02, w: 0.55, h: 0.055 }, solid(accent))];
+  let y = M.top + 0.32;
+
+  if (section.eyebrow) {
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH, h: 0.28 }, [
+        { text: eyebrowCase(section.eyebrow), role: 'eyebrow', size: SIZE.eyebrow, tracking: 0.12, lineHeight: 1, color: accent },
+      ]),
+    );
+    y += 0.42;
+  } else {
+    y = M.top + 0.42;
+  }
+
+  // §2.3: the wordmark is two tone wherever it appears, prefix in the ground's
+  // text colour and "Semantic" in the accent.
+  shapes.push(
+    inlineText({ x: M.left, y, w: CONTENT_WIDTH * 0.8, h: 0.5 }, [
+      { text: section.suite.replace(/Semantic$/, ''), role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: DARK.text },
+      { text: 'Semantic', role: 'display', size: SIZE.slideTitle, tracking: -0.02, lineHeight: 1.15, color: accent },
+    ]),
+  );
+  y += 0.58;
+
+  if (section.title) {
+    const h = heightOf(section.title, fonts.body, GEOMETRY.subtitle.size, CONTENT_WIDTH * 0.72, 1.4);
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.72, h }, [
+        { text: section.title, role: 'body', size: GEOMETRY.subtitle.size, lineHeight: 1.4, color: DARK.body },
+      ]),
+    );
+    y += h + 0.1;
+  }
+
+  if (section.body) {
+    const h = heightOf(section.body, fonts.body, GEOMETRY.subtitle.size, CONTENT_WIDTH * 0.72, 1.4);
+    shapes.push(
+      text({ x: M.left, y, w: CONTENT_WIDTH * 0.72, h }, [
+        { text: section.body, role: 'body', size: GEOMETRY.subtitle.size, lineHeight: 1.4, color: DARK.muted },
+      ]),
+    );
+    y += h + 0.1;
+  }
+
+  y += 0.3;
+
+  // Three across at most, per §1.5, wrapping to a second row rather than
+  // narrowing to a fourth column.
+  const columns = Math.min(DENSITY.columns, section.cards.length);
+  const gap = 0.26;
+  const w = (CONTENT_WIDTH - gap * (columns - 1)) / columns;
+  const cardHeight = Math.max(
+    1.14,
+    0.86 + Math.max(...section.cards.map((c) => heightOf(c.body, fonts.body, 9.5, w - 0.48, 1.35))),
+  );
+
+  section.cards.forEach((card, i) => {
+    shapes.push(
+      comp.darkKpiCard(
+        {
+          x: M.left + (i % columns) * (w + gap),
+          y: y + Math.floor(i / columns) * (cardHeight + gap),
+          w,
+          h: cardHeight,
+        },
+        card,
+      ),
+    );
+  });
+
+  return slideXml(settle(shapes) + footer(spec, true, pageLabel, tag), bg(DARK.bg));
+}
+
+/**
+ * §4.3's logo tiles: uniform white rounded tiles, never raw on the ground.
+ *
+ * Names rather than marks, because there are no logo assets here and a
+ * redrawn logo is a trademark somebody has to defend. Nothing in the renderer
+ * can check that a name belongs to a real customer; that is the model's rule
+ * and the rep's review, and both are told so.
+ */
+function logosSlide(spec, section, meta, pageLabel, fonts) {
+  const head = drawnHead(section, fonts);
+  const shapes = [...head.shapes];
+
+  const columns = Math.min(3, section.names.length);
+  const gap = 0.26;
+  const w = (CONTENT_WIDTH - gap * (columns - 1)) / columns;
+  const h = 0.92;
+
+  section.names.forEach((name, i) => {
+    shapes.push(
+      comp.logoTile({
+        x: M.left + (i % columns) * (w + gap),
+        y: head.nextY + 0.15 + Math.floor(i / columns) * (h + gap),
+        w,
+        h,
+      }, name),
+    );
+  });
+
+  return slideXml(settle(shapes) + footer(spec, false, pageLabel), bg(COLOR.cream));
+}
+
 const DRAWN = {
   stat: statSlide,
+  suite: suiteSlide,
+  logos: logosSlide,
   tiles: tilesSlide,
   table: tableSlide,
   kpi: kpiSlide,

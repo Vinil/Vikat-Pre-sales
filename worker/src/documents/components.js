@@ -396,6 +396,28 @@ export function suiteTile({ x, y, w, h }, { prefix, accent }, { size = 13, onDar
   );
 }
 
+/**
+ * A logo tile (§4.3): a uniform white tile with the mark centred on it.
+ *
+ * Set as a name rather than drawn as a mark. There are no logo assets here,
+ * and approximating one is worse than not having it: a redrawn logo is a
+ * trademark somebody has to defend, and the guidelines this file follows
+ * prohibit reconstructing a mark for exactly that reason.
+ */
+export function logoTile(box, name) {
+  return (
+    card(box) +
+    label({ x: box.x + 0.18, y: box.y, w: box.w - 0.36, h: box.h }, name, {
+      size: 13,
+      bold: true,
+      color: CREAM.ink,
+      align: 'c',
+      anchor: 'ctr',
+      lineHeight: 1.2,
+    })
+  );
+}
+
 /** All three suite wordmarks, evenly spaced across `width`. §3.4's cover. */
 export function suiteWordmarks(x, y, width, { tileHeight = 0.46, gap = 0.22, onDark = true } = {}) {
   const n = SUITE_WORDMARKS.length;

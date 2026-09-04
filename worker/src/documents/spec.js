@@ -13,7 +13,7 @@
  */
 
 import { brandSafe, sentenceCase } from '../brand.js';
-import { DENSITY } from './house.js';
+import { DENSITY, DARK_SUITES } from './house.js';
 
 /** Formats the assistant can produce. */
 export const FORMATS = ['pptx', 'pdf', 'docx'];
@@ -142,7 +142,9 @@ const DENSITY_COLUMNS = DENSITY.columns;
 export const LAYOUTS = [
   'stat', 'bars', 'chain', 'timeline', 'split', 'quote',
   // §4.3, the named components. Reuse, do not invent.
-  'tiles', 'table', 'kpi', 'outcome', 'paradigm', 'flow',
+  'tiles', 'table', 'kpi', 'outcome', 'paradigm', 'flow', 'logos',
+  // §3.3's one licensed departure from the cream ground.
+  'suite',
 ];
 
 /** Split "a | b | c" into trimmed, non-empty parts. */
@@ -212,6 +214,15 @@ function asText(drawn) {
   }
   if (drawn.layout === 'paradigm') {
     return { title: drawn.title || '', points: [`From: ${drawn.from}`, `To: ${drawn.to}`] };
+  }
+  if (drawn.layout === 'suite') {
+    return {
+      title: drawn.title || drawn.suite,
+      points: drawn.cards.map((c) => `${c.metric}: ${c.body}`),
+    };
+  }
+  if (drawn.layout === 'logos') {
+    return { title: drawn.title || '', points: [drawn.names.join(', ')] };
   }
   if (drawn.layout === 'flow') {
     return drawn.title
@@ -384,6 +395,48 @@ function parseKind(kind, rest) {
     return steps.length >= 2 ? { layout: 'flow', steps, emphasis, ...(title ? { title } : {}) } : null;
   }
 
+  if (kind === 'suite') {
+    // §3.3's suite deep dive, the one slide allowed off the cream ground.
+    // "suite | SecSemantic | Heading | Metric: line | Metric: line".
+    //
+    // The suite name is required and must be one the instruction set gives a
+    // dark accent and a footer tag: a heading that names something else is not
+    // a deep dive and falls through to prose rather than being rendered in a
+    // colour nobody approved.
+    const suite = DARK_SUITES[String(rest[0] || '').toLowerCase().replace(/\s+/g, '')];
+    if (!suite) return null;
+
+    const body = rest.slice(1);
+    const isCard = (line) => line.includes(':');
+    const title = body.length && !isCard(body[0]) ? body[0] : '';
+    const cards = (title ? body.slice(1) : body)
+      .filter(isCard)
+      .map((line) => {
+        const at = line.indexOf(':');
+        return { metric: line.slice(0, at).trim(), body: line.slice(at + 1).trim() };
+      })
+      .filter((c) => c.metric && c.body)
+      .slice(0, DENSITY.cards);
+
+    return cards.length ? { layout: 'suite', suite: suite.name, cards, ...(title ? { title } : {}) } : null;
+  }
+
+  if (kind === 'logos') {
+    // §4.3's logo tiles, as names on uniform tiles. There are no logo assets
+    // in the repo, and approximating a customer's mark is worse than setting
+    // their name: a redrawn logo is a trademark someone has to defend.
+    //
+    // Nothing here validates that a name is a real customer, because nothing
+    // here could. That is the model's rule and the rep's review.
+    const title = rest.length > 1 ? rest[0] : '';
+    const names = (title ? rest.slice(1) : rest)
+      .flatMap((line) => line.split(',').map((x) => x.trim()))
+      .filter(Boolean)
+      .slice(0, DENSITY.cards);
+
+    return names.length >= 2 ? { layout: 'logos', names, ...(title ? { title } : {}) } : null;
+  }
+
   if (kind === 'split') {
     return rest.length >= 2 ? { layout: 'split', left: rest[0], right: rest[1] } : null;
   }
@@ -508,6 +561,20 @@ function drawnFields(s) {
       title: clean(s.title, LIMITS.sectionTitleChars, true),
       steps: s.steps.map((x) => clean(x, 24, false)),
       emphasis: Number.isInteger(s.emphasis) ? s.emphasis : -1,
+    };
+  }
+  if (s.layout === 'suite') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      // The suite name is a trademark and is not sentence-cased or trimmed.
+      suite: s.suite,
+      cards: s.cards.map((c) => ({ metric: clean(c.metric, 28, false), body: clean(c.body, 130, false) })),
+    };
+  }
+  if (s.layout === 'logos') {
+    return {
+      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      names: s.names.map((n) => clean(n, 28, false)).filter(Boolean),
     };
   }
   if (s.layout === 'split') return { left: clean(s.left, 60, false), right: clean(s.right, 60, false) };

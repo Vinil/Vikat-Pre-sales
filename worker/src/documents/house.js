@@ -90,6 +90,28 @@ export const FINE_PRINT =
   '© 2026 Vikat.AI. All rights reserved. Vikat, SecSemantic, DevSemantic, ' +
   'ProSemantic, VShield, VCommand, VSentinel, and VInsight are trademarks of Vikat.AI. Confidential.';
 
+/**
+ * §3.2, exactly: the wordmark tag, right aligned on every slide.
+ *
+ * Two spaces between the words, as the instruction set writes it. That is not
+ * a typo being reproduced faithfully for its own sake — it is what makes the
+ * tag read as a lockup rather than a sentence at 8pt.
+ */
+export const WORDMARK_TAG = 'VIKAT  CYBERSEC';
+
+/**
+ * §3.2: a dark suite slide may swap the tag.
+ *
+ * SecSemantic and DevSemantic only. §3.2 names those two and §4.1 gives those
+ * two a dark accent; ProSemantic has a light accent and no dark variant, so a
+ * dark ProSemantic slide would be either illegible or off palette, and there
+ * is no third option that keeps both.
+ */
+export const DARK_SUITES = {
+  secsemantic: { key: 'sec', name: 'SecSemantic', tag: 'VIKAT  SECSEMANTIC' },
+  devsemantic: { key: 'dev', name: 'DevSemantic', tag: 'VIKAT  DEVSEMANTIC' },
+};
+
 /** §1.4. Modeled figures carry this on the same slide, small italic. */
 export const DATA_NOTE =
   'Data note: illustrative modeled estimates. Not actual customer production results unless independently validated.';
