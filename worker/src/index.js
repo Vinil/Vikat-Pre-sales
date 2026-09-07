@@ -991,13 +991,25 @@ export default {
           );
         }
 
+        // The reader embeds a PDF in the page, and a browser will not render
+        // an attachment — it downloads it. So ?view=1 asks for inline, and it
+        // is honoured ONLY for a PDF: a .pptx has nothing to render in a tab,
+        // and for everything else the filename is what the rep looks for on
+        // disk. The type is not taken from the request; it is the one the
+        // generator stored, out of a fixed map of three.
+        const wantsInline = url.searchParams.get('view') === '1';
+        const inline = wantsInline && doc.contentType === 'application/pdf';
+
         return new Response(doc.bytes, {
           headers: {
             ...cors,
             'content-type': doc.contentType,
-            // attachment, not inline: a .pptx has nothing to render in a tab,
-            // and the filename is what the rep will look for on disk.
-            'content-disposition': `attachment; filename="${doc.fileName.replace(/["\\]/g, '')}"`,
+            'content-disposition':
+              `${inline ? 'inline' : 'attachment'}; filename="${doc.fileName.replace(/["\\]/g, '')}"`,
+            // Belt and braces on a response the browser may render rather
+            // than save: the stored type is trustworthy, and sniffing past it
+            // is the failure this forecloses.
+            'x-content-type-options': 'nosniff',
             'cache-control': 'private, no-store',
           },
         });

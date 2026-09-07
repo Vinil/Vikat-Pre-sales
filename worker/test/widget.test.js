@@ -1188,3 +1188,239 @@ test('the overlay clears once the server agrees, rather than double-listing', as
   assert.equal(count, 1, 'one person, one row');
   await admin.close();
 });
+
+// --- the reader ------------------------------------------------------------
+
+/** Put one generated asset in the rail and hand back the page. */
+async function openAppWithDeck(format = 'pdf') {
+  const { app } = await openApp([]);
+  await app.evaluate(() => {
+    window.VikatChat.open('cccc55556666', [
+      { userMessage: 'What did we agree?', agentResponse: 'Deal Desk owns the discount.' },
+    ]);
+  });
+  await app.waitForFunction(() => document.querySelector('.vk-log').textContent.includes('Deal Desk'));
+
+  await app.evaluate((fmt) => {
+    window.VikatChatInternals.emitForTest('asset', [
+      {
+        kind: 'generated',
+        name: `RadNet_Brief.${fmt}`,
+        url: '/document/doc_00112233445566aa',
+        format: fmt,
+        disclosure: 'Internal only: not for customer distribution',
+      },
+    ]);
+  }, format);
+  await app.waitForFunction(() => document.querySelectorAll('#assets-body .asset').length === 1, null, {
+    timeout: 5000,
+  });
+  return app;
+}
+
+test('a generated document opens beside the conversation, not over it', async () => {
+  // The point of the whole thing: the rep can look at the deck and ask about
+  // it in the same breath. If opening it replaced the chat, they would have to
+  // close the deck to say what is wrong with it.
+  const app = await openAppWithDeck('pdf');
+
+  await app.click('#assets-body .asset');
+  await app.waitForFunction(() => document.querySelector('#work').classList.contains('reading'));
+
+  assert.equal(await app.evaluate(() => document.querySelector('#reader').hidden), false);
+  assert.match(await app.textContent('#reader-title'), /RadNet_Brief\.pdf/);
+
+  // The conversation is still on screen and still has its transcript.
+  assert.ok(await app.isVisible('#assistant'), 'the conversation went away');
+  assert.match(await app.textContent('.vk-log'), /Deal Desk owns the discount/);
+
+  await app.close();
+});
+
+test('a PDF is embedded and asks for it inline', async () => {
+  // Without ?view=1 the Worker sends Content-Disposition: attachment and the
+  // browser downloads the file instead of drawing it — an empty frame and a
+  // surprise file on disk.
+  const app = await openAppWithDeck('pdf');
+  await app.click('#assets-body .asset');
+  await app.waitForSelector('#reader-surface iframe');
+
+  const src = await app.$eval('#reader-surface iframe', (n) => n.getAttribute('src'));
+  assert.match(src, /^\/document\/doc_[a-f0-9]{16}\?view=1/);
+
+  await app.close();
+});
+
+test('a format no browser can draw gets a sheet, not an empty frame', async () => {
+  const app = await openAppWithDeck('pptx');
+  await app.click('#assets-body .asset');
+  await app.waitForSelector('.reader-sheet');
+
+  assert.equal(await app.$$eval('#reader-surface iframe', (n) => n.length), 0, 'a pptx must not be framed');
+  assert.match(await app.textContent('.reader-sheet'), /No browser can render this format/);
+  assert.match(await app.textContent('.reader-sheet'), /RadNet_Brief\.pptx/);
+
+  await app.close();
+});
+
+test('the disclosure travels with the document', async () => {
+  // It is the one thing a rep must see before sending a file, and they opened
+  // the reader to get away from the rail it used to live in.
+  const app = await openAppWithDeck('pdf');
+  await app.click('#assets-body .asset');
+  await app.waitForFunction(() => !document.querySelector('#reader').hidden);
+
+  assert.match(await app.textContent('#reader-note'), /Internal only/);
+  assert.ok(
+    await app.evaluate(() => document.querySelector('#reader-note').classList.contains('warn')),
+    'an internal-only document must be flagged, not merely labelled',
+  );
+
+  await app.close();
+});
+
+test('only a document this app serves can be embedded', async () => {
+  // The reader mounts a URL into an iframe, which is the one place a value
+  // from the server becomes something the browser loads. Anything that is not
+  // /document/doc_… is refused rather than sanitised.
+  const { app } = await openApp([]);
+
+  const refused = await app.evaluate(() =>
+    [
+      'https://evil.example/x.pdf',
+      'javascript:alert(1)',
+      '//evil.example/x.pdf',
+      '/document/../admin',
+      '/document/doc_zzzz',
+    ].map((url) => window.VikatReader.open({ name: 'x', url, format: 'pdf' })),
+  );
+
+  assert.deepEqual(refused, [false, false, false, false, false]);
+  assert.equal(await app.evaluate(() => document.querySelector('#reader').hidden), true);
+  await app.close();
+});
+
+test('closing empties the frame rather than hiding it', async () => {
+  // An iframe left in the DOM keeps the document loaded and the plugin alive.
+  // Hiding the pane looks the same and is not the same.
+  const app = await openAppWithDeck('pdf');
+  await app.click('#assets-body .asset');
+  await app.waitForSelector('#reader-surface iframe');
+
+  await app.click('#reader-close');
+  await app.waitForFunction(() => document.querySelector('#reader').hidden);
+
+  assert.equal(await app.$$eval('#reader-surface iframe', (n) => n.length), 0);
+  assert.equal(await app.evaluate(() => document.querySelector('#work').classList.contains('reading')), false);
+  await app.close();
+});
+
+test('escape closes the document', async () => {
+  const app = await openAppWithDeck('pdf');
+  await app.click('#assets-body .asset');
+  await app.waitForFunction(() => !document.querySelector('#reader').hidden);
+
+  await app.keyboard.press('Escape');
+  await app.waitForFunction(() => document.querySelector('#reader').hidden);
+  await app.close();
+});
+
+test('closing gives back the rail the rep had, not the one reading wanted', async () => {
+  // Reading collapses the assets rail to make room. A rep who had already
+  // collapsed it must not find it open afterwards, and a rep who had it open
+  // must get it back.
+  const app = await openAppWithDeck('pdf');
+
+  await app.click('#assets-body .asset');
+  await app.waitForFunction(() => document.querySelector('#pane-chat').classList.contains('r-shut'));
+  await app.click('#reader-close');
+  await app.waitForFunction(() => !document.querySelector('#pane-chat').classList.contains('r-shut'));
+
+  // Now with the rail already shut before opening.
+  await app.click('#assets-tog');
+  await app.waitForFunction(() => document.querySelector('#pane-chat').classList.contains('r-shut'));
+  await app.evaluate(() => document.querySelector('#assets-body .asset').click());
+  await app.waitForFunction(() => !document.querySelector('#reader').hidden);
+  await app.click('#reader-close');
+
+  assert.ok(
+    await app.evaluate(() => document.querySelector('#pane-chat').classList.contains('r-shut')),
+    'a rail the rep shut was reopened for them',
+  );
+  await app.close();
+});
+
+test('opening a second document does not lose the rail the rep had', async () => {
+  // railWasShut is read on the way in only. Recording it on every open would
+  // read the rail the FIRST document closed, conclude the rep had closed it,
+  // and leave it shut for good.
+  const app = await openAppWithDeck('pdf');
+  await app.evaluate(() => {
+    window.VikatChatInternals.emitForTest('asset', [
+      { kind: 'generated', name: 'Second.pdf', url: '/document/doc_bbbbbbbbbbbbbbbb', format: 'pdf' },
+    ]);
+  });
+  await app.waitForFunction(() => document.querySelectorAll('#assets-body .asset').length === 2);
+
+  await app.evaluate(() => document.querySelectorAll('#assets-body .asset')[0].click());
+  await app.waitForFunction(() => !document.querySelector('#reader').hidden);
+  await app.evaluate(() => document.querySelectorAll('#assets-body .asset')[1].click());
+  await app.waitForFunction(() => document.querySelector('#reader-title').textContent.includes('Second'));
+
+  await app.click('#reader-close');
+  assert.ok(
+    await app.evaluate(() => !document.querySelector('#pane-chat').classList.contains('r-shut')),
+    'the rail the rep had open never came back',
+  );
+  await app.close();
+});
+
+test('a modified click still downloads', async () => {
+  // The card is a real link so cmd-click, middle-click and "save link as"
+  // work. A card that only works one way is a card people stop trusting.
+  const app = await openAppWithDeck('pdf');
+
+  const prevented = await app.evaluate(() => {
+    const card = document.querySelector('#assets-body .asset');
+    // The href is real, so leaving the default alone navigates the harness
+    // away. The reader's handler has already run by the document's bubble
+    // phase; this reads its verdict and then stops the browser following it.
+    let seen = null;
+    document.addEventListener('click', function stop(e) {
+      seen = e.defaultPrevented;
+      e.preventDefault();
+      document.removeEventListener('click', stop);
+    });
+    card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }));
+    return seen;
+  });
+
+  assert.equal(prevented, false, 'a modified click was hijacked by the reader');
+  assert.equal(await app.evaluate(() => document.querySelector('#reader').hidden), true);
+  await app.close();
+});
+
+test('the rail keeps saying which document is open when it redraws', async () => {
+  // The rail rebuilds on every turn. Without re-marking, the document on
+  // screen loses its marker the moment the assistant produces anything else.
+  const app = await openAppWithDeck('pdf');
+  await app.click('#assets-body .asset');
+  // Reading collapses the rail, so the marked card is in the DOM and not on
+  // screen. Presence is what is being checked; visibility is the rail's own
+  // business and the rep can reopen it while reading.
+  await app.waitForFunction(() => document.querySelector('#assets-body .asset[aria-current="true"]'));
+
+  await app.evaluate(() => {
+    window.VikatChatInternals.emitForTest('asset', [
+      { kind: 'generated', name: 'Second.pdf', url: '/document/doc_bbbbbbbbbbbbbbbb', format: 'pdf' },
+    ]);
+  });
+  await app.waitForFunction(() => document.querySelectorAll('#assets-body .asset').length === 2);
+
+  const marked = await app.$$eval('#assets-body .asset[aria-current="true"]', (n) =>
+    n.map((x) => x.textContent),
+  );
+  assert.equal(marked.length, 1, 'exactly one document is open');
+  assert.match(marked[0], /RadNet_Brief/);
+  await app.close();
+});

@@ -247,3 +247,54 @@ test('assets are not readable from someone else’s conversation', async () => {
 
   assert.equal(res.status, 404);
 });
+
+// --- serving a document ----------------------------------------------------
+
+test('a PDF asked for inline is served inline, and nothing else is', async () => {
+  // The reader embeds a PDF in the page, and a browser will not render an
+  // attachment — it downloads it. So ?view=1 asks for inline. It is granted
+  // for a PDF and refused for everything else, because a .pptx has nothing to
+  // render in a tab and the filename is what the rep looks for on disk.
+  const kv = fakeKV();
+  const env = { ...ENV, VIKAT_KV: kv };
+  const storage = createStorage(env, loadConfig(env));
+
+  const cases = [
+    ['application/pdf', 'brief.pdf', 'inline'],
+    ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'deck.pptx', 'attachment'],
+    ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'note.docx', 'attachment'],
+  ];
+
+  for (const [contentType, fileName, expected] of cases) {
+    const id = await storage.saveDocument({
+      fileName,
+      contentType,
+      bytes: new Uint8Array([1, 2, 3]),
+      title: fileName,
+      disclosure: 'internal_only',
+      createdBy: REP,
+      createdAt: new Date().toISOString(),
+    });
+
+    const viewed = await worker.fetch(
+      new Request(`https://sales.vikat.ai/document/${id}?view=1`, { headers: { 'x-dev-email': REP } }),
+      env,
+    );
+    assert.equal(viewed.status, 200, fileName);
+    assert.match(
+      viewed.headers.get('content-disposition'),
+      new RegExp(`^${expected};`),
+      `${fileName} asked for inline and got ${viewed.headers.get('content-disposition')}`,
+    );
+
+    // Without the flag it is always an attachment, whatever the type.
+    const plain = await worker.fetch(
+      new Request(`https://sales.vikat.ai/document/${id}`, { headers: { 'x-dev-email': REP } }),
+      env,
+    );
+    assert.match(plain.headers.get('content-disposition'), /^attachment;/, fileName);
+
+    // A response the browser may render must not be sniffed past its type.
+    assert.equal(viewed.headers.get('x-content-type-options'), 'nosniff', fileName);
+  }
+});

@@ -262,6 +262,13 @@
     line-height: 1.35;
   }
   .asset:hover { border-color: var(--w20); color: var(--w); }
+  /* The one on screen. A rail that redraws every turn needs to say which
+     document the middle of the app is showing. */
+  .asset[aria-current="true"] {
+    border-color: var(--accent);
+    background: var(--w04);
+    color: var(--w);
+  }
   .asset .n { overflow-wrap: anywhere; }
   .asset .m { margin-top: 3px; font-size: 11px; color: var(--w40); }
   .asset .m a { color: var(--accent); }
@@ -284,7 +291,139 @@
   }
 
 
+  /* ── The middle column ──────────────────────────────────── */
+
+  /* One cell until a document opens in it, then two. The conversation keeps
+     its own scroll and its own state either way: opening a document must not
+     reload the chat, because the whole point is to ask about what is on
+     screen without losing what was said before it. */
+  #work {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+  }
+  #work.reading { grid-template-columns: minmax(0, 1fr) var(--chat-w, 400px); }
+  #work.reading #assistant { border-left: 1px solid var(--line); background: var(--shell); }
+
   #assistant { min-width: 0; min-height: 0; }
+
+  /* ── Reader ─────────────────────────────────────────────── */
+
+  #reader { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #reader[hidden] { display: none; }
+
+  .reader-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 14px; height: 44px;
+    border-bottom: 1px solid var(--line);
+    background: var(--shell);
+  }
+
+  .reader-close {
+    flex: none; display: grid; place-items: center;
+    width: 26px; height: 26px; padding: 0;
+    border: 1px solid var(--w20); border-radius: 7px;
+    background: none; color: var(--w60); cursor: pointer;
+  }
+  .reader-close:hover { border-color: var(--accent); color: var(--accent); }
+  /* Two strokes rather than a glyph: × is a multiplication sign at whatever
+     weight the font feels like, and it never matches the rules beside it. */
+  .reader-x { position: relative; width: 10px; height: 10px; }
+  .reader-x::before, .reader-x::after {
+    content: ''; position: absolute; left: 0; top: 4px;
+    width: 10px; height: 1.5px; background: currentColor; border-radius: 2px;
+  }
+  .reader-x::before { transform: rotate(45deg); }
+  .reader-x::after { transform: rotate(-45deg); }
+
+  .reader-kind {
+    flex: none; padding: 2px 7px; border-radius: 4px;
+    background: var(--w08); color: var(--w60);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .6px;
+  }
+  .reader-title {
+    flex: 1 1 auto; min-width: 0;
+    font-size: 13px; color: var(--w80);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* The disclosure travels with the document rather than staying in the rail:
+     a rep about to send a file needs it on the thing they are looking at. */
+  .reader-note {
+    flex: none; font-family: var(--mono); font-size: 10px;
+    letter-spacing: .4px; text-transform: uppercase; color: var(--w40);
+    white-space: nowrap;
+  }
+  .reader-note.warn { color: var(--orange); }
+
+  .reader-dl {
+    flex: none; padding: 4px 11px;
+    border: 1px solid var(--w20); border-radius: 999px;
+    color: var(--w80); text-decoration: none; font-size: 12px;
+  }
+  .reader-dl:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* The desk the page sits on. */
+  .reader-surface {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; justify-content: center;
+    padding: 18px;
+    background: var(--bg);
+    overflow: auto;
+  }
+
+  .reader-page {
+    width: 100%; height: 100%;
+    border: 0; border-radius: 6px;
+    background: var(--paper);
+    box-shadow: 0 6px 26px rgba(0,0,0,.4);
+  }
+
+  /* What a format no browser can draw gets instead: a sheet that says what it
+     is, rather than an empty frame pretending to be the file. */
+  .reader-sheet {
+    align-self: flex-start;
+    width: 100%; max-width: 520px;
+    padding: 28px;
+    border: 1px solid var(--paper-line); border-radius: 8px;
+    background: var(--paper); color: var(--paper-ink);
+    box-shadow: 0 6px 26px rgba(0,0,0,.4);
+  }
+  .reader-sheet-kind {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
+    color: var(--paper-dim);
+  }
+  .reader-sheet-name { margin: 8px 0 12px; font-size: 19px; line-height: 1.3; overflow-wrap: anywhere; }
+  .reader-sheet-why { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--paper-body); }
+  .reader-sheet-disclosure {
+    margin-top: 14px; padding: 8px 11px;
+    border-radius: 6px; background: rgba(28,30,26,.05);
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .4px;
+    text-transform: uppercase; color: var(--paper-body);
+  }
+  .reader-sheet-row { display: flex; gap: 9px; margin-top: 18px; flex-wrap: wrap; }
+  .reader-sheet-btn {
+    padding: 8px 15px; border-radius: 999px;
+    background: var(--paper-ink); color: var(--paper);
+    text-decoration: none; font-size: 13px; font-weight: 500;
+  }
+  .reader-sheet-btn.ghost {
+    background: none; color: var(--paper-ink);
+    border: 1px solid var(--paper-line);
+  }
+
+  .sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* Below this the page and the conversation cannot both be useful, so the
+     document takes the column and the conversation is a tab away. */
+  @media (max-width: 1180px) {
+    #work.reading { grid-template-columns: minmax(0, 1fr); }
+    #work.reading #assistant { display: none; }
+  }
 
   /* The widget draws its own header inside an inline mount; here the app
      header already names the tool, so drop the duplicate chrome and let the
@@ -296,6 +435,15 @@
   #assistant .vk-composer { padding: 12px clamp(16px, 6vw, 15%) 8px; }
   #assistant .vk-foot { padding-bottom: 12px; }
   #assistant .vk-empty { max-width: 62ch; }
+
+  /* Beside a document the conversation is a 400px column, and 15% of 400 is
+     60px of padding a side. The placeholder wrapped inside the input and the
+     footer line ran under the composer. A column this narrow needs its
+     gutters back. */
+  #work.reading #assistant .vk-log { padding-left: 18px; padding-right: 18px; }
+  #work.reading #assistant .vk-composer { padding-left: 12px; padding-right: 12px; }
+  #work.reading #assistant .vk-foot { padding-left: 10px; padding-right: 10px; line-height: 1.5; }
+  #work.reading #assistant .vk-msg { font-size: 14px; }
 
   /* ── Collateral pane ────────────────────────────────────── */
 
@@ -411,7 +559,25 @@
       </div>
     </aside>
 
-    <div id="assistant"></div>
+    <!-- The middle column. One cell until a document opens in it, then two:
+         the page, and the conversation beside it. -->
+    <div id="work">
+      <section id="reader" aria-label="Document" hidden>
+        <div class="reader-bar">
+          <button type="button" class="reader-close" id="reader-close" title="Close the document (Esc)">
+            <span class="reader-x" aria-hidden="true"></span>
+            <span class="sr">Close the document</span>
+          </button>
+          <span class="reader-kind" id="reader-kind" hidden></span>
+          <span class="reader-title" id="reader-title"></span>
+          <span class="reader-note" id="reader-note" hidden></span>
+          <a class="reader-dl" id="reader-download" href="#">Download</a>
+        </div>
+        <div class="reader-surface" id="reader-surface"></div>
+      </section>
+
+      <div id="assistant"></div>
+    </div>
 
     <aside class="rail rail-r" id="rail-assets">
       <div class="rail-head">
@@ -447,7 +613,9 @@
         data-mount="#assistant"
         defer></script>
 <!-- After vikat-chat.js: deferred scripts run in document order, and the
-     rails boot against window.VikatChat. -->
+     rails boot against window.VikatChat. The reader goes before the rails,
+     which open documents into it. -->
+<script src="./vikat-reader.js" defer></script>
 <script src="./vikat-rails.js" defer></script>
 <script src="./vikat-collateral.js" data-endpoint="/" defer></script>
 

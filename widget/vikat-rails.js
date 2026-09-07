@@ -206,6 +206,10 @@
         assetsBody.appendChild(webCard(a));
       });
     }
+
+    // The rail redraws on every turn. Without this the document on screen
+    // loses its marker the moment the assistant produces anything else.
+    if (window.VikatReader) window.VikatReader.mark();
   }
 
   function webCard(a) {
@@ -235,6 +239,18 @@
     var card = el('a', 'asset');
     card.href = a.url;
     card.appendChild(el('div', 'n', a.name));
+
+    // Opens in the reader rather than downloading. The href stays real so
+    // cmd-click, middle-click and "save link as" still get the file — a card
+    // that only works one way is a card people stop trusting.
+    var reader = window.VikatReader;
+    if (reader && reader.embeddable(a.url)) {
+      card.classList.add('asset-open');
+      card.addEventListener('click', function (e) {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        if (reader.open(a)) e.preventDefault();
+      });
+    }
 
     var meta = el('div', 'm');
     // The disclosure label is the one thing a rep must see before sending a
