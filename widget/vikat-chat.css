@@ -7,34 +7,50 @@
    ═══════════════════════════════════════════════ */
 
 .vk-root {
-  /* The Vikat palette, read off the Vikat_Overview template. Cream is the
-     ground there and it is the ground here: the assistant and the decks it
-     produces should not look like two different companies.
+  /* The dark theme from §4.1 of the presentation instruction set, so the
+     assistant and the decks it produces are one system rather than two
+     companies.
 
-     The --vk-w* names are kept even though they now describe INK on a light
-     ground rather than white on a dark one. Renaming forty usages to say the
-     same thing would be churn; what matters is that every one of them still
-     means "the strongest text colour", "the faintest rule", and so on. */
-  --vk-bg: #F6F1E4;
-  --vk-sf: #FFFFFF;
-  --vk-sf2: #EFE9DA;
-  --vk-w: #022258;
-  --vk-w80: rgba(2, 34, 88, 0.86);
-  --vk-w60: rgba(2, 34, 88, 0.66);
-  --vk-w40: rgba(2, 34, 88, 0.46);
-  --vk-w20: rgba(2, 34, 88, 0.18);
-  --vk-w08: rgba(2, 34, 88, 0.1);
-  --vk-w04: rgba(2, 34, 88, 0.05);
-  --vk-cyan: #14736D;
-  --vk-violet: #5B4FC0;
-  --vk-green: #2E7044;
-  --vk-orange: #B4531F;
-  --vk-red: #A5292B;
+     The --vk-w* names describe the strongest text colour through the faintest
+     rule, and they mean that on any ground. They were white on dark, then ink
+     on cream, and are cream on dark again; renaming forty usages each time
+     would be churn, and what matters is that every one still means what it
+     says. */
+  --vk-bg: #01163A;
+  --vk-sf: #032B66;
+  --vk-sf2: #01214F;
+  /* Chrome: header, composer, footer. It was #E7DFCC typed into three rules
+     rather than a token, which is exactly why it stayed cream through a theme
+     change and left a beige band under a navy conversation. */
+  --vk-shell: #022258;
+  /* The one white, and it means DOCUMENT. A white input on navy chrome is a
+     hole in the screen; a white page is a page. */
+  --vk-paper: #FFFFFF;
+  --vk-paper-ink: #022258;
+  --vk-paper-body: #4A5B74;
+  --vk-paper-line: #DCD6C6;
+  --vk-w: #F6F1E4;
+  --vk-w80: rgba(246, 241, 228, 0.82);
+  --vk-w60: rgba(246, 241, 228, 0.62);
+  --vk-w40: rgba(246, 241, 228, 0.44);
+  --vk-w20: rgba(246, 241, 228, 0.18);
+  --vk-w08: rgba(246, 241, 228, 0.09);
+  --vk-w04: rgba(246, 241, 228, 0.05);
+  /* §4.1's dark variants. The light-ground accents are unreadable here:
+     14736D on 01163A is 1.9:1. */
+  --vk-cyan: #7FD4CD;
+  --vk-violet: #B3A9F5;
+  --vk-green: #7FC98F;
+  --vk-orange: #E3A93F;
+  --vk-red: #E8797B;
 
   --vk-font: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --vk-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
 
   --vk-radius: 14px;
+
+  /* Native controls render light unless the page says which way round it is. */
+  color-scheme: dark;
 
   font-family: var(--vk-font);
   color: var(--vk-w);
@@ -62,15 +78,15 @@
   border: 1px solid var(--vk-w08);
   border-radius: 100px;
   background: linear-gradient(135deg, var(--vk-cyan), var(--vk-violet));
-  color: var(--vk-bg);
+  color: #01163A;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(2, 34, 88, 0.16);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   transition: transform 0.2s, box-shadow 0.25s;
 }
 
 .vk-launcher:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 32px rgba(2, 34, 88, 0.22);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
 .vk-launcher svg {
@@ -92,7 +108,7 @@
   border: 1px solid var(--vk-w08);
   border-radius: var(--vk-radius);
   background: var(--vk-bg);
-  box-shadow: 0 24px 60px rgba(2, 34, 88, 0.18), 0 0 0 1px var(--vk-w08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--vk-w08);
   overflow: hidden;
 }
 
@@ -128,7 +144,7 @@
   gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--vk-w08);
-  background: #E7DFCC;
+  background: var(--vk-shell);
 }
 
 .vk-mark {
@@ -242,7 +258,7 @@
   color: var(--vk-cyan);
   text-decoration: underline;
   text-underline-offset: 2px;
-  text-decoration-color: rgba(0, 212, 255, 0.4);
+  text-decoration-color: rgba(127, 212, 205, 0.4);
   overflow-wrap: anywhere;
 }
 
@@ -356,14 +372,14 @@
 }
 
 .vk-tag-internal {
-  border-color: rgba(255, 90, 90, 0.35);
-  background: rgba(255, 90, 90, 0.08);
+  border-color: rgba(232, 121, 123, 0.35);
+  background: rgba(232, 121, 123, 0.08);
   color: var(--vk-red);
 }
 
 .vk-tag-approval {
-  border-color: rgba(255, 122, 69, 0.35);
-  background: rgba(255, 122, 69, 0.08);
+  border-color: rgba(227, 169, 63, 0.35);
+  background: rgba(227, 169, 63, 0.08);
   color: var(--vk-orange);
 }
 
@@ -444,9 +460,9 @@
 .vk-error {
   align-self: stretch;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 90, 90, 0.3);
+  border: 1px solid rgba(232, 121, 123, 0.3);
   border-radius: 10px;
-  background: rgba(255, 90, 90, 0.06);
+  background: rgba(232, 121, 123, 0.06);
   font-size: 13px;
   line-height: 1.5;
   color: var(--vk-w80);
@@ -494,7 +510,7 @@
 }
 
 .vk-chip:hover {
-  border-color: rgba(0, 212, 255, 0.4);
+  border-color: rgba(127, 212, 205, 0.4);
   color: var(--vk-cyan);
 }
 
@@ -506,7 +522,7 @@
   gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--vk-w08);
-  background: #E7DFCC;
+  background: var(--vk-shell);
 }
 
 .vk-input {
@@ -531,7 +547,7 @@
 
 .vk-input:focus {
   outline: none;
-  border-color: rgba(0, 212, 255, 0.45);
+  border-color: rgba(127, 212, 205, 0.45);
 }
 
 .vk-send {
@@ -544,7 +560,7 @@
   border: none;
   border-radius: 10px;
   background: linear-gradient(135deg, var(--vk-cyan), var(--vk-violet));
-  color: var(--vk-bg);
+  color: #01163A;
   cursor: pointer;
   transition: opacity 0.2s;
 }
@@ -561,7 +577,7 @@
 
 .vk-foot {
   padding: 0 12px 10px;
-  background: #E7DFCC;
+  background: var(--vk-shell);
   font-family: var(--vk-mono);
   font-size: 9.5px;
   letter-spacing: 0.5px;

@@ -12,32 +12,33 @@
 
 <style>
   :root {
-    /* The Vikat palette, read off the Vikat_Overview template — but a deck is
-       one flat cream page and an app is not. A workspace, a rail and a
-       composer that share one colour give the eye nothing to hold onto, so
-       the cream is used as a SCALE: rails and chrome sit back in sand, the
-       conversation comes forward in the lightest tone, and cards sit on white.
-       The borders are the template's own sand, which is what keeps it Vikat
-       rather than a generic beige. */
-    --bg: #FBF8F1;
-    --shell: #E7DFCC;
-    --sf: #FFFFFF;
-    --sf2: #F1EADA;
-    --line: #D2CAB4;
-    --w: #022258;
-    --w80: rgba(2,34,88,.86);
-    --w60: rgba(2,34,88,.66);
-    --w40: rgba(2,34,88,.5);
-    --w20: rgba(2,34,88,.2);
-    --w08: rgba(2,34,88,.12);
-    --w04: rgba(2,34,88,.06);
-    --cyan: #14736D;
-    --violet: #5B4FC0;
-    --green: #2E7044;
-    --orange: #B4531F;
-    --red: #A5292B;
-    --red: #A5292B;
+    /* The same tokens the assistant uses, and for the same reason: the two
+       surfaces are one product and an admin who switches tabs should not feel
+       they switched tools. See index.html for what each tone is for. */
+    --bg: #01163A;
+    --shell: #022258;
+    --sf: #032B66;
+    --sf2: #01214F;
+    --paper: #FFFFFF;
+    --paper-ink: #022258;
+    --line: #1C3B66;
+    --w: #F6F1E4;
+    --w80: rgba(246,241,228,.82);
+    --w60: rgba(246,241,228,.62);
+    --w40: rgba(246,241,228,.44);
+    --w20: rgba(246,241,228,.18);
+    --w08: rgba(246,241,228,.09);
+    --w04: rgba(246,241,228,.05);
+    --cyan: #7FD4CD;
+    --violet: #B3A9F5;
+    --green: #7FC98F;
+    --orange: #E3A93F;
+    --red: #E8797B;
     --mono: 'IBM Plex Mono','SF Mono',Consolas,monospace;
+
+    /* Native controls render light unless the page says which way round it
+       is — the file input on this page was the giveaway. */
+    color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
@@ -97,7 +98,7 @@
     font-family: inherit; font-size: 14px; line-height: 1.5;
   }
   textarea { min-height: 130px; resize: vertical; }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: rgba(0,212,255,.45); }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: rgba(127, 212, 205, .45); }
   input::placeholder, textarea::placeholder { color: var(--w40); }
   select { appearance: none; cursor: pointer; }
 
@@ -112,8 +113,8 @@
   button.primary { border: none; background: linear-gradient(135deg,var(--cyan),var(--violet)); color: var(--bg); }
   button.ghost { border: 1px solid var(--w08); background: none; color: var(--w60); }
   button.ghost:hover { border-color: var(--w20); color: var(--w); }
-  button.danger { border: 1px solid rgba(255,90,90,.3); background: none; color: var(--red); }
-  button.danger:hover { background: rgba(255,90,90,.08); }
+  button.danger { border: 1px solid rgba(232,121,123,.35); background: none; color: var(--red); }
+  button.danger:hover { background: rgba(232, 121, 123, .08); }
   button:disabled { opacity: .4; cursor: not-allowed; }
 
   .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -149,18 +150,18 @@
     letter-spacing: .8px; text-transform: uppercase; white-space: nowrap;
   }
   .pill-approved { border-color: rgba(0,230,138,.35); background: rgba(0,230,138,.08); color: var(--green); }
-  .pill-draft   { border-color: rgba(255,122,69,.35); background: rgba(255,122,69,.08); color: var(--orange); }
+  .pill-draft   { border-color: rgba(227,169,63,.4); background: rgba(227,169,63,.1); color: var(--orange); }
   .pill-admin   { border-color: rgba(110,86,255,.4);  background: rgba(110,86,255,.1);  color: #a898ff; }
   .pill-rep     { border-color: var(--w20); background: var(--w04); color: var(--w60); }
-  .pill-denied  { border-color: rgba(255,90,90,.35); background: rgba(255,90,90,.08); color: var(--red); }
+  .pill-denied  { border-color: rgba(232,121,123,.4); background: rgba(232,121,123,.1); color: var(--red); }
   .pill-locked  { border-color: var(--w08); background: none; color: var(--w40); }
 
   .empty { padding: 26px 0; text-align: center; color: var(--w40); font-size: 13.5px; }
 
   .banner { padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.55; margin-bottom: 18px; }
-  .banner-info  { border: 1px solid rgba(0,212,255,.25); background: rgba(0,212,255,.05); color: var(--w80); }
-  .banner-warn  { border: 1px solid rgba(255,122,69,.3); background: rgba(255,122,69,.06); color: var(--w80); }
-  .banner-error { border: 1px solid rgba(255,90,90,.3);  background: rgba(255,90,90,.06);  color: var(--w80); }
+  .banner-info  { border: 1px solid rgba(127, 212, 205, .25); background: rgba(127, 212, 205, .05); color: var(--w80); }
+  .banner-warn  { border: 1px solid rgba(227, 169, 63, .3); background: rgba(227, 169, 63, .06); color: var(--w80); }
+  .banner-error { border: 1px solid rgba(232, 121, 123, .3);  background: rgba(232, 121, 123, .06);  color: var(--w80); }
   .banner-ok    { border: 1px solid rgba(0,230,138,.3);  background: rgba(0,230,138,.06);  color: var(--w80); }
   .banner code { font-family: var(--mono); font-size: 12px; color: var(--cyan); }
 
@@ -172,7 +173,7 @@
     opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 100;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  #toast.err { border-color: rgba(255,90,90,.4); }
+  #toast.err { border-color: rgba(232, 121, 123, .4); }
 
   :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
 
