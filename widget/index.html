@@ -14,52 +14,49 @@
 
 <style>
   :root {
-    /* Dark chrome, white paper. The dark half is the instruction set's own
-       dark theme (§4.1) rather than a generic near-black, so the app and the
-       decks it produces stay one system — which was the whole point of the
-       cream it replaces.
+    /* The palette from the design sample: warm charcoal chrome, white paper,
+       one green accent. Read by eye off the shared image rather than sampled
+       from a file, so the hexes are a close read and not a measurement — say
+       the word and any of them shifts.
 
-       The tones are a SCALE, not one flat navy: the ground sits furthest
-       back, rails and header a step forward, cards and inputs a step further.
-       A workspace, a rail and a composer sharing one colour give the eye
-       nothing to hold onto, and that is true of navy exactly as it was of
-       cream.
+       The chrome is a warm charcoal with a green cast, not a neutral grey and
+       not navy. That warmth is what stops white paper on it looking like a
+       browser print preview.
 
-       --paper is the one white in the app and it means DOCUMENT. Not an
-       input, not a card: a white input on navy chrome is a hole in the
-       screen. Anything wearing --paper is something a customer could be
-       shown. */
-    --bg: #01163A;
-    --shell: #022258;
-    --sf: #032B66;
-    --sf2: #01214F;
-    --paper: #FFFFFF;
-    --paper-ink: #022258;
-    --paper-body: #4A5B74;
-    --paper-line: #DCD6C6;
-    --line: #1C3B66;
-    --w: #F6F1E4;
-    --w80: rgba(246,241,228,.82);
-    --w60: rgba(246,241,228,.62);
-    --w40: rgba(246,241,228,.44);
-    --w20: rgba(246,241,228,.18);
-    --w08: rgba(246,241,228,.09);
-    --w04: rgba(246,241,228,.05);
-    /* The dark variants §4.1 gives for each accent. The light-ground values
-       (14736D, 5B4FC0, 2E7044) are unreadable here: 14736D on 01163A is
-       1.9:1. */
-    --cyan: #7FD4CD;
-    --violet: #B3A9F5;
-    --green: #7FC98F;
-    /* C08500 is the house warning colour and clears 4.5:1 on the shell by a
-       hair (4.81). Lightened along its own hue so a warning reads as a
-       warning at 11px rather than as mud. */
+       The tones are a scale: ground furthest back, shell for chrome, sf for
+       the things you click. --paper is the one white and it means DOCUMENT.
+
+       --accent is the sample's green and it carries every semantic use:
+       focus, hover, active, links. It used to be called --cyan, which stopped
+       being true. The Vikat teal and violet survive as --brand-*, used only
+       by the mark itself, because the mark is the identity and not part of
+       the UI palette. */
+    --bg: #23271F;
+    --shell: #2C3128;
+    --sf: #363B31;
+    --sf2: #2A2F26;
+    --line: #444A3D;
+    --paper: #FCFBF7;
+    --paper-ink: #1C1E1A;
+    --paper-body: #4A4E45;
+    --paper-dim: #6B6F64;
+    --paper-line: #E2DFD6;
+    --w: #EAE7DE;
+    --w80: rgba(234,231,222,.82);
+    --w60: rgba(234,231,222,.62);
+    --w40: rgba(234,231,222,.46);
+    --w20: rgba(234,231,222,.2);
+    --w08: rgba(234,231,222,.1);
+    --w04: rgba(234,231,222,.055);
+    --accent: #8FCB9B;
+    --green: #8FCB9B;
     --orange: #E3A93F;
     --red: #E8797B;
+    --brand-teal: #7FD4CD;
+    --brand-violet: #B3A9F5;
     --mono: 'IBM Plex Mono','SF Mono',Consolas,monospace;
 
-    /* Native controls — file inputs, scrollbars, date pickers — render
-       light unless the page says which way round it is. */
+    /* Native controls render light unless the page says which way round it is. */
     color-scheme: dark;
   }
 
@@ -96,11 +93,11 @@
   .logo { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
   .logo-m {
     display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px;
-    background: linear-gradient(135deg, var(--cyan), var(--violet));
-    color: #01163A; font-weight: 700; font-size: 13px;
+    background: linear-gradient(135deg, var(--brand-teal), var(--brand-violet));
+    color: #1C1E1A; font-weight: 700; font-size: 13px;
   }
   .logo-t { font-weight: 600; font-size: 16px; letter-spacing: -.3px; }
-  .logo-t i { font-style: normal; color: var(--cyan); }
+  .logo-t i { font-style: normal; color: var(--accent); }
 
   nav { display: flex; gap: 2px; flex: 1 1 auto; }
   .tab {
@@ -207,7 +204,7 @@
     font-size: 11px;
     cursor: pointer;
   }
-  .rail-act:hover { border-color: var(--cyan); color: var(--cyan); }
+  .rail-act:hover { border-color: var(--accent); color: var(--accent); }
 
   .rail-count { flex: none; font-size: 11px; color: var(--w40); }
 
@@ -267,7 +264,7 @@
   .asset:hover { border-color: var(--w20); color: var(--w); }
   .asset .n { overflow-wrap: anywhere; }
   .asset .m { margin-top: 3px; font-size: 11px; color: var(--w40); }
-  .asset .m a { color: var(--cyan); }
+  .asset .m a { color: var(--accent); }
   .asset-group {
     margin: 6px 0 4px;
     padding: 0 10px;
@@ -315,7 +312,7 @@
     font-family: inherit; font-size: 14px;
   }
   .col-search::placeholder { color: var(--w40); }
-  .col-search:focus { outline: none; border-color: var(--cyan); }
+  .col-search:focus { outline: none; border-color: var(--accent); }
 
   .col-count { font-family: var(--mono); font-size: 10.5px; color: var(--w40); white-space: nowrap; }
 
@@ -343,7 +340,7 @@
     box-shadow: 0 2px 10px rgba(0,0,0,.28);
     transition: border-color .2s, transform .12s;
   }
-  .doc:hover { border-color: var(--cyan); transform: translateY(-1px); }
+  .doc:hover { border-color: var(--accent); transform: translateY(-1px); }
   .doc-name { font-size: 14.5px; font-weight: 600; margin-bottom: 4px; }
   .doc-summary {
     font-size: 13px; line-height: 1.6; color: var(--paper-body); max-width: 88ch;
@@ -351,9 +348,7 @@
   }
   .doc-meta {
     margin-top: 7px; font-family: var(--mono); font-size: 10.5px;
-    /* The instruction set's dim ink. #6C7A90 looked right and measured
-       4.35:1, which is under the floor for 10.5px text. */
-    color: #5F6C80; display: flex; gap: 14px; flex-wrap: wrap;
+    color: var(--paper-dim); display: flex; gap: 14px; flex-wrap: wrap;
   }
 
   .kind {
@@ -361,17 +356,17 @@
     font-family: var(--mono); font-size: 9.5px; font-weight: 500;
     letter-spacing: .6px; text-transform: uppercase;
   }
-  /* On paper, so the LIGHT-ground accents: the dark variants that work on
-     navy are 1.6:1 on white. */
-  .kind-pptx { background: rgba(138,96,0,.12);  color: #8A6000; }
-  .kind-docx { background: rgba(20,115,109,.12); color: #14736D; }
+  /* These sit on paper, so they take ink-weight colours: the accents that
+     work on charcoal are under 2:1 on white. */
+  .kind-pptx { background: rgba(138,96,0,.12);   color: #8A6000; }
+  .kind-docx { background: rgba(46,112,68,.12);  color: #2E7044; }
   .kind-pdf  { background: rgba(165,41,43,.1);   color: #A5292B; }
-  .kind-other{ background: rgba(2,34,88,.07);    color: #4A5B74; }
+  .kind-other{ background: rgba(28,30,26,.07);   color: var(--paper-body); }
 
   .state { padding: 56px 0; text-align: center; color: var(--w40); font-size: 13.5px; line-height: 1.7; }
   .state b { display: block; color: var(--w60); font-weight: 500; margin-bottom: 6px; }
 
-  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
   @media (prefers-reduced-motion: reduce) { * { transition-duration: .001ms !important; } }
 

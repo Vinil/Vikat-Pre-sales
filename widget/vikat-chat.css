@@ -7,42 +7,43 @@
    ═══════════════════════════════════════════════ */
 
 .vk-root {
-  /* The dark theme from §4.1 of the presentation instruction set, so the
-     assistant and the decks it produces are one system rather than two
-     companies.
+  /* The palette from the design sample: warm charcoal chrome, white paper,
+     one green accent. Read by eye off the shared image rather than sampled,
+     so the hexes are a close read and not a measurement.
 
      The --vk-w* names describe the strongest text colour through the faintest
      rule, and they mean that on any ground. They were white on dark, then ink
-     on cream, and are cream on dark again; renaming forty usages each time
-     would be churn, and what matters is that every one still means what it
-     says. */
-  --vk-bg: #01163A;
-  --vk-sf: #032B66;
-  --vk-sf2: #01214F;
-  /* Chrome: header, composer, footer. It was #E7DFCC typed into three rules
-     rather than a token, which is exactly why it stayed cream through a theme
-     change and left a beige band under a navy conversation. */
-  --vk-shell: #022258;
-  /* The one white, and it means DOCUMENT. A white input on navy chrome is a
-     hole in the screen; a white page is a page. */
-  --vk-paper: #FFFFFF;
-  --vk-paper-ink: #022258;
-  --vk-paper-body: #4A5B74;
-  --vk-paper-line: #DCD6C6;
-  --vk-w: #F6F1E4;
-  --vk-w80: rgba(246, 241, 228, 0.82);
-  --vk-w60: rgba(246, 241, 228, 0.62);
-  --vk-w40: rgba(246, 241, 228, 0.44);
-  --vk-w20: rgba(246, 241, 228, 0.18);
-  --vk-w08: rgba(246, 241, 228, 0.09);
-  --vk-w04: rgba(246, 241, 228, 0.05);
-  /* §4.1's dark variants. The light-ground accents are unreadable here:
-     14736D on 01163A is 1.9:1. */
-  --vk-cyan: #7FD4CD;
-  --vk-violet: #B3A9F5;
-  --vk-green: #7FC98F;
+     on cream, and are warm off-white on charcoal now; renaming forty usages
+     each time would be churn, and what matters is that every one still means
+     what it says.
+
+     --vk-accent is the sample's green and carries every semantic use: focus,
+     hover, active, links. It was --vk-cyan, which stopped being true. The
+     Vikat teal and violet survive as --vk-brand-*, used only by the mark
+     itself, because the mark is the identity and not part of the UI palette. */
+  --vk-bg: #23271F;
+  --vk-shell: #2C3128;
+  --vk-sf: #363B31;
+  --vk-sf2: #2A2F26;
+  /* The one white, and it means DOCUMENT. A white input on charcoal chrome is
+     a hole in the screen; a white page is a page. */
+  --vk-paper: #FCFBF7;
+  --vk-paper-ink: #1C1E1A;
+  --vk-paper-body: #4A4E45;
+  --vk-paper-line: #E2DFD6;
+  --vk-w: #EAE7DE;
+  --vk-w80: rgba(234, 231, 222, 0.82);
+  --vk-w60: rgba(234, 231, 222, 0.62);
+  --vk-w40: rgba(234, 231, 222, 0.46);
+  --vk-w20: rgba(234, 231, 222, 0.2);
+  --vk-w08: rgba(234, 231, 222, 0.1);
+  --vk-w04: rgba(234, 231, 222, 0.055);
+  --vk-accent: #8FCB9B;
+  --vk-green: #8FCB9B;
   --vk-orange: #E3A93F;
   --vk-red: #E8797B;
+  --vk-brand-teal: #7FD4CD;
+  --vk-brand-violet: #B3A9F5;
 
   --vk-font: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --vk-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
@@ -77,8 +78,8 @@
   padding: 0;
   border: 1px solid var(--vk-w08);
   border-radius: 100px;
-  background: linear-gradient(135deg, var(--vk-cyan), var(--vk-violet));
-  color: #01163A;
+  background: linear-gradient(135deg, var(--vk-brand-teal), var(--vk-brand-violet));
+  color: #1C1E1A;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   transition: transform 0.2s, box-shadow 0.25s;
@@ -154,7 +155,7 @@
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--vk-cyan), var(--vk-violet));
+  background: linear-gradient(135deg, var(--vk-brand-teal), var(--vk-brand-violet));
   color: var(--vk-bg);
   font-weight: 700;
   font-size: 14px;
@@ -255,7 +256,7 @@
 /* Links to SharePoint collateral. Underlined rather than colour-only, so they
    read as links in a bubble that is already low-contrast body text. */
 .vk-link {
-  color: var(--vk-cyan);
+  color: var(--vk-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-color: rgba(127, 212, 205, 0.4);
@@ -263,7 +264,7 @@
 }
 
 .vk-link:hover {
-  text-decoration-color: var(--vk-cyan);
+  text-decoration-color: var(--vk-accent);
 }
 
 /* ── Formatted answer bodies ─────────────────────────────────
@@ -316,7 +317,7 @@
 }
 
 .vk-list li::marker {
-  color: var(--vk-cyan);
+  color: var(--vk-accent);
 }
 
 .vk-list li:last-child {
@@ -366,8 +367,8 @@
 }
 
 .vk-tag-ok {
-  border-color: rgba(0, 230, 138, 0.35);
-  background: rgba(0, 230, 138, 0.08);
+  border-color: rgba(143, 203, 155, 0.4);
+  background: rgba(143, 203, 155, 0.1);
   color: var(--vk-green);
 }
 
@@ -399,11 +400,11 @@
   gap: 10px;
   margin: 2px 0;
   padding: 11px 14px;
-  border: 1px solid var(--vk-cyan);
+  border: 1px solid var(--vk-accent);
   border-radius: 12px;
   background: rgba(20, 115, 109, 0.07);
   font-size: 13.5px;
-  color: var(--vk-cyan);
+  color: var(--vk-accent);
   overflow: hidden;
   position: relative;
 }
@@ -417,7 +418,7 @@
   bottom: 0;
   height: 2px;
   width: 32%;
-  background: var(--vk-cyan);
+  background: var(--vk-accent);
   opacity: 0.75;
   animation: vk-sweep 1.6s ease-in-out infinite;
 }
@@ -441,7 +442,7 @@
   width: 9px;
   height: 9px;
   border-radius: 100px;
-  background: var(--vk-cyan);
+  background: var(--vk-accent);
   animation: vk-pulse 1.2s ease-in-out infinite;
 }
 
@@ -469,7 +470,7 @@
 }
 
 .vk-error a {
-  color: var(--vk-cyan);
+  color: var(--vk-accent);
 }
 
 /* ── Empty state ────────────────────────────────────────────── */
@@ -511,7 +512,7 @@
 
 .vk-chip:hover {
   border-color: rgba(127, 212, 205, 0.4);
-  color: var(--vk-cyan);
+  color: var(--vk-accent);
 }
 
 /* ── Composer ───────────────────────────────────────────────── */
@@ -559,8 +560,8 @@
   padding: 0;
   border: none;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--vk-cyan), var(--vk-violet));
-  color: #01163A;
+  background: var(--vk-accent);
+  color: #1C1E1A;
   cursor: pointer;
   transition: opacity 0.2s;
 }
@@ -589,7 +590,7 @@
 /* Keyboard users must always be able to see where they are. */
 
 .vk-root :focus-visible {
-  outline: 2px solid var(--vk-cyan);
+  outline: 2px solid var(--vk-accent);
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -663,7 +664,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--vk-cyan);
+  color: var(--vk-accent);
 }
 
 .vk-draft-label {
@@ -732,13 +733,13 @@
 }
 
 .vk-copy:hover {
-  border-color: var(--vk-cyan);
+  border-color: var(--vk-accent);
   color: var(--vk-w);
 }
 
 .vk-copy-main {
   border-color: transparent;
-  background: linear-gradient(135deg, var(--vk-cyan), var(--vk-violet));
+  background: var(--vk-accent);
   color: var(--vk-bg);
   font-weight: 600;
 }
