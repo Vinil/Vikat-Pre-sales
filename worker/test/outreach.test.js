@@ -436,3 +436,12 @@ test('a rep cannot read or change the positioning statement', async () => {
   );
   assert.equal(res.status, 403);
 });
+
+test('a draft is a choice unless it says otherwise', () => {
+  // The safe default. A rep who reads three alternatives as three posts has
+  // written less than they meant to; one who reads a campaign as a choice
+  // sends less. The second mistake is recoverable next turn, the first is not.
+  assert.equal(normaliseDraft({ channel: 'email', body: 'x', subject: 's' }).draft.group, 'versions');
+  assert.equal(normaliseDraft({ channel: 'email', body: 'x', subject: 's', group: 'nonsense' }).draft.group, 'versions');
+  assert.equal(normaliseDraft({ channel: 'email', body: 'x', subject: 's', group: 'sequence' }).draft.group, 'sequence');
+});

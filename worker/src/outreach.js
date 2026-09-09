@@ -98,6 +98,11 @@ export function normaliseDraft(input = {}) {
     channelLabel: spec.label,
     body,
     label: clean(input.label, LABEL_CHARS) || spec.label,
+    // "versions" is the safe default: it frames the card as a choice, and a
+    // rep who reads three alternatives as three posts has written less than
+    // they meant to, whereas one who reads a campaign as a choice sends less.
+    // The second mistake is recoverable in the next turn; the first is not.
+    group: input.group === 'sequence' ? 'sequence' : 'versions',
   };
 
   if (spec.subject) {

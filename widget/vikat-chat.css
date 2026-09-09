@@ -31,6 +31,10 @@
   --vk-paper-ink: #1C1E1A;
   --vk-paper-body: #4A4E45;
   --vk-paper-line: #E2DFD6;
+  --vk-paper-sf: #F1EFE8;
+  /* The accent, at ink weight. #8FCB9B is 1.8:1 on paper — the dark-ground
+     green cannot be reused here and reusing it was the first thing tried. */
+  --vk-paper-accent: #2E7044;
   --vk-w: #EAE7DE;
   --vk-w80: rgba(234, 231, 222, 0.82);
   --vk-w60: rgba(234, 231, 222, 0.62);
@@ -641,22 +645,29 @@
    pre-wrapped and monospaced-ish in feel: what they see is exactly what lands
    in the email client, including the line breaks. */
 
+/* PAPER. A draft is a document the rep is about to send, and this app has one
+   white and it means document — the same rule the reader and the collateral
+   list follow. It also puts the words on the ground they will actually be
+   read on: an email is read on white, and judging one on navy is judging it
+   somewhere it will never be. */
 .vk-draft {
   align-self: stretch;
   margin: 4px 0;
-  border: 1px solid var(--vk-w20);
+  border: 1px solid var(--vk-paper-line);
   border-radius: 12px;
-  background: var(--vk-sf);
+  background: var(--vk-paper);
+  color: var(--vk-paper-ink);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
   overflow: hidden;
 }
 
 .vk-draft-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--vk-w08);
-  background: var(--vk-sf2);
+  border-bottom: 1px solid var(--vk-paper-line);
+  background: var(--vk-paper-sf);
 }
 
 .vk-draft-ch {
@@ -664,13 +675,16 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--vk-accent);
+  color: var(--vk-paper-accent);
 }
 
 .vk-draft-label {
   font-size: 12px;
-  color: var(--vk-w60);
+  color: var(--vk-paper-body);
 }
+
+/* Pushes "Copy all" to the right edge of the head. */
+.vk-draft-head .vk-copy { margin-left: auto; }
 
 /* Variants of one draft, as tabs. Two takes on the same email are one
    decision, and as stacked cards a rep scrolled between them to compare —
@@ -679,8 +693,8 @@
   display: flex;
   gap: 2px;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--vk-w08);
-  background: var(--vk-sf2);
+  border-bottom: 1px solid var(--vk-paper-line);
+  background: var(--vk-paper-sf);
   overflow-x: auto;
 }
 
@@ -694,18 +708,20 @@
   border: 0;
   border-radius: 8px;
   background: none;
-  color: var(--vk-w60);
+  /* Not --vk-paper-dim: on the tab strip that measures 4.47:1, just under
+     the floor for 13px text. */
+  color: var(--vk-paper-body);
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.vk-draft-tab:hover { color: var(--vk-w); background: var(--vk-w04); }
+.vk-draft-tab:hover { color: var(--vk-paper-ink); background: rgba(28, 30, 26, 0.05); }
 
 .vk-draft-tab[aria-selected="true"] {
-  background: var(--vk-sf);
-  color: var(--vk-w);
+  background: var(--vk-paper);
+  color: var(--vk-paper-ink);
   font-weight: 600;
 }
 
@@ -715,10 +731,10 @@
   flex: none;
   font-size: 11px;
   font-weight: 600;
-  color: var(--vk-w40);
+  color: var(--vk-paper-dim);
 }
 
-.vk-draft-tab[aria-selected="true"] .vk-draft-tab-k { color: var(--vk-accent); }
+.vk-draft-tab[aria-selected="true"] .vk-draft-tab-k { color: var(--vk-paper-accent); }
 
 .vk-draft-pane[hidden] { display: none; }
 
@@ -726,26 +742,26 @@
    the browser handles the handoff and a middle-click still behaves. */
 .vk-draft-mail {
   text-decoration: none;
-  border-color: var(--vk-accent);
-  color: var(--vk-accent);
+  border-color: var(--vk-paper-accent);
+  color: var(--vk-paper-accent);
 }
 
-.vk-draft-mail:hover { background: var(--vk-w04); }
+.vk-draft-mail:hover { background: rgba(46, 112, 68, 0.08); }
 
 /* The desktop route leads. The web one is a fallback and reads as one. */
 .vk-draft-mail-main { font-weight: 600; }
 .vk-draft-mail:not(.vk-draft-mail-main) {
-  border-color: var(--vk-w20);
-  color: var(--vk-w60);
+  border-color: var(--vk-paper-line);
+  color: var(--vk-paper-body);
 }
-.vk-draft-mail:not(.vk-draft-mail-main):hover { color: var(--vk-w); }
+.vk-draft-mail:not(.vk-draft-mail-main):hover { color: var(--vk-paper-ink); }
 
 /* Why there is no button: a mail client truncates a long URL silently, and a
    half-written email with no warning is worse than a copy. */
 .vk-draft-note {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--vk-w40);
+  color: var(--vk-paper-dim);
 }
 
 .vk-draft-row {
@@ -757,13 +773,13 @@
 }
 
 .vk-draft-row + .vk-draft-row {
-  border-top: 1px solid var(--vk-w08);
+  border-top: 1px solid var(--vk-paper-line);
 }
 
 .vk-draft-k {
   font-size: 11px;
   line-height: 1.7;
-  color: var(--vk-w40);
+  color: var(--vk-paper-dim);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -771,7 +787,7 @@
 .vk-draft-v {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--vk-w);
+  color: var(--vk-paper-ink);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -786,48 +802,50 @@
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-top: 1px solid var(--vk-w08);
-  background: var(--vk-w04);
+  border-top: 1px solid var(--vk-paper-line);
+  background: var(--vk-paper-sf);
 }
 
 .vk-draft-count {
   margin-left: auto;
   font-size: 11px;
-  color: var(--vk-w40);
+  color: var(--vk-paper-dim);
 }
 
+/* Only ever inside a draft card, which is paper — so these are ink-weight
+   throughout. The dark-ground accent on white is 1.8:1. */
 .vk-copy {
   flex: none;
   padding: 5px 10px;
-  border: 1px solid var(--vk-w20);
+  border: 1px solid var(--vk-paper-line);
   border-radius: 7px;
   background: transparent;
-  color: var(--vk-w80);
+  color: var(--vk-paper-body);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .vk-copy:hover {
-  border-color: var(--vk-accent);
-  color: var(--vk-w);
+  border-color: var(--vk-paper-accent);
+  color: var(--vk-paper-ink);
 }
 
 .vk-copy-main {
   border-color: transparent;
-  background: var(--vk-accent);
-  color: var(--vk-bg);
+  background: var(--vk-paper-accent);
+  color: var(--vk-paper);
   font-weight: 600;
 }
 
 .vk-copy.done {
-  border-color: var(--vk-green);
-  color: var(--vk-green);
+  border-color: var(--vk-paper-accent);
+  color: var(--vk-paper-accent);
 }
 
 .vk-copy-main.done {
-  background: var(--vk-green);
-  color: var(--vk-bg);
+  background: var(--vk-paper-accent);
+  color: var(--vk-paper);
 }
 
 @media (max-width: 560px) {

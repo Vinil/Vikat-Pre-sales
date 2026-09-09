@@ -652,6 +652,16 @@
 
   var LETTERS = 'ABCDEFGH';
 
+  /** Every draft in a group, as one block of text a rep can paste anywhere. */
+  function wholeGroup(group) {
+    return group
+      .map(function (d, i) {
+        var head = (d.label || 'Part ' + (i + 1)) + '\n';
+        return head + (d.subject ? 'Subject: ' + d.subject + '\n\n' : '') + d.body;
+      })
+      .join('\n\n———\n\n');
+  }
+
   /**
    * One card per group of variants.
    *
@@ -666,11 +676,34 @@
     var card = el('div', 'vk-draft');
     var panes = [];
 
+    // A campaign is not a choice. A rep who reads three posts as three options
+    // sends one and thinks the job is done, so the card says which it is
+    // rather than leaving them to infer it from the labels.
+    var isSequence = group.length > 1 && group[0].group === 'sequence';
+    if (isSequence) card.classList.add('vk-draft-seq');
+
     var head = el('div', 'vk-draft-head');
     head.appendChild(el('span', 'vk-draft-ch', group[0].channelLabel || 'Draft'));
+
     if (group.length === 1 && group[0].label && group[0].label !== group[0].channelLabel) {
       head.appendChild(el('span', 'vk-draft-label', group[0].label));
     }
+
+    if (group.length > 1) {
+      head.appendChild(
+        el(
+          'span',
+          'vk-draft-label',
+          isSequence
+            ? group.length + ' to send, in order'
+            : group.length + ' versions — send one',
+        ),
+      );
+      // Only for a sequence. "Copy all" on a set of alternatives is an
+      // invitation to paste all of them into one email.
+      if (isSequence) head.appendChild(copyButton('Copy all', wholeGroup(group)));
+    }
+
     card.appendChild(head);
 
     if (group.length > 1) {
@@ -684,7 +717,9 @@
         tab.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
         // The letter always shows. Two variants the model gave the same label
         // would otherwise be two identical tabs.
-        tab.appendChild(el('span', 'vk-draft-tab-k', LETTERS[i] || String(i + 1)));
+        tab.appendChild(
+          el('span', 'vk-draft-tab-k', isSequence ? String(i + 1) : LETTERS[i] || String(i + 1)),
+        );
         tab.appendChild(el('span', null, draft.label || draft.channelLabel || 'Draft'));
 
         tab.addEventListener('click', function () {
@@ -753,7 +788,11 @@
           // Clipboard access can be refused outright. Saying so beats a button
           // that looks like it worked and put nothing on the clipboard.
           b.textContent = 'Press Ctrl+C';
-          selectText(b.closest('.vk-draft-row').querySelector('.vk-draft-v'));
+          // A copy button in the card HEAD has no row to select from. Without
+          // the guard the refused-clipboard path throws on a null and the rep
+          // gets nothing at all, which is the case this branch exists for.
+          var row = b.closest('.vk-draft-row');
+          if (row) selectText(row.querySelector('.vk-draft-v'));
         },
       );
     });

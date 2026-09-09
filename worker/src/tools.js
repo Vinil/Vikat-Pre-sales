@@ -203,8 +203,14 @@ export const TOOL_DEFINITIONS = [
           description:
             'A few words naming this draft, for when there are several: "Touch 1 — the fine", "Follow-up if no reply", "Post 2 of 3". Empty string if there is only one.',
         },
+        group: {
+          type: 'string',
+          enum: ['versions', 'sequence'],
+          description:
+            'What consecutive drafts for one channel are to each other. "versions" means the rep picks ONE — two takes on the same email. "sequence" means they send ALL of them, in order — a campaign, a follow-up chain, three posts across a fortnight. The card says which, so a rep never sends one post of three thinking it was a choice.',
+        },
       },
-      required: ['channel', 'subject', 'body', 'label'],
+      required: ['channel', 'subject', 'body', 'label', 'group'],
     },
   },
   {

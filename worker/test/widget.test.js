@@ -532,6 +532,12 @@ const DRAFT = {
 async function widgetPage() {
   const page = await browser.newPage();
   await page.setContent('<!doctype html><html><body><div id="m"></div></body></html>');
+  // The real stylesheet, so a test can ask what colour something actually is.
+  // Without it every computed style comes back transparent and a token that
+  // stopped resolving would look exactly like one that never existed.
+  await page.addStyleTag({
+    content: fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget/vikat-chat.css'), 'utf8'),
+  });
   await page.addScriptTag({
     content: fs
       .readFileSync(WIDGET, 'utf8')
@@ -1594,5 +1600,116 @@ test('the mail link cannot carry anything but a mailto', async () => {
     assert.ok(!/["'<>]/.test(href), `nothing unencoded survived into ${href.slice(0, 40)}`);
   }
 
+  await page.close();
+});
+
+// --- a campaign is not a choice --------------------------------------------
+
+const CAMPAIGN = [1, 2, 3].map((n) => ({
+  channel: 'linkedin_post',
+  channelLabel: 'LinkedIn post',
+  label: `Post ${n} of 3`,
+  group: 'sequence',
+  body: `Post number ${n}.\n\nWith a second paragraph.`,
+}));
+
+test('a campaign says it is a sequence, and a set of versions says it is a choice', async () => {
+  // A rep who reads three posts as three options sends one and thinks the job
+  // is done. The card has to say which it is rather than leave them to infer
+  // it from the labels.
+  const seq = await withVariants(CAMPAIGN);
+  assert.match(await seq.textContent('.vk-draft-head'), /3 to send, in order/);
+  await seq.close();
+
+  const versions = await withVariants();
+  assert.match(await versions.textContent('.vk-draft-head'), /2 versions/);
+  assert.match(await versions.textContent('.vk-draft-head'), /send one/);
+  await versions.close();
+});
+
+test('a sequence numbers its steps and versions letter theirs', async () => {
+  const seq = await withVariants(CAMPAIGN);
+  assert.deepEqual(await seq.$$eval('.vk-draft-tab-k', (n) => n.map((k) => k.textContent)), ['1', '2', '3']);
+  await seq.close();
+
+  const versions = await withVariants();
+  assert.deepEqual(await versions.$$eval('.vk-draft-tab-k', (n) => n.map((k) => k.textContent)), ['A', 'B']);
+  await versions.close();
+});
+
+test('only a sequence offers Copy all', async () => {
+  // "Copy all" on a set of alternatives is an invitation to paste every one of
+  // them into the same email.
+  const seq = await withVariants(CAMPAIGN);
+  assert.match(await seq.textContent('.vk-draft-head'), /Copy all/);
+  await seq.close();
+
+  const versions = await withVariants();
+  assert.ok(!(await versions.textContent('.vk-draft-head')).includes('Copy all'));
+  await versions.close();
+});
+
+test('Copy all carries every part, in order, with its label', async () => {
+  const page = await withVariants(CAMPAIGN);
+
+  const copied = await page.evaluate(async () => {
+    let taken = '';
+    navigator.clipboard.writeText = (t) => { taken = t; return Promise.resolve(); };
+    const btn = [...document.querySelectorAll('.vk-draft-head .vk-copy')].pop();
+    btn.click();
+    await new Promise((r) => setTimeout(r, 60));
+    return taken;
+  });
+
+  assert.match(copied, /Post 1 of 3/);
+  assert.match(copied, /Post 3 of 3/);
+  assert.ok(
+    copied.indexOf('Post number 1') < copied.indexOf('Post number 3'),
+    'the parts must come out in the order they are sent',
+  );
+  await page.close();
+});
+
+test('a single draft is never framed as a choice', async () => {
+  const page = await withDraft({ ...DRAFT, group: 'sequence' });
+  const head = await page.textContent('.vk-draft-head');
+  assert.ok(!/to send, in order/.test(head), head);
+  assert.ok(!/versions/.test(head), head);
+  await page.close();
+});
+
+// --- the draft is paper ----------------------------------------------------
+
+test('a draft card is white, because a draft is a document', async () => {
+  // The one white in this app means document, and an email is read on white.
+  // Judging one on navy is judging it somewhere it will never be seen.
+  const page = await withDraft();
+
+  const bg = await page.$eval('.vk-draft', (n) => getComputedStyle(n).backgroundColor);
+  assert.match(bg, /^rgb\(2(4[0-9]|5[0-5]), /, `the card should be near-white, got ${bg}`);
+
+  // And the ink on it is ink, not the dark-ground text colour.
+  const ink = await page.$eval('.vk-draft-v', (n) => getComputedStyle(n).color);
+  assert.match(ink, /^rgb\((1[0-9]|2[0-9]|3[0-9]), /, `body text should be ink, got ${ink}`);
+
+  await page.close();
+});
+
+test('a refused clipboard does not take the card down with it', async () => {
+  // The head's Copy all has no row to fall back on. The refused-clipboard
+  // branch reached for one and would have thrown on a null — in the one case
+  // the branch exists to handle.
+  const page = await withVariants(CAMPAIGN);
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+
+  await page.evaluate(async () => {
+    navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    [...document.querySelectorAll('.vk-draft-head .vk-copy')].pop().click();
+    await new Promise((r) => setTimeout(r, 80));
+  });
+
+  assert.deepEqual(errors, [], 'the copy path threw');
+  assert.match(await page.textContent('.vk-draft-head'), /Ctrl\+C/, 'and it must still say what to do');
   await page.close();
 });
