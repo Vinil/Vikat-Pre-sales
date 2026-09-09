@@ -35,9 +35,16 @@ export const CHANNELS = {
     hard: true,
   },
   linkedin_message: {
-    label: 'LinkedIn message',
+    // What the reps here call it. The key stays linkedin_message because it is
+    // written into every logged turn already; renaming it would orphan them.
+    label: 'LinkedIn InMail',
     subject: true,
     subjectChars: 160,
+    // ADVISORY, not LinkedIn's. Nobody has given a sourced InMail ceiling, and
+    // inventing one and enforcing it hard would be worse than a soft trim: a
+    // draft would be cut at a number no platform actually applies. When the
+    // real figure arrives, move this up beside the 300-character connection
+    // note and set `hard`.
     bodyChars: 1800,
   },
   linkedin_post: {

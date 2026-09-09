@@ -672,6 +672,82 @@
   color: var(--vk-w60);
 }
 
+/* Variants of one draft, as tabs. Two takes on the same email are one
+   decision, and as stacked cards a rep scrolled between them to compare —
+   which is the comparison the second draft existed to make easy. */
+.vk-draft-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vk-w08);
+  background: var(--vk-sf2);
+  overflow-x: auto;
+}
+
+.vk-draft-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--vk-w60);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.vk-draft-tab:hover { color: var(--vk-w); background: var(--vk-w04); }
+
+.vk-draft-tab[aria-selected="true"] {
+  background: var(--vk-sf);
+  color: var(--vk-w);
+  font-weight: 600;
+}
+
+/* The letter always shows: two variants the model gave the same label would
+   otherwise be two identical tabs. */
+.vk-draft-tab-k {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vk-w40);
+}
+
+.vk-draft-tab[aria-selected="true"] .vk-draft-tab-k { color: var(--vk-accent); }
+
+.vk-draft-pane[hidden] { display: none; }
+
+/* Opens whatever mail client the rep already uses. A link, not a button, so
+   the browser handles the handoff and a middle-click still behaves. */
+.vk-draft-mail {
+  text-decoration: none;
+  border-color: var(--vk-accent);
+  color: var(--vk-accent);
+}
+
+.vk-draft-mail:hover { background: var(--vk-w04); }
+
+/* The desktop route leads. The web one is a fallback and reads as one. */
+.vk-draft-mail-main { font-weight: 600; }
+.vk-draft-mail:not(.vk-draft-mail-main) {
+  border-color: var(--vk-w20);
+  color: var(--vk-w60);
+}
+.vk-draft-mail:not(.vk-draft-mail-main):hover { color: var(--vk-w); }
+
+/* Why there is no button: a mail client truncates a long URL silently, and a
+   half-written email with no warning is worse than a copy. */
+.vk-draft-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vk-w40);
+}
+
 .vk-draft-row {
   display: grid;
   grid-template-columns: 68px 1fr auto;

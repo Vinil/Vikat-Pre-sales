@@ -1424,3 +1424,175 @@ test('the rail keeps saying which document is open when it redraws', async () =>
   assert.match(marked[0], /RadNet_Brief/);
   await app.close();
 });
+
+// --- draft variants --------------------------------------------------------
+
+const VARIANTS = [
+  {
+    channel: 'email',
+    channelLabel: 'Email',
+    label: 'Support solutioning, CX-led delivery',
+    subject: 'RE: Spotify Ads Technical Support RFP',
+    body: 'This is a B2B technical support deal at its core.\n\nHappy to join the intro call.',
+  },
+  {
+    channel: 'email',
+    channelLabel: 'Email',
+    label: 'DES leads solution end to end',
+    subject: 'RE: Spotify Ads Technical Support RFP',
+    body: 'DES should own this one end to end.\n\nHappy to join the intro call.',
+  },
+];
+
+async function withVariants(list = VARIANTS) {
+  const page = await widgetPage();
+  await page.evaluate((d) => window.VikatChatInternals.addDrafts(d), list);
+  await page.waitForSelector('.vk-draft');
+  return page;
+}
+
+test('two versions of one email are one card with tabs, not two cards', async () => {
+  // A rep comparing two takes should not be scrolling between cards — the
+  // comparison is the whole reason the second version exists.
+  const page = await withVariants();
+
+  assert.equal(await page.$$eval('.vk-draft', (n) => n.length), 1, 'two cards, not one');
+  assert.equal(await page.$$eval('.vk-draft-tab', (n) => n.length), 2);
+  assert.match(await page.textContent('.vk-draft-tabs'), /Support solutioning/);
+  assert.match(await page.textContent('.vk-draft-tabs'), /DES leads solution/);
+
+  // The first is showing, the second is not.
+  const shown = await page.$$eval('.vk-draft-pane', (n) => n.map((p) => !p.hidden));
+  assert.deepEqual(shown, [true, false]);
+
+  await page.close();
+});
+
+test('a tab shows its own version and hides the other', async () => {
+  const page = await withVariants();
+
+  await page.click('.vk-draft-tab:nth-child(2)');
+  await page.waitForFunction(() => !document.querySelectorAll('.vk-draft-pane')[1].hidden);
+
+  const shown = await page.$$eval('.vk-draft-pane', (n) => n.map((p) => !p.hidden));
+  assert.deepEqual(shown, [false, true]);
+
+  const selected = await page.$$eval('.vk-draft-tab', (n) =>
+    n.map((t) => t.getAttribute('aria-selected')),
+  );
+  assert.deepEqual(selected, ['false', 'true'], 'the tab strip must agree with the panes');
+
+  await page.close();
+});
+
+test('every version keeps its letter even when the labels collide', async () => {
+  // Two variants the model labelled identically would otherwise be two
+  // identical tabs with no way to tell which is which.
+  const page = await withVariants(VARIANTS.map((v) => ({ ...v, label: 'Email' })));
+
+  const keys = await page.$$eval('.vk-draft-tab-k', (n) => n.map((k) => k.textContent));
+  assert.deepEqual(keys, ['A', 'B']);
+
+  await page.close();
+});
+
+test('a different channel starts a new card', async () => {
+  // An email and a LinkedIn note written in the same turn are two jobs. Two
+  // emails are one job written twice.
+  const page = await withVariants([
+    VARIANTS[0],
+    { channel: 'linkedin_note', channelLabel: 'LinkedIn connection note', label: 'Warm intro', body: 'Short note.' },
+  ]);
+
+  assert.equal(await page.$$eval('.vk-draft', (n) => n.length), 2);
+  assert.equal(await page.$$eval('.vk-draft-tab', (n) => n.length), 0, 'one variant each, so no tabs');
+
+  await page.close();
+});
+
+test('a single draft still renders without a tab strip', async () => {
+  const page = await withDraft();
+  assert.equal(await page.$$eval('.vk-draft-tabs', (n) => n.length), 0);
+  assert.match(await page.textContent('.vk-draft-label'), /Touch 1/);
+  await page.close();
+});
+
+// --- opening in a mail client ---------------------------------------------
+
+test('an email draft opens in Outlook, desktop first and web as the fallback', async () => {
+  // mailto: is the path to be confident in on a Microsoft tenant — Outlook is
+  // the registered handler. The web link is second because Microsoft owns that
+  // URL shape and has changed it before.
+  const page = await withDraft();
+
+  const links = await page.$$eval('.vk-draft-mail', (n) =>
+    n.map((a) => ({ label: a.textContent, href: a.getAttribute('href') })),
+  );
+
+  assert.equal(links.length, 2, JSON.stringify(links.map((l) => l.label)));
+  assert.match(links[0].href, /^mailto:\?subject=/);
+  assert.match(links[0].label, /Outlook/);
+  assert.match(links[1].href, /^https:\/\/outlook\.office\.com\//);
+
+  for (const link of links) {
+    assert.ok(link.href.includes(encodeURIComponent('The March ruling')), 'the subject must survive encoding');
+    assert.ok(link.href.includes(encodeURIComponent('Worth fifteen minutes?')), 'and so must the body');
+  }
+
+  await page.close();
+});
+
+test('a draft past the mailto ceiling still has a web link', async () => {
+  // The two ceilings differ on purpose: a URL a mail client would truncate can
+  // still be long enough for a browser. Collapsing them would send a rep to
+  // Copy for a draft that had a working route.
+  const page = await withDraft({ ...DRAFT, body: 'x'.repeat(2000) });
+
+  const links = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  assert.equal(links.length, 1, 'the desktop link should be gone and the web one kept');
+  assert.match(links[0], /^https:\/\/outlook\.office\.com\//);
+
+  await page.close();
+});
+
+test('a LinkedIn draft gets no mail link', async () => {
+  // There is no mail client to open.
+  const page = await withDraft({
+    channel: 'linkedin_note',
+    channelLabel: 'LinkedIn connection note',
+    label: 'Warm intro',
+    body: 'Short note.',
+  });
+
+  assert.equal(await page.$$eval('.vk-draft-mail', (n) => n.length), 0);
+  await page.close();
+});
+
+test('a draft too long for either route gets a reason, not a broken button', async () => {
+  // Mail clients and browsers truncate a long URL SILENTLY. A half-written
+  // email with no warning is worse than being told to copy it.
+  const page = await withDraft({ ...DRAFT, body: 'x'.repeat(7000) });
+
+  assert.equal(await page.$$eval('.vk-draft-mail', (n) => n.length), 0, 'every link would be truncated');
+  assert.match(await page.textContent('.vk-draft-note'), /Too long/);
+
+  await page.close();
+});
+
+test('the mail link cannot carry anything but a mailto', async () => {
+  // The subject and body are model-authored. They are encoded into the query,
+  // and the scheme is ours — a draft cannot turn the link into something else.
+  const page = await withDraft({
+    ...DRAFT,
+    subject: 'x" onclick="alert(1)',
+    body: 'javascript:alert(1)\n\nmailto:someone@example.com',
+  });
+
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  assert.ok(hrefs[0].startsWith('mailto:?subject='), hrefs[0].slice(0, 40));
+  for (const href of hrefs) {
+    assert.ok(!/["'<>]/.test(href), `nothing unencoded survived into ${href.slice(0, 40)}`);
+  }
+
+  await page.close();
+});

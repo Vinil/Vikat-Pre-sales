@@ -569,22 +569,45 @@
    * markdown, a subject line they have to find inside a sentence, and a "here
    * is a draft" they have to delete. Two buttons remove all of that.
    */
-  function addDraft(draft) {
-    var card = el('div', 'vk-draft');
+  /**
+   * Where an email draft can be opened, in order of preference.
+   *
+   * mailto: first, because on this tenant Outlook is the registered handler
+   * and that opens the client the rep already has. Outlook on the web second,
+   * for anyone working in a browser with no desktop client — deliberately the
+   * fallback rather than the main path, since Microsoft owns that URL shape
+   * and has changed it before. If it breaks, the fallback breaks.
+   *
+   * Both have a ceiling. Clients and browsers truncate a long URL SILENTLY —
+   * the rep gets a half-written email and no warning — so a draft that would
+   * not survive gets no link rather than a broken one. mailto: is the tighter
+   * of the two, which is why a long draft can still have a web link and no
+   * desktop one.
+   */
+  function mailLinks(draft) {
+    var subject = encodeURIComponent(draft.subject || '');
+    var body = encodeURIComponent(draft.body);
+    var out = [];
 
-    var head = el('div', 'vk-draft-head');
-    head.appendChild(el('span', 'vk-draft-ch', draft.channelLabel || 'Draft'));
-    if (draft.label && draft.label !== draft.channelLabel) {
-      head.appendChild(el('span', 'vk-draft-label', draft.label));
-    }
-    card.appendChild(head);
+    var mailto = 'mailto:?subject=' + subject + '&body=' + body;
+    if (mailto.length <= 1800) out.push({ label: 'Open in Outlook', href: mailto, primary: true });
+
+    var web = 'https://outlook.office.com/mail/deeplink/compose?subject=' + subject + '&body=' + body;
+    if (web.length <= 6000) out.push({ label: 'Outlook on the web', href: web });
+
+    return out;
+  }
+
+  /** One variant: the rows, the actions, the count. */
+  function draftPane(draft) {
+    var pane = el('div', 'vk-draft-pane');
 
     if (draft.subject) {
       var subjRow = el('div', 'vk-draft-row');
       subjRow.appendChild(el('div', 'vk-draft-k', 'Subject'));
       subjRow.appendChild(el('div', 'vk-draft-v', draft.subject));
       subjRow.appendChild(copyButton('Copy', draft.subject));
-      card.appendChild(subjRow);
+      pane.appendChild(subjRow);
     }
 
     var bodyRow = el('div', 'vk-draft-row vk-draft-body');
@@ -593,21 +616,122 @@
     // client, and the prospect's own name is in it.
     bodyRow.appendChild(el('div', 'vk-draft-v vk-draft-text', draft.body));
     bodyRow.appendChild(copyButton('Copy', draft.body));
-    card.appendChild(bodyRow);
+    pane.appendChild(bodyRow);
 
     var foot = el('div', 'vk-draft-foot');
     if (draft.subject) {
       foot.appendChild(copyButton('Copy subject + body', draft.subject + '\n\n' + draft.body, true));
     }
+
+    // Email only. There is no URL that pre-fills a LinkedIn message or an
+    // InMail the way mailto: does, so that channel gets Copy and nothing that
+    // pretends to be more — a button opening an empty compose window is worse
+    // than no button, because the rep finds out after the click.
+    if (draft.channel === 'email') {
+      var links = mailLinks(draft);
+      links.forEach(function (link) {
+        var open = el('a', 'vk-copy vk-draft-mail' + (link.primary ? ' vk-draft-mail-main' : ''), link.label);
+        open.href = link.href;
+        open.target = '_blank';
+        open.rel = 'noopener noreferrer';
+        foot.appendChild(open);
+      });
+      if (!links.length) {
+        foot.appendChild(el('span', 'vk-draft-note', 'Too long to open in a mail client — copy it.'));
+      }
+    }
+
     // A character count, because LinkedIn silently refuses a connection note
     // over 300 and an email over ~200 words gets skimmed. The rep is the one
     // who decides; they just need to be able to see it.
     foot.appendChild(el('span', 'vk-draft-count', draft.body.length + ' characters'));
-    card.appendChild(foot);
+    pane.appendChild(foot);
+
+    return pane;
+  }
+
+  var LETTERS = 'ABCDEFGH';
+
+  /**
+   * One card per group of variants.
+   *
+   * Two takes on the same email are one decision, not two things to read. As
+   * separate stacked cards a rep scrolled between them to compare, which is
+   * the comparison the second draft existed to make easy.
+   */
+  function addDraft(drafts) {
+    var group = Array.isArray(drafts) ? drafts : [drafts];
+    if (!group.length) return null;
+
+    var card = el('div', 'vk-draft');
+    var panes = [];
+
+    var head = el('div', 'vk-draft-head');
+    head.appendChild(el('span', 'vk-draft-ch', group[0].channelLabel || 'Draft'));
+    if (group.length === 1 && group[0].label && group[0].label !== group[0].channelLabel) {
+      head.appendChild(el('span', 'vk-draft-label', group[0].label));
+    }
+    card.appendChild(head);
+
+    if (group.length > 1) {
+      var tabs = el('div', 'vk-draft-tabs');
+      tabs.setAttribute('role', 'tablist');
+
+      group.forEach(function (draft, i) {
+        var tab = el('button', 'vk-draft-tab');
+        tab.type = 'button';
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+        // The letter always shows. Two variants the model gave the same label
+        // would otherwise be two identical tabs.
+        tab.appendChild(el('span', 'vk-draft-tab-k', LETTERS[i] || String(i + 1)));
+        tab.appendChild(el('span', null, draft.label || draft.channelLabel || 'Draft'));
+
+        tab.addEventListener('click', function () {
+          for (var j = 0; j < panes.length; j += 1) {
+            var on = j === i;
+            panes[j].hidden = !on;
+            tabs.children[j].setAttribute('aria-selected', on ? 'true' : 'false');
+          }
+        });
+
+        tabs.appendChild(tab);
+      });
+
+      card.appendChild(tabs);
+    }
+
+    group.forEach(function (draft, i) {
+      var pane = draftPane(draft);
+      pane.hidden = i > 0;
+      panes.push(pane);
+      card.appendChild(pane);
+    });
 
     log.appendChild(card);
     scroll();
     return card;
+  }
+
+  /**
+   * Group what one turn produced into cards.
+   *
+   * Consecutive drafts for the same channel are variants of one thing and
+   * share a card; a different channel starts a new one. Grouping by position
+   * rather than by a field the model fills in: an email and a LinkedIn note
+   * written in the same turn are two jobs, and two emails are one job written
+   * twice.
+   */
+  function addDrafts(list) {
+    var group = [];
+    (list || []).forEach(function (draft) {
+      if (group.length && group[0].channel !== draft.channel) {
+        addDraft(group);
+        group = [];
+      }
+      group.push(draft);
+    });
+    if (group.length) addDraft(group);
   }
 
   function copyButton(label, text, primary) {
@@ -877,7 +1001,7 @@
             if (!status.isConnected) log.appendChild(status);
           } else if (event === 'draft') {
             status.remove();
-            (data.drafts || []).forEach(addDraft);
+            addDrafts(data.drafts);
             // The answer continues after the card, so a fresh bubble is needed
             // — otherwise the model's explanation appends to the bubble that
             // was open before the draft and reads as part of it.
@@ -1110,6 +1234,7 @@
     // The card is what a rep actually touches, so it is drivable from a test
     // without having to fake a whole streamed turn.
     addDraft: addDraft,
+    addDrafts: addDrafts,
     addStatus: addStatus,
   };
 })();
