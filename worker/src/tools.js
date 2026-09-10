@@ -210,6 +210,12 @@ export const TOOL_DEFINITIONS = [
             'What consecutive drafts for one channel are to each other. "versions" means the rep picks ONE — two takes on the same email. "sequence" means they send ALL of them, in order — a campaign, a follow-up chain, three posts across a fortnight. The card says which, so a rep never sends one post of three thinking it was a choice.',
         },
       },
+      // Fully required, like every other tool here: a closed, fully-required
+      // schema is what stops the model inventing fields, and an optional
+      // property is where one improvises. `group` was briefly made optional
+      // on a hunch that a fifth required argument had caused a malformed tool
+      // call — a hunch with nothing behind it but timing. The defence against
+      // malformation is normaliseDraft(), which strips it whatever the cause.
       required: ['channel', 'subject', 'body', 'label', 'group'],
     },
   },

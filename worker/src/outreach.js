@@ -15,6 +15,8 @@
  * killed every conversation, including ones that never touched a tool.
  */
 
+import { noDashes } from './brand.js';
+
 /** What a draft can be written for. Each has a real limit, not a style note. */
 export const CHANNELS = {
   email: {
@@ -60,11 +62,59 @@ export const CHANNEL_NAMES = Object.keys(CHANNELS);
 
 const LABEL_CHARS = 80;
 
+/**
+ * Tool-call serialisation that reached an argument instead of framing it.
+ *
+ * A draft came back with its label reading `</parameter> <parameter
+ * name="group">versions` — the markup that separates one argument from the
+ * next, ending up INSIDE one. It rendered on the card exactly as written,
+ * because nothing between the model and the DOM looked at it.
+ *
+ * No email, subject or label contains an angle-bracketed token with any of
+ * these words in it. If one does, it is not content.
+ */
+const TOOL_MARKUP = /<\/?[^<>]*\b(?:antml|parameter|invoke|function_calls)\b[^<>]*>/gi;
+
+const looksMalformed = (value) => TOOL_MARKUP.test(String(value == null ? '' : value));
+
+/**
+ * The architecture is called the Semantic Context PLANE and the Semantic
+ * Context LOOP. Those two, and nothing else.
+ *
+ * A draft went to a real prospect describing a "Semantic Context Graph",
+ * which does not exist. A near-miss on a product name is the worst kind of
+ * invention: it reads as authoritative, it survives being forwarded, and the
+ * first person to notice is the customer who asks to see it.
+ *
+ * Deliberately narrow — it only fires on the exact shape of that mistake, so
+ * it never argues with real copy.
+ */
+// Capitalised throughout, and the third word capitalised too: a product name
+// looks like "Semantic Context Graph". Case-insensitively this fired on "we
+// map semantic context across your estate", which is ordinary English and
+// exactly the kind of false positive that teaches a rep to skip the warnings.
+const SEMANTIC_CONTEXT = /\bSemantic Context ([A-Z]\w+)/g;
+const REAL_SURFACES = ['plane', 'loop'];
+
+function inventedSurfaces(text) {
+  const found = [];
+  let m;
+  SEMANTIC_CONTEXT.lastIndex = 0;
+  while ((m = SEMANTIC_CONTEXT.exec(String(text || '')))) {
+    if (!REAL_SURFACES.includes(m[1].toLowerCase())) found.push(`Semantic Context ${m[1]}`);
+  }
+  return [...new Set(found)];
+}
+
 function clean(value, max) {
-  return String(value == null ? '' : value)
-    .replace(/\r\n/g, '\n')
-    .trim()
-    .slice(0, max);
+  return (
+    noDashes(String(value == null ? '' : value).replace(TOOL_MARKUP, ' '))
+      .replace(/\r\n/g, '\n')
+      // The strip can leave a double space where the markup was.
+      .replace(/[^\S\n]{2,}/g, ' ')
+      .trim()
+      .slice(0, max)
+  );
 }
 
 /**
@@ -93,11 +143,30 @@ export function normaliseDraft(input = {}) {
     );
   }
 
+  // A label that came back as markup is not a label. Blanking it falls through
+  // to the channel name, which is uninformative and TRUE — better than a tab
+  // reading `</parameter> <parameter name="group">`.
+  const rawLabel = looksMalformed(input.label) ? '' : input.label;
+
+  if (looksMalformed(input.label) || looksMalformed(input.subject) || looksMalformed(input.body)) {
+    warnings.push(
+      'This draft came back with tool markup inside it, which has been stripped. Read it before you send it.',
+    );
+  }
+
+  const invented = inventedSurfaces(`${input.subject || ''} ${input.body || ''}`);
+  if (invented.length) {
+    warnings.push(
+      `DO NOT SEND AS WRITTEN: "${invented.join('", "')}" is not one of ours. ` +
+        'The architecture is the Semantic Context Plane and the Semantic Context Loop.',
+    );
+  }
+
   const draft = {
     channel,
     channelLabel: spec.label,
     body,
-    label: clean(input.label, LABEL_CHARS) || spec.label,
+    label: clean(rawLabel, LABEL_CHARS) || spec.label,
     // "versions" is the safe default: it frames the card as a choice, and a
     // rep who reads three alternatives as three posts has written less than
     // they meant to, whereas one who reads a campaign as a choice sends less.

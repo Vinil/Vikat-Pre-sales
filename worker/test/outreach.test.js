@@ -445,3 +445,94 @@ test('a draft is a choice unless it says otherwise', () => {
   assert.equal(normaliseDraft({ channel: 'email', body: 'x', subject: 's', group: 'nonsense' }).draft.group, 'versions');
   assert.equal(normaliseDraft({ channel: 'email', body: 'x', subject: 's', group: 'sequence' }).draft.group, 'sequence');
 });
+
+// --- what came back from the model, and what a rep must never be handed ----
+
+test('tool markup that leaked into an argument never reaches the card', () => {
+  // A real draft came back with its label reading `</parameter> <parameter
+  // name="group">versions` — the markup that separates one argument from the
+  // next, ending up INSIDE one. It rendered on the card exactly as written,
+  // because nothing between the model and the DOM looked at it.
+  const r = normaliseDraft({
+    channel: 'email',
+    label: '</antml,parameter> <parameter name="group">versions',
+    subject: 'BerryGPT is live',
+    body: 'A real paragraph.',
+  });
+
+  assert.equal(r.draft.label, 'Email', 'a label that is markup falls back to the channel');
+  assert.ok(!/parameter|antml|invoke/i.test(JSON.stringify(r.draft)), JSON.stringify(r.draft));
+  assert.ok(r.warnings.some((w) => /tool markup/i.test(w)), 'and the rep is told');
+});
+
+test('markup in the body is stripped and flagged, not silently kept', () => {
+  const r = normaliseDraft({
+    channel: 'email',
+    label: 'Touch 1',
+    subject: 'A subject',
+    body: 'The offer stands.</parameter><parameter name="group">sequence',
+  });
+
+  assert.ok(!/parameter/i.test(r.draft.body), r.draft.body);
+  assert.match(r.draft.body, /The offer stands\./);
+  assert.ok(r.warnings.some((w) => /tool markup/i.test(w)));
+});
+
+test('a draft carries no em dashes, and keeps its paragraph breaks', () => {
+  // §2.3 bans them in customer-facing copy, and a draft is the MOST
+  // customer-facing thing here — it goes out under the rep's own name. Decks
+  // were cleaned and drafts were not, which is backwards.
+  const r = normaliseDraft({
+    channel: 'email',
+    label: 'Touch 1',
+    subject: 'BerryGPT is live — who governs what it can reach?',
+    // The last dash sits at the END of a line. That is the case that matters:
+    // a rewrite matching \s around the dash eats the newlines after it and
+    // the two paragraphs become one. Mid-line dashes pass either way, which
+    // is why the first fixture here proved nothing.
+    body: 'We preempt early — not fast.\n\nA second paragraph —\n\nAnd a third.',
+  });
+
+  assert.ok(!/[—–]/.test(r.draft.subject), r.draft.subject);
+  assert.ok(!/[—–]/.test(r.draft.body), r.draft.body);
+  assert.equal(
+    (r.draft.body.match(/\n\n/g) || []).length,
+    2,
+    `both paragraph breaks must survive: ${JSON.stringify(r.draft.body)}`,
+  );
+});
+
+test('an invented architecture name is flagged before it is sent', () => {
+  // A draft went to a real prospect describing a "Semantic Context Graph",
+  // which does not exist anywhere in this repo or this product.
+  const bad = normaliseDraft({
+    channel: 'email',
+    label: 'Touch 1',
+    subject: 'A subject',
+    body: 'Vikat builds a Semantic Context Graph of your environment.',
+  });
+  assert.ok(bad.warnings.some((w) => /DO NOT SEND/.test(w)), JSON.stringify(bad.warnings));
+  assert.ok(bad.warnings.some((w) => /Semantic Context Graph/.test(w)));
+
+  const good = normaliseDraft({
+    channel: 'email',
+    label: 'Touch 1',
+    subject: 'A subject',
+    body: 'The Semantic Context Plane and the Semantic Context Loop do this.',
+  });
+  assert.deepEqual(good.warnings, [], 'the real names must not be flagged');
+});
+
+test('the invented-name check does not argue with ordinary English', () => {
+  // Case-insensitively this fired on "we map semantic context across your
+  // estate", which is prose. A warning that fires on good copy is a warning
+  // reps learn to skip, and then the real one goes unread too.
+  for (const body of [
+    'We map semantic context across your estate.',
+    'Semantic context is Continuously recomputed.',
+    'The context is semantic, not statistical.',
+  ]) {
+    const r = normaliseDraft({ channel: 'email', label: 'x', subject: 's', body });
+    assert.deepEqual(r.warnings, [], `${body} -> ${r.warnings.join(' ')}`);
+  }
+});

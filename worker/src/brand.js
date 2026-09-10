@@ -232,16 +232,31 @@ const EMOJI_RE =
  * turn a sentence into a different sentence, which is what matters when the
  * text is already written and nobody is going to re-read it.
  */
-export function brandSafe(text) {
+/**
+ * The no-dash rule on its own, with the line structure left alone.
+ *
+ * brandSafe() collapses all whitespace, which is right for a heading and
+ * fatal for an email: the blank line between paragraphs IS the paragraph
+ * break, and an email whose breaks collapse arrives as a wall of text. So the
+ * dash rewrite lives here, both callers share it, and only one of them
+ * reflows.
+ *
+ * Horizontal whitespace only around the dash, for the same reason: a dash at
+ * the end of a line must not swallow the newline after it.
+ */
+export function noDashes(text) {
   return String(text || '')
-    .replace(EMOJI_RE, '')
     // A range: 2020–2024, 5–10 minutes.
-    .replace(/(\d)\s*[—–]\s*(\d)/g, '$1 to $2')
+    .replace(/(\d)[^\S\n]*[—–][^\S\n]*(\d)/g, '$1 to $2')
     // Between clauses, spaced or not.
-    .replace(/\s*[—–]\s*/g, ', ')
+    .replace(/[^\S\n]*[—–][^\S\n]*/g, ', ')
     // The rewrite can double a comma that was already there.
-    .replace(/,\s*,/g, ',')
-    .replace(/\s+,/g, ',')
+    .replace(/,[^\S\n]*,/g, ',')
+    .replace(/[^\S\n]+,/g, ',');
+}
+
+export function brandSafe(text) {
+  return noDashes(String(text || '').replace(EMOJI_RE, ''))
     // Straight quotes read as code; the brand sets prose, not terminal output.
     .replace(/(^|[\s(\[])"(?=\S)/g, '$1“')
     .replace(/"/g, '”')
