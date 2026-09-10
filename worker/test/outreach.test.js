@@ -502,37 +502,25 @@ test('a draft carries no em dashes, and keeps its paragraph breaks', () => {
   );
 });
 
-test('an invented architecture name is flagged before it is sent', () => {
-  // A draft went to a real prospect describing a "Semantic Context Graph",
-  // which does not exist anywhere in this repo or this product.
-  const bad = normaliseDraft({
+
+test('a product name from the positioning statement is left alone', () => {
+  // A check here once flagged "Semantic Context Graph" as invented, on the
+  // strength of a grep that found it nowhere in this repo. It is in the
+  // POSITIONING STATEMENT, which lives in KV and is uploaded through the
+  // admin panel — a grep of the repo could never have found it, and the
+  // conclusion drawn from that grep was wrong.
+  //
+  // Nothing here knows what the positioning statement says, so nothing here
+  // gets to rule on what is or is not one of our names. The positioning
+  // statement is injected on every turn and outranks the knowledge base;
+  // that is where this belongs and it already works.
+  const r = normaliseDraft({
     channel: 'email',
     label: 'Touch 1',
     subject: 'A subject',
-    body: 'Vikat builds a Semantic Context Graph of your environment.',
+    body: 'Vikat builds a Semantic Context Graph of your enterprise and your business.',
   });
-  assert.ok(bad.warnings.some((w) => /DO NOT SEND/.test(w)), JSON.stringify(bad.warnings));
-  assert.ok(bad.warnings.some((w) => /Semantic Context Graph/.test(w)));
 
-  const good = normaliseDraft({
-    channel: 'email',
-    label: 'Touch 1',
-    subject: 'A subject',
-    body: 'The Semantic Context Plane and the Semantic Context Loop do this.',
-  });
-  assert.deepEqual(good.warnings, [], 'the real names must not be flagged');
-});
-
-test('the invented-name check does not argue with ordinary English', () => {
-  // Case-insensitively this fired on "we map semantic context across your
-  // estate", which is prose. A warning that fires on good copy is a warning
-  // reps learn to skip, and then the real one goes unread too.
-  for (const body of [
-    'We map semantic context across your estate.',
-    'Semantic context is Continuously recomputed.',
-    'The context is semantic, not statistical.',
-  ]) {
-    const r = normaliseDraft({ channel: 'email', label: 'x', subject: 's', body });
-    assert.deepEqual(r.warnings, [], `${body} -> ${r.warnings.join(' ')}`);
-  }
+  assert.deepEqual(r.warnings, [], JSON.stringify(r.warnings));
+  assert.match(r.draft.body, /Semantic Context Graph/);
 });

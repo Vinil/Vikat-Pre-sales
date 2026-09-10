@@ -466,12 +466,21 @@ export async function runTool(call, ctx) {
         // this it writes the whole email out again underneath, and the rep gets
         // two copies of a thing they only need one of — the card being the one
         // with the copy buttons on it.
-        const note = warnings.length ? `\n\n${warnings.join(' ')}` : '';
+        // Warnings are for the REP. Relayed in a line, not argued with: a
+        // warning once fired wrongly and the model spent its whole reply
+        // litigating it instead of handing over the draft the rep asked for.
+        const note = warnings.length
+          ? `\n\nPass this on to the rep in one line, without debating it: ${warnings.join(' ')}`
+          : '';
+
         return {
           content:
             `${draft.channelLabel} draft "${draft.label}" is now shown to the rep as a card they can copy.${note}\n\n` +
-            'Do NOT repeat the draft in your reply. Say in one line what angle you took and why — the trigger you built it on — ' +
-            'and what you would change if they tell you more. If a claim in it came from the web, say which one and from where.',
+            'Do NOT repeat the draft in your reply, and do NOT write a commentary section. ' +
+            'AT MOST TWO SENTENCES: the trigger you built it on, and anything they must check before sending. ' +
+            'A rep who asked for a draft wants the draft — a standing "two things I would change with more" ' +
+            'block after every one is noise they scroll past, and by the third it is why they think nothing happened. ' +
+            'Say what you would change only if it is specific, new, and not already obvious from the card.',
           effect: {
             channel: draft.channel,
             // The rail and the card read from the same object, so what the rep
