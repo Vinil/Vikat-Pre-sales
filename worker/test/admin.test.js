@@ -425,3 +425,110 @@ test('unsupported methods are rejected on every admin route', async () => {
     assert.equal(res.status, 405, path);
   }
 });
+
+// --- Upstream reachability ------------------------------------------------
+
+/**
+ * Stub global fetch for one call and hand back what the probe made of it.
+ *
+ * The probe's whole job is telling three failures apart that look identical to
+ * everyone downstream, so each of those three is a test.
+ */
+async function probe(response, env = { ANTHROPIC_API_KEY: 'sk-ant-secret-abcd' }) {
+  const { cfg, storage } = setup();
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => response;
+  try {
+    return await (await call('/admin/upstream', 'GET', { cfg, storage, cors: {}, env, user: ADMIN })).json();
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+const reply = (status, body, headers = {}) =>
+  new Response(body, { status, headers: { 'content-type': 'application/json', ...headers } });
+
+test('a refusal that is not an API error is named as one', async () => {
+  // The production failure, exactly. 403 and a body with no `type: "error"` and
+  // no request_id: the Messages API never saw this. An admin reading "403
+  // forbidden" reasonably concludes the key is dead and rotates a working key,
+  // which is a wasted afternoon and a second secret to look after.
+  const r = await probe(
+    reply(403, '{"error":{"type":"forbidden","message":"Request not allowed"}}', { 'cf-ray': 'a395-BOM' }),
+  );
+
+  assert.equal(r.ok, false);
+  assert.equal(r.reached, true);
+  assert.equal(r.status, 403);
+  assert.equal(r.fromApi, false, 'no `type: "error"`, so this was not the API answering');
+  assert.match(r.diagnosis, /BEFORE the Messages API/);
+  assert.match(r.diagnosis, /key is not the issue/);
+  assert.equal(r.cfRay, 'a395-BOM', 'the one identifier whoever runs that edge can act on');
+});
+
+test('a real API refusal is attributed to the API', async () => {
+  const r = await probe(
+    reply(401, '{"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}'),
+  );
+
+  assert.equal(r.fromApi, true);
+  assert.match(r.diagnosis, /Messages API itself refused/);
+  assert.doesNotMatch(r.diagnosis, /BEFORE/);
+});
+
+test('a working upstream says the fault is ours', async () => {
+  const r = await probe(reply(200, '{"type":"message","content":[]}', { 'request-id': 'req_1' }));
+
+  assert.equal(r.ok, true);
+  assert.equal(r.fromApi, true);
+  assert.equal(r.requestId, 'req_1');
+  assert.match(r.diagnosis, /fault is in the request this app builds/);
+});
+
+test('a missing key names the per-environment trap', async () => {
+  // Wrangler secrets are per-environment and this has bitten before: a key set
+  // on dev leaves production with nothing, and "401" is all anyone sees.
+  const r = await probe(reply(200, '{}'), {});
+
+  assert.equal(r.reached, false);
+  assert.match(r.diagnosis, /per environment/);
+});
+
+test('egress that never completes is not blamed on the key', async () => {
+  const { cfg, storage } = setup();
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('connection refused');
+  };
+  let r;
+  try {
+    r = await (await call('/admin/upstream', 'GET', {
+      cfg, storage, cors: {}, env: { ANTHROPIC_API_KEY: 'sk-ant-x' }, user: ADMIN,
+    })).json();
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  assert.equal(r.reached, false);
+  assert.match(r.diagnosis, /egress from the Worker, not the key/);
+  assert.match(r.error, /connection refused/);
+});
+
+test('the probe never returns the key', async () => {
+  // It is read by whoever is debugging and pasted wherever they are debugging.
+  // Four characters distinguish two environments' keys; the rest is a secret
+  // that would end up in a chat window, which is exactly how this project
+  // acquired the credential it still has to rotate.
+  const r = await probe(reply(403, '{"error":{"type":"forbidden","message":"Request not allowed"}}'));
+
+  assert.equal(r.keyTail, 'abcd');
+  assert.doesNotMatch(JSON.stringify(r), /sk-ant-secret/);
+});
+
+test('the probe is GET only', async () => {
+  const { cfg, storage } = setup();
+  const res = await call('/admin/upstream', 'POST', {
+    cfg, storage, cors: {}, env: {}, user: ADMIN,
+  });
+  assert.equal(res.status, 405);
+});

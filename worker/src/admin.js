@@ -646,6 +646,8 @@ export async function handleAdmin(request, url, ctx) {
       return handleSharePoint(request, url, ctx);
     case '/admin/users':
       return handleUsers(request, url, ctx);
+    case '/admin/upstream':
+      return handleUpstream(request, ctx);
     default:
       return null;
   }
@@ -667,6 +669,118 @@ export async function handleAdminSummary(request, ctx) {
         draft: entries.filter((e) => e.status !== 'approved').length,
       },
       defaultRole: cfg.DEFAULT_ROLE,
+    },
+    200,
+    cors,
+  );
+}
+
+// --- Upstream reachability -------------------------------------------------
+
+/**
+ * Ask Anthropic one trivial question FROM THE WORKER, and report exactly what
+ * came back.
+ *
+ * A rep sees "Something went wrong" and an admin sees a status and a body, and
+ * neither can tell the three causes apart: a bad key, an account restriction,
+ * or something refusing the request before it reaches the API at all. The last
+ * one is the reason this exists. A 403 whose body is
+ * `{"error":{"type":"forbidden","message":"Request not allowed"}}` is NOT the
+ * Messages API answering — every real API error carries `{"type":"error",…}`
+ * and a `request_id`. Something in front of it said no.
+ *
+ * A curl from a laptop cannot tell you this, because the laptop is not what is
+ * being refused. The call has to come from where the failing calls come from.
+ *
+ * Deliberately raw `fetch` rather than the SDK: the SDK turns a non-JSON or
+ * unexpected body into an exception with a tidied-up message, and the exact
+ * bytes are the whole point. max_tokens is 1 — this costs a rounding error.
+ */
+async function handleUpstream(request, ctx) {
+  const { cfg, cors, env } = ctx;
+
+  if (request.method !== 'GET') {
+    return json({ error: 'Use GET.', code: 'method_not_allowed' }, 405, cors);
+  }
+
+  if (!env.ANTHROPIC_API_KEY) {
+    return json(
+      // Worded without naming the variable: the guard in no-direct-bindings
+      // rightly treats any bare mention of it outside an `env.` read as
+      // suspect, and a diagnostic message is not worth loosening that for.
+      {
+        ok: false,
+        reached: false,
+        diagnosis:
+          'No API key is configured for this environment. Secrets are set per environment, so a key set on dev does nothing for production.',
+      },
+      200,
+      cors,
+    );
+  }
+
+  let res;
+  let body;
+  const started = Date.now();
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: cfg.MODEL,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    });
+    body = await res.text();
+  } catch (err) {
+    return json(
+      {
+        ok: false,
+        reached: false,
+        error: String((err && err.message) || err),
+        diagnosis: 'The request never completed. This is network egress from the Worker, not the key.',
+      },
+      200,
+      cors,
+    );
+  }
+
+  // The one distinction worth automating, because it is the one everybody gets
+  // wrong: an API error always names itself `{"type":"error",…}`. Anything else
+  // arriving with a 4xx was written by something standing in front of the API.
+  let parsed = null;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    /* not JSON at all, which is itself the answer */
+  }
+  const fromApi = Boolean(parsed && (parsed.type === 'error' || parsed.type === 'message'));
+
+  return json(
+    {
+      ok: res.ok,
+      reached: true,
+      status: res.status,
+      ms: Date.now() - started,
+      model: cfg.MODEL,
+      // Never the key. The last four characters are enough to tell two keys
+      // apart when someone has set a different one on each environment.
+      keyTail: String(env.ANTHROPIC_API_KEY).slice(-4),
+      fromApi,
+      // Capped: a block page can be a whole HTML document.
+      body: body.slice(0, 600),
+      requestId: res.headers.get('request-id'),
+      cfRay: res.headers.get('cf-ray'),
+      diagnosis: res.ok
+        ? 'The Worker can reach the Messages API and the key works. If reps are still failing, the fault is in the request this app builds, not in reachability.'
+        : fromApi
+          ? 'The Messages API itself refused this. The body names the reason and it is an account or key matter, not a network one.'
+          : 'Something refused this BEFORE the Messages API saw it: the body is not an API error envelope. The key is not the issue. Take the cf-ray above to whoever runs the edge in front of the API.',
     },
     200,
     cors,
