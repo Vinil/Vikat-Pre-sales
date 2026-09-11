@@ -1713,3 +1713,167 @@ test('a refused clipboard does not take the card down with it', async () => {
   assert.match(await page.textContent('.vk-draft-head'), /Ctrl\+C/, 'and it must still say what to do');
   await page.close();
 });
+
+// --- the path a draft actually travels -------------------------------------
+
+/**
+ * A real streamed turn.
+ *
+ * Every other draft test here calls addDrafts() directly, which skips the one
+ * seam a draft has to cross: the SSE frame. A card that renders perfectly from
+ * a function call and never from a stream looks identical in this file and
+ * completely different to a rep.
+ */
+async function streamedTurn(frames) {
+  const page = await widgetPage();
+
+  await page.evaluate((body) => {
+    window.fetch = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/event-stream' },
+        body: {
+          getReader() {
+            let sent = false;
+            return {
+              read() {
+                if (sent) return Promise.resolve({ done: true });
+                sent = true;
+                return Promise.resolve({ done: false, value: new TextEncoder().encode(body) });
+              },
+            };
+          },
+        },
+      });
+  }, frames);
+
+  await page.fill('.vk-input', 'write me the email');
+  await page.click('.vk-send');
+  return page;
+}
+
+/** Framed exactly as worker/src/index.js frames it. */
+const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+test('a draft that arrives on the stream reaches the card', async () => {
+  const draft = {
+    channel: 'email',
+    channelLabel: 'Email',
+    label: 'BerryGPT as the trigger',
+    group: 'versions',
+    subject: 'BerryGPT and what it is allowed to touch',
+    body: 'BerryGPT is a smart move.\n\nIt also creates a question.\n\nWorth twenty minutes?',
+  };
+
+  const page = await streamedTurn(
+    frame('text', { text: 'Here it is.' }) +
+      frame('draft', { drafts: [draft] }) +
+      frame('text', { text: 'The trigger is BerryGPT.' }) +
+      frame('done', {}),
+  );
+
+  await page.waitForSelector('.vk-draft', { timeout: 5000 });
+  assert.match(await page.textContent('.vk-draft'), /BerryGPT and what it is allowed to touch/);
+  assert.match(await page.textContent('.vk-draft-text'), /Worth twenty minutes\?/);
+
+  await page.close();
+});
+
+test('a long draft still reaches the card', async () => {
+  // The email that failed in production was ~1500 characters with blank lines
+  // between paragraphs. Both are ordinary and both are exactly what a real
+  // draft looks like, which is why the short fixtures everywhere else in this
+  // file proved nothing about it.
+  const body = Array.from({ length: 8 }, (_, i) =>
+    `Paragraph ${i + 1}. ${'The sector average dwell time is 42 days. '.repeat(4)}`,
+  ).join('\n\n');
+
+  const page = await streamedTurn(
+    frame('draft', {
+      drafts: [{
+        channel: 'email',
+        channelLabel: 'Email',
+        label: 'Long one',
+        group: 'versions',
+        subject: 'A subject with a question in it?',
+        body,
+      }],
+    }) + frame('done', {}),
+  );
+
+  await page.waitForSelector('.vk-draft', { timeout: 5000 });
+  assert.match(await page.textContent('.vk-draft-text'), /Paragraph 8\./);
+  await page.close();
+});
+
+test('a draft frame split across chunks still reaches the card', async () => {
+  // A frame does not arrive whole. The reader hands over whatever bytes the
+  // network gave it, and a long draft is split mid-JSON — the case the
+  // remainder buffer exists for, and the one a single-chunk stub never tests.
+  const page = await widgetPage();
+  const body =
+    frame('draft', {
+      drafts: [{
+        channel: 'email', channelLabel: 'Email', label: 'Split', group: 'versions',
+        subject: 'A subject', body: 'First paragraph.\n\nSecond paragraph.',
+      }],
+    }) + frame('done', {});
+
+  await page.evaluate((whole) => {
+    const bytes = new TextEncoder().encode(whole);
+    const cuts = [17, 40, 95, bytes.length];
+    let at = 0;
+    let i = 0;
+    window.fetch = () =>
+      Promise.resolve({
+        ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+        body: {
+          getReader: () => ({
+            read() {
+              if (at >= bytes.length) return Promise.resolve({ done: true });
+              const end = Math.min(cuts[i++] || bytes.length, bytes.length);
+              const slice = bytes.slice(at, end);
+              at = end;
+              return Promise.resolve({ done: false, value: slice });
+            },
+          }),
+        },
+      });
+  }, body);
+
+  await page.fill('.vk-input', 'write me the email');
+  await page.click('.vk-send');
+
+  await page.waitForSelector('.vk-draft', { timeout: 5000 });
+  assert.match(await page.textContent('.vk-draft-text'), /Second paragraph\./);
+  await page.close();
+});
+
+test('a frame that cannot be parsed says so instead of vanishing', async () => {
+  // The failure this makes visible: a draft frame is dropped, no card
+  // appears, and the answer still says "the draft is in the card above".
+  // Silence there cost an afternoon.
+  const page = await widgetPage();
+  const logged = [];
+  page.on('console', (m) => { if (m.type() === 'error') logged.push(m.text()); });
+
+  await page.evaluate((body) => {
+    window.fetch = () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => { let sent = false; return { read() {
+        if (sent) return Promise.resolve({ done: true });
+        sent = true;
+        return Promise.resolve({ done: false, value: new TextEncoder().encode(body) });
+      } }; } },
+    });
+  }, 'event: draft\ndata: {"drafts":[{"body":"unterminated\n\nevent: done\ndata: {}\n\n');
+
+  await page.fill('.vk-input', 'write me the email');
+  await page.click('.vk-send');
+  await page.waitForTimeout(400);
+
+  assert.equal(await page.$$eval('.vk-draft', (n) => n.length), 0, 'nothing to render, which is the point');
+  assert.ok(logged.some((l) => /dropped a draft frame/.test(l)), JSON.stringify(logged));
+  await page.close();
+});

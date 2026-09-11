@@ -927,7 +927,12 @@
       try {
         onFrame(event, JSON.parse(data));
       } catch (e) {
-        /* a partial or malformed frame is not worth breaking the stream over */
+        // Not worth breaking the stream over — but not worth hiding either.
+        // A draft frame that failed to parse used to vanish in complete
+        // silence: no card, no error, and an answer that cheerfully said
+        // "the draft is in the card above". Whatever goes wrong here, the
+        // console says which event it was.
+        console.error('[chat] dropped a ' + event + ' frame:', e && e.message);
       }
     });
 

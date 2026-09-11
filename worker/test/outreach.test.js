@@ -524,3 +524,26 @@ test('a product name from the positioning statement is left alone', () => {
   assert.deepEqual(r.warnings, [], JSON.stringify(r.warnings));
   assert.match(r.draft.body, /Semantic Context Graph/);
 });
+
+test('markup in the label alone still raises the warning', () => {
+  // looksMalformed() is called twice against the same string: once to decide
+  // whether to blank the label, once to decide whether to warn. `.test()` on
+  // a /g regex resumes from lastIndex, so without a reset the SECOND call
+  // returns false and the label is silently blanked with nothing said.
+  //
+  // Every other fixture here puts markup in one field and checks one thing,
+  // which is why this went unnoticed: it is the second question about the
+  // same string that gets the wrong answer.
+  const r = normaliseDraft({
+    channel: 'email',
+    label: 'Touch 1 <parameter name="group">versions',
+    subject: 'A clean subject',
+    body: 'A clean body.',
+  });
+
+  assert.equal(r.draft.label, 'Email', 'the label was markup and must not be kept');
+  assert.ok(
+    r.warnings.some((w) => /tool markup/i.test(w)),
+    `blanked the label and said nothing: ${JSON.stringify(r.warnings)}`,
+  );
+});

@@ -75,7 +75,15 @@ const LABEL_CHARS = 80;
  */
 const TOOL_MARKUP = /<\/?[^<>]*\b(?:antml|parameter|invoke|function_calls)\b[^<>]*>/gi;
 
-const looksMalformed = (value) => TOOL_MARKUP.test(String(value == null ? '' : value));
+/**
+ * `.test()` on a /g regex is STATEFUL — it resumes from lastIndex — so three
+ * calls in a row against three different strings give three answers that
+ * depend on the order they were asked in. Reset before each one.
+ */
+const looksMalformed = (value) => {
+  TOOL_MARKUP.lastIndex = 0;
+  return TOOL_MARKUP.test(String(value == null ? '' : value));
+};
 
 function clean(value, max) {
   return (
