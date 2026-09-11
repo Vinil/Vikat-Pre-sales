@@ -120,6 +120,39 @@
     }
   }
 
+  /**
+   * An assistant turn as the MODEL should see it, rather than as the rep saw it.
+   *
+   * The wire carries strings, so a tool call cannot be replayed: the server
+   * accepts `{role, content}` and nothing else. What survives a draft turn is
+   * therefore the two sentences written AROUND the card — "built on X, check Y
+   * before sending" — which read as a complete, successful answer to "write me
+   * an email" and say nothing about a tool.
+   *
+   * The model then does the obvious thing next time it is asked: it reproduces
+   * the shape of its own last reply. Two sentences, no tool call, no card. That
+   * is the bug reps hit — the first draft in a conversation works and every one
+   * after it comes back as commentary about a card that was never made.
+   *
+   * So the transcript says what actually happened. The note is added HERE and
+   * not in `content`, because repaint() draws `content` and a rep must never
+   * read our bookkeeping in the middle of their conversation.
+   */
+  function forWire(m) {
+    if (m.role !== 'assistant' || !m.drafts) return { role: m.role, content: m.content };
+    return {
+      role: m.role,
+      content:
+        m.content +
+        '\n\n[Transcript note: on this turn you called draft_outreach ' +
+        m.drafts +
+        (m.drafts === 1 ? ' time' : ' times') +
+        ' and the rep was shown the draft as a card. Tool calls are not kept in this ' +
+        'transcript, so only the sentences above survive. Writing sentences like them ' +
+        'again does not produce a draft.]',
+    };
+  }
+
   // --- Disclosure tags -----------------------------------------------------
 
   // The system prompt ends an answer with e.g. "[Internal only] — do not repeat…".
@@ -962,6 +995,9 @@
     // the card would vanish from the history that gets resent next turn.
     var answer = '';
     var spoken = '';
+    // How many drafts this turn actually produced. Recorded so the next turn's
+    // transcript can say a tool ran; see forWire().
+    var made = 0;
 
     controller = new AbortController();
 
@@ -971,7 +1007,7 @@
         headers: { 'Content-Type': 'application/json' },
         // Carries the Cloudflare Access cookie on a cross-origin request.
         credentials: 'include',
-        body: JSON.stringify({ sessionId: sessionId(), messages: history }),
+        body: JSON.stringify({ sessionId: sessionId(), messages: history.map(forWire) }),
         signal: controller.signal,
       });
 
@@ -1045,6 +1081,7 @@
             if (!status.isConnected) log.appendChild(status);
           } else if (event === 'draft') {
             status.remove();
+            made += (data.drafts || []).length;
             addDrafts(data.drafts);
             // The answer continues after the card, so a fresh bubble is needed
             // — otherwise the model's explanation appends to the bubble that
@@ -1065,7 +1102,7 @@
       status.remove();
 
       if (spoken.trim()) {
-        history.push({ role: 'assistant', content: spoken });
+        history.push({ role: 'assistant', content: spoken, drafts: made });
         saveHistory();
         // The server indexed this conversation on the turn it just handled, so
         // a brand-new chat only becomes listable now. The rail refreshes on
@@ -1165,7 +1202,19 @@
     history = [];
     (turns || []).forEach(function (turn) {
       if (turn.userMessage) history.push({ role: 'user', content: turn.userMessage });
-      if (turn.agentResponse) history.push({ role: 'assistant', content: turn.agentResponse });
+      if (turn.agentResponse) {
+        // The server records the names of the tools each turn ran, which is
+        // what lets a reopened conversation carry the same truthful transcript
+        // a live one does. Without it, picking a chat back up tomorrow puts the
+        // model straight back into imitating replies it thinks were drafts.
+        history.push({
+          role: 'assistant',
+          content: turn.agentResponse,
+          drafts: (turn.toolCalls || []).filter(function (n) {
+            return n === 'draft_outreach';
+          }).length,
+        });
+      }
     });
 
     try {
@@ -1280,5 +1329,12 @@
     addDraft: addDraft,
     addDrafts: addDrafts,
     addStatus: addStatus,
+    // What repaint() draws and what gets resent next turn. A test cannot read
+    // it from sessionStorage — this page has no storage origin, which is the
+    // same reason saveHistory() swallows the error — and it is the one place
+    // the transcript note must NOT be, so it has to be visible from a test.
+    historyForTest: function () {
+      return history.slice();
+    },
   };
 })();

@@ -1877,3 +1877,154 @@ test('a frame that cannot be parsed says so instead of vanishing', async () => {
   assert.ok(logged.some((l) => /dropped a draft frame/.test(l)), JSON.stringify(logged));
   await page.close();
 });
+
+/**
+ * Drive two turns and hand back every request body the widget sent.
+ *
+ * The bug these cover is not in a single turn — turn one is fine every time.
+ * It is in what turn one leaves behind for turn two to read.
+ */
+async function twoTurns(firstTurnFrames) {
+  const page = await widgetPage();
+
+  await page.evaluate((body) => {
+    window.__sent = [];
+    window.fetch = (url, init) => {
+      window.__sent.push(JSON.parse(init.body));
+      const text = window.__sent.length === 1 ? body : 'event: done\ndata: {}\n\n';
+      return Promise.resolve({
+        ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+        body: { getReader: () => { let sent = false; return { read() {
+          if (sent) return Promise.resolve({ done: true });
+          sent = true;
+          return Promise.resolve({ done: false, value: new TextEncoder().encode(text) });
+        } }; } },
+      });
+    };
+  }, firstTurnFrames);
+
+  await page.fill('.vk-input', 'write me an email to Driscolls');
+  await page.click('.vk-send');
+  await page.waitForTimeout(400);
+
+  await page.fill('.vk-input', 'can you generate another email draft please?');
+  await page.click('.vk-send');
+  await page.waitForTimeout(400);
+
+  return page;
+}
+
+const A_DRAFT = {
+  channel: 'email',
+  channelLabel: 'Email',
+  label: 'BerryGPT as the trigger',
+  group: 'versions',
+  subject: 'BerryGPT and what it is allowed to touch',
+  body: 'BerryGPT is a smart move.\n\nWorth twenty minutes?',
+};
+
+test('a turn that made a draft says so in the transcript it replays', async () => {
+  // Production failure, exactly: the first draft lands, and every "another
+  // one please" after it comes back as two sentences of commentary with no
+  // card. The wire carries strings, so the draft_outreach call is erased and
+  // all the model can see of its last turn is a confident little reply that
+  // looks like a complete answer. It reproduces the reply. No tool, no card.
+  const page = await twoTurns(
+    frame('draft', { drafts: [A_DRAFT] }) +
+      frame('text', { text: 'Built on BerryGPT. Check the recipient before sending.' }) +
+      frame('done', {}),
+  );
+
+  const second = (await page.evaluate(() => window.__sent))[1];
+  const assistant = second.messages.filter((m) => m.role === 'assistant');
+
+  assert.equal(assistant.length, 1);
+  assert.match(assistant[0].content, /called draft_outreach 1 time/);
+  assert.match(assistant[0].content, /does not produce a draft/);
+  // And the rep's own words are still in front of it, not replaced by it.
+  assert.match(assistant[0].content, /^Built on BerryGPT\./);
+
+  await page.close();
+});
+
+test('a turn that made no draft is replayed untouched', async () => {
+  // The note is a statement of fact about a tool call. A turn that ran no
+  // tool must not carry it, or it teaches the model that the sentence is
+  // something an assistant writes rather than something that happened.
+  const page = await twoTurns(
+    frame('text', { text: 'Driscolls is a berry grower in Watsonville.' }) + frame('done', {}),
+  );
+
+  const second = (await page.evaluate(() => window.__sent))[1];
+  const assistant = second.messages.filter((m) => m.role === 'assistant');
+
+  assert.equal(assistant.length, 1);
+  assert.equal(assistant[0].content, 'Driscolls is a berry grower in Watsonville.');
+
+  await page.close();
+});
+
+test('the transcript note is never shown to the rep', async () => {
+  // It is bookkeeping addressed to the model. repaint() draws history, so a
+  // note written into `content` rather than added on the way out would appear
+  // in the middle of a rep's conversation on the next redraw.
+  const page = await twoTurns(
+    frame('draft', { drafts: [A_DRAFT] }) +
+      frame('text', { text: 'Built on BerryGPT.' }) +
+      frame('done', {}),
+  );
+
+  assert.doesNotMatch(await page.textContent('.vk-log'), /Transcript note/);
+
+  // The DOM check alone proves nothing: the first render draws the stream, not
+  // history, so a note written into `content` would sail past it and only show
+  // up on the next redraw. What repaint() draws is the stored history, so that
+  // is what has to be clean — this is the assertion with the teeth in it.
+  const stored = await page.evaluate(() => window.VikatChatInternals.historyForTest());
+  const said = stored.filter((m) => m.role === 'assistant');
+  assert.equal(said.length, 1);
+  assert.equal(said[0].content, 'Built on BerryGPT.');
+  assert.equal(said[0].drafts, 1, 'the count is carried beside the text, not inside it');
+
+  await page.close();
+});
+
+test('a reopened conversation carries the same truthful transcript', async () => {
+  // A rep who comes back to a chat tomorrow gets it from the SERVER, not from
+  // sessionStorage, and the server records tool names per turn. Without this,
+  // reopening a conversation puts the model straight back into imitating
+  // replies it has no way to know were drafts.
+  const page = await widgetPage();
+
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.fetch = (url, init) => {
+      window.__sent.push(JSON.parse(init.body));
+      return Promise.resolve({
+        ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+        body: { getReader: () => { let sent = false; return { read() {
+          if (sent) return Promise.resolve({ done: true });
+          sent = true;
+          return Promise.resolve({ done: false, value: new TextEncoder().encode('event: done\ndata: {}\n\n') });
+        } }; } },
+      });
+    };
+    window.VikatChat.open('sess_reopened', [
+      { userMessage: 'write me an email', agentResponse: 'Built on BerryGPT.', toolCalls: ['draft_outreach'] },
+      { userMessage: 'who are they?', agentResponse: 'A berry grower.', toolCalls: [] },
+    ], []);
+  });
+
+  await page.fill('.vk-input', 'another draft please');
+  await page.click('.vk-send');
+  await page.waitForTimeout(400);
+
+  const sent = (await page.evaluate(() => window.__sent))[0];
+  const assistant = sent.messages.filter((m) => m.role === 'assistant');
+
+  assert.equal(assistant.length, 2);
+  assert.match(assistant[0].content, /called draft_outreach 1 time/);
+  assert.equal(assistant[1].content, 'A berry grower.');
+
+  await page.close();
+});
