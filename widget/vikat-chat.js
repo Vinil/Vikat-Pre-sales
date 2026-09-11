@@ -802,6 +802,46 @@
     if (group.length) addDraft(group);
   }
 
+  /**
+   * Draw the drafts a turn produced, and say so out loud when nothing appears.
+   *
+   * A draft that fails to render is INVISIBLE. The reply still reads as though
+   * a card is on screen — "built on X, check Y before sending" — so a rep sees
+   * confident commentary about an email that is not there, and the only report
+   * anyone can make is "it isn't working". That has now cost days, twice,
+   * because every layer was silent: a dropped frame said nothing, an empty
+   * payload said nothing, and a card that failed to build said nothing.
+   *
+   * So this is the one place that checks its own work. If a draft arrived and
+   * no card can be found afterwards, the rep is told plainly and the console
+   * gets what actually came down the wire.
+   */
+  function showDrafts(list) {
+    var drafts = list || [];
+    var before = log.querySelectorAll('.vk-draft').length;
+
+    if (!drafts.length) {
+      console.error('[chat] a draft frame arrived carrying no drafts:', JSON.stringify(list));
+      addError('The assistant says it wrote a draft but sent nothing to show. Ask for it again.');
+      return;
+    }
+
+    try {
+      addDrafts(drafts);
+    } catch (err) {
+      console.error('[chat] the draft card failed to build:', err);
+      console.error('[chat] what arrived:', JSON.stringify(drafts).slice(0, 1000));
+    }
+
+    // Built is not the same as drawn. A card with nothing in it is the shape
+    // this failure takes on screen: a thin line where an email should be.
+    var cards = log.querySelectorAll('.vk-draft');
+    var drawn = cards.length > before && cards[cards.length - 1].textContent.trim();
+    if (!drawn) {
+      addError('A draft came back but its card could not be drawn. The browser console has what arrived.');
+    }
+  }
+
   function copyButton(label, text, primary) {
     var b = el('button', 'vk-copy' + (primary ? ' vk-copy-main' : ''), label);
     b.type = 'button';
@@ -1082,7 +1122,7 @@
           } else if (event === 'draft') {
             status.remove();
             made += (data.drafts || []).length;
-            addDrafts(data.drafts);
+            showDrafts(data.drafts);
             // The answer continues after the card, so a fresh bubble is needed
             // — otherwise the model's explanation appends to the bubble that
             // was open before the draft and reads as part of it.

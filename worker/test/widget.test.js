@@ -2028,3 +2028,72 @@ test('a reopened conversation carries the same truthful transcript', async () =>
 
   await page.close();
 });
+
+test('a draft frame carrying nothing says so instead of going quiet', async () => {
+  // The server guards against this, so it should be impossible — which is
+  // exactly why it must be loud if it ever happens. A silent no-op here reads
+  // to the rep as "the assistant ignored me", and that has cost days.
+  const page = await widgetPage();
+  const logged = [];
+  page.on('console', (m) => { if (m.type() === 'error') logged.push(m.text()); });
+
+  await page.evaluate(() => {
+    window.fetch = () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => { let sent = false; return { read() {
+        if (sent) return Promise.resolve({ done: true });
+        sent = true;
+        return Promise.resolve({ done: false, value: new TextEncoder().encode(
+          'event: draft\ndata: {"drafts":[]}\n\nevent: done\ndata: {}\n\n') });
+      } }; } },
+    });
+  });
+
+  await page.fill('.vk-input', 'write me the email');
+  await page.click('.vk-send');
+  await page.waitForSelector('.vk-error', { timeout: 5000 });
+
+  assert.match(await page.textContent('.vk-error'), /sent nothing to show/);
+  assert.ok(logged.some((l) => /carrying no drafts/.test(l)), JSON.stringify(logged));
+  await page.close();
+});
+
+test('a draft that cannot be drawn is reported, not swallowed', async () => {
+  // A card that builds but renders empty is the shape this failure takes on
+  // screen: a thin line where an email should be, and a reply above it talking
+  // confidently about a draft the rep cannot see.
+  const page = await widgetPage();
+  const logged = [];
+  page.on('console', (m) => { if (m.type() === 'error') logged.push(m.text()); });
+
+  await page.evaluate(() => {
+    window.fetch = () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => { let sent = false; return { read() {
+        if (sent) return Promise.resolve({ done: true });
+        sent = true;
+        return Promise.resolve({ done: false, value: new TextEncoder().encode(
+          'event: draft\ndata: {"drafts":[null]}\n\nevent: done\ndata: {}\n\n') });
+      } }; } },
+    });
+  });
+
+  await page.fill('.vk-input', 'write me the email');
+  await page.click('.vk-send');
+  await page.waitForSelector('.vk-error', { timeout: 5000 });
+
+  assert.match(await page.textContent('.vk-error'), /could not be drawn/);
+  assert.equal(await page.$$eval('.vk-draft', (n) => n.length), 0);
+  assert.ok(logged.some((l) => /failed to build/.test(l)), JSON.stringify(logged));
+  await page.close();
+});
+
+test('a draft that draws fine raises nothing', async () => {
+  // The check must not cry wolf: a working card with an error under it is
+  // worse than no check at all.
+  const page = await streamedTurn(frame('draft', { drafts: [A_DRAFT] }) + frame('done', {}));
+
+  await page.waitForSelector('.vk-draft', { timeout: 5000 });
+  assert.equal(await page.$$eval('.vk-error', (n) => n.length), 0);
+  await page.close();
+});
