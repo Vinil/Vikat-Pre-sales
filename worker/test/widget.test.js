@@ -2097,3 +2097,31 @@ test('a draft that draws fine raises nothing', async () => {
   assert.equal(await page.$$eval('.vk-error', (n) => n.length), 0);
   await page.close();
 });
+
+test('a card that builds but never shows is still reported', async () => {
+  // The failure shape a rep actually describes as "still not coming": the card
+  // is in the DOM, the reply talks about it, and there is nothing on screen but
+  // a thin line. Counting cards calls this a success, which is why the check
+  // asks the browser for a height rather than asking the DOM for a node.
+  const page = await widgetPage();
+  await page.addStyleTag({ content: '.vk-draft { display: none; }' });
+
+  await page.evaluate((body) => {
+    window.fetch = () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => { let sent = false; return { read() {
+        if (sent) return Promise.resolve({ done: true });
+        sent = true;
+        return Promise.resolve({ done: false, value: new TextEncoder().encode(body) });
+      } }; } },
+    });
+  }, `event: draft\ndata: ${JSON.stringify({ drafts: [A_DRAFT] })}\n\nevent: done\ndata: {}\n\n`);
+
+  await page.fill('.vk-input', 'write me the email');
+  await page.click('.vk-send');
+  await page.waitForSelector('.vk-error', { timeout: 5000 });
+
+  assert.equal(await page.$$eval('.vk-draft', (n) => n.length), 1, 'it built');
+  assert.match(await page.textContent('.vk-error'), /could not be drawn/, 'and it still reached nobody');
+  await page.close();
+});

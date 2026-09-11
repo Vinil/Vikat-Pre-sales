@@ -833,10 +833,17 @@
       console.error('[chat] what arrived:', JSON.stringify(drafts).slice(0, 1000));
     }
 
-    // Built is not the same as drawn. A card with nothing in it is the shape
-    // this failure takes on screen: a thin line where an email should be.
+    // Built is not the same as drawn, and the difference is the whole point.
+    // A card in the DOM with no height on screen is what this failure looks
+    // like to a rep: a thin line where an email should be, under a reply that
+    // talks about it confidently. Counting cards would call that a success.
+    //
+    // offsetHeight is the honest question — it is zero for display:none, for a
+    // collapsed parent, and for a card clipped out of the layout, which are
+    // the ways a card that built perfectly still reaches nobody.
     var cards = log.querySelectorAll('.vk-draft');
-    var drawn = cards.length > before && cards[cards.length - 1].textContent.trim();
+    var last = cards.length > before ? cards[cards.length - 1] : null;
+    var drawn = last && last.offsetHeight > 0 && last.textContent.trim();
     if (!drawn) {
       addError('A draft came back but its card could not be drawn. The browser console has what arrived.');
     }
