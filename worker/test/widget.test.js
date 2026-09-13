@@ -2125,3 +2125,79 @@ test('a card that builds but never shows is still reported', async () => {
   assert.match(await page.textContent('.vk-error'), /could not be drawn/, 'and it still reached nobody');
   await page.close();
 });
+
+test('a draft card survives a conversation long enough to scroll', async () => {
+  // THE bug reps reported as "the card is not rendering". It rendered every
+  // time. It was crushed.
+  //
+  // .vk-log is a flex column with a bounded height, so its children are
+  // shrinkable; `min-height: auto` normally gives each one a floor at its own
+  // content height, but `overflow: hidden` on the card resolves that floor to
+  // ZERO. Once there is enough above it to overflow the log, the browser takes
+  // the space it needs from the one child that will yield, and the card
+  // collapses to its head with its own overflow clipping the email inside.
+  //
+  // Every other draft test put one short message on screen, where nothing
+  // overflows and nothing shrinks. A real research turn writes four paragraphs
+  // before the draft and hit it every single time.
+  const page = await widgetPage();
+  await page.setViewportSize({ width: 900, height: 500 });
+  await page.evaluate(() => {
+    document.querySelector('#m').style.height = '400px';
+  });
+
+  // The preamble a research turn actually writes before it drafts anything.
+  await page.evaluate(() => {
+    for (let i = 0; i < 6; i += 1) {
+      window.VikatChatInternals.renderBody;
+      const n = document.createElement('div');
+      n.className = 'vk-msg vk-msg-agent';
+      n.textContent = `The person, the trigger, why it matters. ${'Paragraph filler. '.repeat(20)}`;
+      document.querySelector('.vk-log').appendChild(n);
+    }
+  });
+
+  await page.evaluate((d) => window.VikatChatInternals.addDraft(d), A_DRAFT);
+  await page.waitForSelector('.vk-draft');
+
+  const card = await page.$eval('.vk-draft', (n) => ({
+    client: n.clientHeight,
+    scroll: n.scrollHeight,
+  }));
+  const bodyShown = await page.$eval('.vk-draft-text', (n) => n.offsetHeight);
+
+  assert.ok(
+    card.scroll <= card.client + 1,
+    `the card is clipping its own contents: ${card.client}px shown of ${card.scroll}px`,
+  );
+  assert.ok(bodyShown > 0, 'the email itself has to be on screen, not just the head');
+
+  await page.close();
+});
+
+test('the working indicator survives a long conversation too', async () => {
+  // Same root cause as the card: overflow:hidden drops the min-height floor to
+  // zero, so the log squeezes it out. An indicator that vanishes exactly when a
+  // turn is slow is worse than none — that is the moment it is the only thing
+  // telling a rep the assistant has not died.
+  const page = await widgetPage();
+  await page.setViewportSize({ width: 900, height: 500 });
+  await page.evaluate(() => {
+    document.querySelector('#m').style.height = '400px';
+    for (let i = 0; i < 6; i += 1) {
+      const n = document.createElement('div');
+      n.className = 'vk-msg vk-msg-agent';
+      n.textContent = `Researching. ${'Paragraph filler. '.repeat(20)}`;
+      document.querySelector('.vk-log').appendChild(n);
+    }
+    window.VikatChatInternals.addStatus('Searching the web');
+  });
+
+  await page.waitForSelector('.vk-status');
+  const s = await page.$eval('.vk-status', (n) => ({ client: n.clientHeight, scroll: n.scrollHeight }));
+
+  assert.ok(s.client > 0, 'it was squeezed out of existence');
+  assert.ok(s.scroll <= s.client + 1, `clipped: ${s.client}px shown of ${s.scroll}px`);
+
+  await page.close();
+});

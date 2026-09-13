@@ -399,6 +399,13 @@
    so it is a card with a moving bar, at reading size, in the brand teal. */
 .vk-status {
   align-self: stretch;
+  /* Same trap as the draft card: `overflow: hidden` below (it clips the
+     sweeping highlight) drops this item's min-height floor to zero, so a long
+     conversation squeezes the working indicator out of existence. An indicator
+     that disappears exactly when a turn is taking a long time is worse than
+     none, because that is the moment it is the only thing telling a rep the
+     assistant has not died. */
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -652,6 +659,18 @@
    somewhere it will never be. */
 .vk-draft {
   align-self: stretch;
+  /* The card is a flex item in a column log with a bounded height, so it is
+     shrinkable by default — and `overflow: hidden` below resolves its
+     `min-height: auto` to ZERO, which is the rule that removes the floor every
+     other child of the log still has. Once the conversation is long enough to
+     overflow, the browser takes the space it needs out of the one item that
+     will give it up, and the card collapses to its head with its own overflow
+     clipping the email inside it.
+     That is the bug reps reported as "the card is not rendering". It rendered
+     every time; it was crushed. And it only happens once there is enough above
+     it to overflow the log, which is why a test with one short message on
+     screen never saw it and a real research turn always did. */
+  flex-shrink: 0;
   margin: 4px 0;
   border: 1px solid var(--vk-paper-line);
   border-radius: 12px;
