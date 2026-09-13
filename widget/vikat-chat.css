@@ -899,3 +899,124 @@
   color: var(--vk-w60);
   overflow-wrap: anywhere;
 }
+
+/* ── LinkedIn post preview ──────────────────────────────────────
+   A rep cannot judge a post from four fields in a form. What they need is the
+   thing their prospect sees, so this is the feed layout rather than a styled
+   blockquote: image at the top, headline against the fold, tags at the bottom.
+   It sits on paper like the rest of the card, because a post is read on white. */
+.vk-draft-preview {
+  /* The preview is the full width of the card, not a value in a label/value
+     row — a feed post squeezed into the third column is not a preview. */
+  display: block;
+}
+
+.vk-post {
+  margin-top: 8px;
+  border: 1px solid var(--vk-paper-line);
+  border-radius: 10px;
+  background: var(--vk-paper);
+  overflow: hidden;
+}
+
+.vk-post-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+
+.vk-post-avatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--vk-brand-teal);
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.vk-post-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vk-paper-ink);
+}
+
+.vk-post-meta {
+  font-size: 11.5px;
+  color: var(--vk-paper-dim);
+}
+
+.vk-post-text {
+  padding: 4px 14px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--vk-paper-ink);
+  white-space: pre-wrap;
+}
+
+.vk-post-headline {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+/* Everything past the fold is what a prospect does NOT read unless they click,
+   so it is shown at the weight it actually has. */
+.vk-post-body { color: var(--vk-paper-body); }
+
+.vk-post-more {
+  color: var(--vk-paper-dim);
+  font-weight: 600;
+}
+
+.vk-post-art {
+  border-top: 1px solid var(--vk-paper-line);
+  background: var(--vk-paper-sf);
+}
+
+.vk-post-img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Until there is a banner this is a labelled space, not a silent gap: a rep
+   who cannot see where the image goes does not notice it is missing. */
+.vk-post-art.empty {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  /* align-CONTENT, not place-items: a two-row grid in a tall box spreads its
+     rows to the edges, which put the label at the top and the brief at the
+     bottom of a 430px void. */
+  align-content: center;
+  padding: 22px 18px;
+  text-align: center;
+  /* A height rather than LinkedIn's 1.91/1 ratio. The ratio is the honest
+     shape, but at full card width it is 430px of nothing and the placeholder
+     becomes the largest thing on screen; capping it with max-height does not
+     work either, because aspect-ratio then takes the width down with it and
+     the banner becomes a box in the corner. A real image keeps the true ratio
+     — it is the EMPTY state that is allowed to be shorter than the thing it
+     stands for. */
+  height: 170px;
+  border: 1px dashed var(--vk-paper-line);
+  border-width: 1px 0 0;
+}
+
+.vk-post-art-k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--vk-paper-dim);
+}
+
+.vk-post-art-brief {
+  max-width: 44ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--vk-paper-body);
+}

@@ -184,13 +184,58 @@ test('one bad schema costs one tool, not the other four', async () => {
     onRequest: (body) => offered.push((body.tools || []).map((d) => d.name)),
   });
   const { status, text } = await chat(stub);
+  const last = offered[offered.length - 1];
 
   assert.equal(status, 200);
   assert.match(text, /Answered without tools\./, 'the rep still gets an answer');
-  assert.equal(offered.length, 2, 'one refusal, one retry');
-  assert.ok(!offered[1].includes('log_prospect'), 'the refused tool is gone');
-  assert.equal(offered[1].length, ALL_TOOLS() - 1, 'and nothing else went with it');
-  assert.ok(offered[1].includes('find_collateral'), 'find_collateral survives, which is the point');
+
+  // One at a time, never the whole set. Which tool goes first is a GUESS — the
+  // costliest schema is the best prior available, not a diagnosis — so the
+  // ladder may take more than one retry to reach the real culprit. What must
+  // never happen is the jump straight to zero that took production down.
+  for (let i = 1; i < offered.length; i += 1) {
+    assert.equal(offered[i].length, offered[i - 1].length - 1, `retry ${i} shed more than one`);
+  }
+  assert.ok(!last.includes('log_prospect'), 'the refused tool is gone');
+  assert.ok(last.includes('find_collateral'), 'find_collateral survives, which is the point');
+  assert.ok(last.length >= ALL_TOOLS() - offered.length + 1, 'nothing was shed beyond the ladder');
+});
+
+test('a tool shed on a wrong guess comes back next turn', () => {
+  // The ladder sheds the costliest schema first, which is a prior and not a
+  // diagnosis. Remembering a guess that did NOT work blacklists an innocent
+  // tool for the life of the isolate — so adding three fields to
+  // draft_outreach, making it the costliest, would have cost every subsequent
+  // request whichever tool was shed before the real culprit was found.
+  //
+  // Only the last drop before the accepted request is remembered.
+  const first = [];
+  const firstStub = stubApi({
+    rejectWithTools: false,
+    rejectWhen: (body) => body.tools?.some((d) => d.name === 'log_prospect'),
+    onRequest: (body) => first.push((body.tools || []).map((d) => d.name)),
+  });
+
+  const second = [];
+  const secondStub = stubApi({
+    rejectWithTools: false,
+    rejectWhen: (body) => body.tools?.some((d) => d.name === 'log_prospect'),
+    onRequest: (body) => second.push((body.tools || []).map((d) => d.name)),
+  });
+
+  return chat(firstStub).then(async () => {
+    const shedOnAGuess = first[0].filter((n) => !first[first.length - 1].includes(n));
+    assert.ok(shedOnAGuess.length > 1, 'this case only means anything if a guess was wrong');
+
+    await chat(secondStub);
+
+    // log_prospect is remembered, so the next turn never offers it again.
+    assert.ok(!second[0].includes('log_prospect'), 'the real culprit is remembered');
+    // Everything else it guessed at is back on the first try.
+    for (const name of shedOnAGuess.filter((n) => n !== 'log_prospect')) {
+      assert.ok(second[0].includes(name), `${name} was innocent and did not come back`);
+    }
+  });
 });
 
 test('a 400 that is not about the schema still fails loudly', async () => {

@@ -23,7 +23,7 @@ import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
 import { retrieve } from '../src/retrieve.js';
 import { runTool, TOOL_DEFINITIONS } from '../src/tools.js';
-import { normaliseDraft, CHANNELS } from '../src/outreach.js';
+import { normaliseDraft, CHANNELS, postText } from '../src/outreach.js';
 import { positioningBlock, POSITIONING_KEY, POSITIONING_MAX_CHARS } from '../src/positioning.js';
 import { buildSystemPrompt } from '../src/systemPrompt.js';
 import { fakeKV } from './helpers.js';
@@ -546,4 +546,83 @@ test('markup in the label alone still raises the warning', () => {
     r.warnings.some((w) => /tool markup/i.test(w)),
     `blanked the label and said nothing: ${JSON.stringify(r.warnings)}`,
   );
+});
+
+// --- LinkedIn posts -------------------------------------------------------
+
+const POST = {
+  channel: 'linkedin_post',
+  subject: '',
+  label: 'Acquisition announcement',
+  group: 'versions',
+  headline: 'NEWS: we acquired the patent behind instrument-to-cloud test data',
+  body: 'At the centre of this is the IP for test data moving from the field to the cloud.\n\nFor customers, that means fewer manual handoffs.',
+  hashtags: '#TestData, #Automation #Automation OT/ICS!! #A #B #C #D',
+  imageBrief: 'An engineer in hi-vis at a server rack, blue and green light, wide landscape.',
+};
+
+test('a post carries its four parts separately', () => {
+  const { draft } = normaliseDraft(POST);
+
+  assert.equal(draft.channel, 'linkedin_post');
+  assert.match(draft.headline, /^NEWS: we acquired/);
+  assert.match(draft.body, /fewer manual handoffs/);
+  assert.match(draft.imageBrief, /hi-vis at a server rack/);
+  // A rep copies these into four different places, so they must not be one
+  // string they have to cut up.
+  assert.ok(!draft.body.includes(draft.headline));
+  assert.ok(!draft.body.includes('#TestData'));
+});
+
+test('hashtags are normalised however the model wrote them', () => {
+  const { draft } = normaliseDraft(POST);
+
+  // Commas, doubled hashes and punctuation are not information.
+  assert.deepEqual(draft.hashtags.slice(0, 3), ['#TestData', '#Automation', '#Automation']);
+  assert.ok(draft.hashtags.every((t) => /^#[A-Za-z0-9]+$/.test(t)), draft.hashtags.join(' '));
+  // Five is the ceiling: more reads as spam.
+  assert.equal(draft.hashtags.length, 5);
+});
+
+test('the 3000 covers the whole post, not the body alone', () => {
+  // A body just inside the limit plus a headline and tags is over it, and the
+  // rep finds that out in the composer with the text already pasted.
+  const { draft, warnings } = normaliseDraft({
+    ...POST,
+    body: 'x'.repeat(2990),
+  });
+
+  assert.ok(postText(draft).length > 3000);
+  assert.ok(
+    warnings.some((w) => /together, over/.test(w)),
+    JSON.stringify(warnings),
+  );
+});
+
+test('postText joins in published order', () => {
+  const { draft } = normaliseDraft(POST);
+  const whole = postText(draft);
+
+  assert.ok(whole.indexOf(draft.headline) === 0, 'the headline is the first line or nobody reads it');
+  assert.ok(whole.indexOf(draft.body) > 0);
+  assert.ok(whole.indexOf('#TestData') > whole.indexOf(draft.body), 'tags go last');
+});
+
+test('the other channels gain nothing from the new fields', () => {
+  // They are required on the schema, so the model sends empty strings. An
+  // email that grows a headline row would be a regression in the common case.
+  const { draft } = normaliseDraft({
+    channel: 'email',
+    subject: 'A subject',
+    body: 'A body.',
+    label: '',
+    group: 'versions',
+    headline: 'should be ignored',
+    hashtags: '#Nope',
+    imageBrief: 'a photo',
+  });
+
+  assert.equal(draft.headline, undefined);
+  assert.equal(draft.hashtags, undefined);
+  assert.equal(draft.imageBrief, undefined);
 });

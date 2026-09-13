@@ -2201,3 +2201,104 @@ test('the working indicator survives a long conversation too', async () => {
 
   await page.close();
 });
+
+// --- LinkedIn post card ---------------------------------------------------
+
+const A_POST = {
+  channel: 'linkedin_post',
+  channelLabel: 'LinkedIn post',
+  label: 'Acquisition announcement',
+  group: 'versions',
+  headline: 'NEWS: we acquired the patent behind instrument-to-cloud test data',
+  body: 'At the centre of this is the IP for test data moving from field to cloud.\n\nFor customers that means fewer manual handoffs, and a closeout record you can trust.',
+  hashtags: ['#TestData', '#Automation'],
+  imageBrief: 'An engineer in hi-vis at a server rack, blue and green light, wide landscape.',
+};
+
+async function withPost(post = A_POST) {
+  const page = await widgetPage();
+  await page.evaluate((d) => window.VikatChatInternals.addDraft(d), post);
+  await page.waitForSelector('.vk-draft');
+  return page;
+}
+
+test('a post arrives as parts a rep can copy one at a time', async () => {
+  const page = await withPost();
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((x) => x.textContent));
+
+  assert.deepEqual(keys, ['Headline', 'Message', 'Hashtags', 'Banner', 'Preview']);
+
+  // Each part copies on its own — a rep edits the headline without touching
+  // the body, and pastes the tags after the composer has eaten the newlines.
+  await page.click('.vk-draft-row:nth-child(3) .vk-copy');
+  assert.deepEqual(await page.evaluate(() => window.__copied), ['#TestData #Automation']);
+
+  await page.close();
+});
+
+test('Copy whole post is the one a rep actually pastes', async () => {
+  const page = await withPost();
+  const buttons = await page.$$eval('.vk-draft-foot .vk-copy', (n) => n.map((b) => b.textContent));
+  assert.ok(buttons.includes('Copy whole post'), buttons.join(' | '));
+
+  await page.click('.vk-draft-foot .vk-copy');
+  const copied = (await page.evaluate(() => window.__copied))[0];
+
+  assert.ok(copied.indexOf(A_POST.headline) === 0, 'headline first or nobody reads it');
+  assert.ok(copied.includes('fewer manual handoffs'));
+  assert.ok(copied.indexOf('#TestData') > copied.indexOf('fewer manual handoffs'), 'tags last');
+
+  await page.close();
+});
+
+test('the character count is the whole post, not the body', async () => {
+  // LinkedIn's 3000 covers headline, body and tags together. A body-only count
+  // passes something the composer refuses.
+  const page = await withPost();
+  const shown = await page.textContent('.vk-draft-count');
+  const whole =
+    A_POST.headline.length + A_POST.body.length + '#TestData #Automation'.length + 4;
+
+  assert.equal(shown, whole + ' characters');
+  await page.close();
+});
+
+test('the preview shows the fold, because that is what the prospect sees', async () => {
+  const page = await withPost();
+
+  assert.match(await page.textContent('.vk-post-headline'), /^NEWS: we acquired/);
+  assert.match(await page.textContent('.vk-post-more'), /see more/);
+
+  // The banner is a labelled space at the real ratio, not a silent gap: a rep
+  // who cannot see where the image goes does not notice it is missing.
+  assert.match(await page.textContent('.vk-post-art-k'), /BANNER/);
+  assert.match(await page.textContent('.vk-post-art-brief'), /hi-vis at a server rack/);
+
+  await page.close();
+});
+
+test('the preview is laid out full width, not squeezed into a value column', async () => {
+  // .vk-draft-row is a three-column grid. Dropping a feed post into the value
+  // column renders it at a third of the card and is not a preview of anything.
+  const page = await withPost();
+  const [row, post] = await Promise.all([
+    page.$eval('.vk-draft-preview', (n) => n.getBoundingClientRect().width),
+    page.$eval('.vk-post', (n) => n.getBoundingClientRect().width),
+  ]);
+
+  assert.ok(post > row * 0.8, `the preview is ${Math.round(post)}px inside a ${Math.round(row)}px row`);
+  await page.close();
+});
+
+test('an email is untouched by any of it', async () => {
+  // The common case must not grow a headline row, a preview, or a second
+  // primary button.
+  const page = await withDraft();
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((x) => x.textContent));
+
+  assert.ok(!keys.includes('Headline'), keys.join(' | '));
+  assert.ok(!keys.includes('Preview'), keys.join(' | '));
+  assert.equal(await page.$$eval('.vk-post', (n) => n.length), 0);
+
+  await page.close();
+});

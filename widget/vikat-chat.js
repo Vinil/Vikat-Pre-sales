@@ -632,8 +632,84 @@
   }
 
   /** One variant: the rows, the actions, the count. */
+  /** A post as one block, in published order. Mirrors postText() on the server. */
+  function wholePost(draft) {
+    return [draft.headline, draft.body, (draft.hashtags || []).join(' ')]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  /**
+   * The post as the feed will show it.
+   *
+   * A rep cannot judge a post from its parts in a form. What they need to see
+   * is the thing their prospect sees: the headline against the fold, the image
+   * at the top, the tags at the bottom. The fold especially — LinkedIn hides
+   * everything past the first line or two behind "see more", so a headline
+   * that buries the point is a post nobody reads, and that is invisible until
+   * you look at it laid out.
+   *
+   * The fold marker is ADVISORY and says so. It moves with the device and the
+   * viewport, so this shows roughly where it lands rather than claiming a line
+   * LinkedIn guarantees.
+   */
+  function postPreview(draft) {
+    var box = el('div', 'vk-post');
+
+    var head = el('div', 'vk-post-head');
+    head.appendChild(el('div', 'vk-post-avatar', 'V'));
+    var who = el('div', 'vk-post-who');
+    who.appendChild(el('div', 'vk-post-name', 'Vikat'));
+    who.appendChild(el('div', 'vk-post-meta', 'Your company page  ·  Now'));
+    head.appendChild(who);
+    box.appendChild(head);
+
+    var text = el('div', 'vk-post-text');
+    if (draft.headline) text.appendChild(el('strong', 'vk-post-headline', draft.headline));
+
+    // The join puts a blank line after the headline and the headline element
+    // already carries its own margin, so without the trim the preview opens on
+    // a gap the real feed does not have.
+    var rest = wholePost(draft)
+      .slice((draft.headline || '').length)
+      .replace(/^\s+/, '');
+    var folded = rest.length > FOLD_CHARS;
+    text.appendChild(
+      el('span', 'vk-post-body', folded ? rest.slice(0, FOLD_CHARS) : rest),
+    );
+    if (folded) text.appendChild(el('span', 'vk-post-more', '…see more'));
+    box.appendChild(text);
+
+    // The image is the first thing in the feed and the last thing built, so it
+    // is a labelled space until there is one rather than a silent gap.
+    var art = el('div', 'vk-post-art');
+    if (draft.imageUrl) {
+      var img = el('img', 'vk-post-img');
+      img.src = draft.imageUrl;
+      img.alt = draft.imageBrief || 'Post banner';
+      art.appendChild(img);
+    } else {
+      art.classList.add('empty');
+      art.appendChild(el('div', 'vk-post-art-k', 'BANNER'));
+      art.appendChild(
+        el('div', 'vk-post-art-brief', draft.imageBrief || 'No banner brief was written.'),
+      );
+    }
+    box.appendChild(art);
+
+    return box;
+  }
+
   function draftPane(draft) {
     var pane = el('div', 'vk-draft-pane');
+
+    if (draft.headline) {
+      var headRow = el('div', 'vk-draft-row');
+      headRow.appendChild(el('div', 'vk-draft-k', 'Headline'));
+      headRow.appendChild(el('div', 'vk-draft-v', draft.headline));
+      headRow.appendChild(copyButton('Copy', draft.headline));
+      pane.appendChild(headRow);
+    }
 
     if (draft.subject) {
       var subjRow = el('div', 'vk-draft-row');
@@ -651,9 +727,41 @@
     bodyRow.appendChild(copyButton('Copy', draft.body));
     pane.appendChild(bodyRow);
 
+    if (draft.hashtags && draft.hashtags.length) {
+      var tagRow = el('div', 'vk-draft-row');
+      tagRow.appendChild(el('div', 'vk-draft-k', 'Hashtags'));
+      tagRow.appendChild(el('div', 'vk-draft-v', draft.hashtags.join(' ')));
+      tagRow.appendChild(copyButton('Copy', draft.hashtags.join(' ')));
+      pane.appendChild(tagRow);
+    }
+
+    // The brief is for whoever makes the banner, so it is copyable on its own
+    // even once there is an image: a rep who does not like the generated one
+    // hands this to a designer.
+    if (draft.imageBrief) {
+      var artRow = el('div', 'vk-draft-row');
+      artRow.appendChild(el('div', 'vk-draft-k', 'Banner'));
+      artRow.appendChild(el('div', 'vk-draft-v', draft.imageBrief));
+      artRow.appendChild(copyButton('Copy', draft.imageBrief));
+      pane.appendChild(artRow);
+    }
+
+    if (draft.channel === 'linkedin_post') {
+      var prev = el('div', 'vk-draft-row vk-draft-preview');
+      prev.appendChild(el('div', 'vk-draft-k', 'Preview'));
+      prev.appendChild(postPreview(draft));
+      pane.appendChild(prev);
+    }
+
     var foot = el('div', 'vk-draft-foot');
     if (draft.subject) {
       foot.appendChild(copyButton('Copy subject + body', draft.subject + '\n\n' + draft.body, true));
+    }
+
+    // One button, because a rep pastes ONE thing into LinkedIn's composer.
+    // The parts above exist for editing; this is for posting.
+    if (draft.channel === 'linkedin_post') {
+      foot.appendChild(copyButton('Copy whole post', wholePost(draft), true));
     }
 
     // Email only. There is no URL that pre-fills a LinkedIn message or an
@@ -677,13 +785,27 @@
     // A character count, because LinkedIn silently refuses a connection note
     // over 300 and an email over ~200 words gets skimmed. The rep is the one
     // who decides; they just need to be able to see it.
-    foot.appendChild(el('span', 'vk-draft-count', draft.body.length + ' characters'));
+    // For a post the number that matters is the WHOLE post's: LinkedIn's 3000
+    // covers headline, body and tags together, and a body-only count passes
+    // something the composer will refuse.
+    var counted = draft.channel === 'linkedin_post' ? wholePost(draft) : draft.body;
+    foot.appendChild(el('span', 'vk-draft-count', counted.length + ' characters'));
     pane.appendChild(foot);
 
     return pane;
   }
 
   var LETTERS = 'ABCDEFGH';
+
+  /**
+   * Roughly where LinkedIn's "see more" falls.
+   *
+   * ADVISORY. The fold moves with the device and the viewport, so the preview
+   * marks about where it lands rather than claiming a line LinkedIn promises —
+   * the same honesty the InMail ceiling gets on the server. Kept in step with
+   * FOLD_CHARS in worker/src/outreach.js.
+   */
+  var FOLD_CHARS = 140;
 
   /** Every draft in a group, as one block of text a rep can paste anywhere. */
   function wholeGroup(group) {

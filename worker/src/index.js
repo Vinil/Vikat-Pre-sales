@@ -362,6 +362,15 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
       // Capabilities given up for this turn if the API refuses them.
       const dropped = new Set(refusedTools());
+      /**
+       * Tools shed on a guess this turn, oldest first.
+       *
+       * Only the LAST one is worth remembering across requests: the ladder
+       * sheds until the request is accepted, so the one removed immediately
+       * before it succeeded is the one that made the difference, and every
+       * earlier drop demonstrably did not help. See degrade() below.
+       */
+      const speculative = [];
       let thinkingDisabled = false;
 
       /**
@@ -429,7 +438,13 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
           const victim = remaining.reduce((a, b) => (schemaCost(b) > schemaCost(a) ? b : a));
           dropped.add(victim.name);
-          noteRefusal(victim.name);
+          // Recorded only if the NEXT request is accepted. Shedding is a guess
+          // — the costliest schema is the best prior, not a diagnosis — and
+          // remembering a guess that did not work blacklists an innocent tool
+          // for the life of the isolate. That is how adding three fields to
+          // draft_outreach could have cost reps find_collateral: it became the
+          // costliest schema, so it was shed first, wrongly, and permanently.
+          speculative.push(victim.name);
           console.error(
             `[chat] tool schema refused; dropping ${victim.name} (cost ${schemaCost(victim)}), ` +
               `${remaining.length - 1} tool(s) still offered: ${err?.message || err}`,
@@ -485,7 +500,23 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
                 send('tool', { name: event.content_block.name });
               }
             });
-            return await stream.finalMessage();
+            const message = await stream.finalMessage();
+            // Accepted. Whatever was shed last is what made the difference, so
+            // that is the one name worth carrying to the next request; the
+            // earlier guesses come back on their own because nothing recorded
+            // them. The log names the survivors for the same reason the drop
+            // is logged: this is how anyone finds out which schema is at fault.
+            if (speculative.length) {
+              const culprit = speculative[speculative.length - 1];
+              const innocent = speculative.slice(0, -1);
+              noteRefusal(culprit);
+              console.error(
+                `[chat] request accepted without ${culprit}; remembering it` +
+                  (innocent.length ? `, restoring ${innocent.join(', ')}` : ''),
+              );
+              speculative.length = 0;
+            }
+            return message;
           } catch (err) {
             if (!degrade(err)) throw err;
             // The conversation itself is what the API refused, so retrying it

@@ -203,6 +203,21 @@ export const TOOL_DEFINITIONS = [
           description:
             'A few words naming this draft, for when there are several: "Touch 1 — the fine", "Follow-up if no reply", "Post 2 of 3". Empty string if there is only one.',
         },
+        headline: {
+          type: 'string',
+          description:
+            'linkedin_post ONLY; empty string for every other channel. The first line of the post, which is the only line most people read: LinkedIn folds the rest behind "see more". Lead with the thing worth knowing even if they never click — a number, a name, what changed — not "We are excited to announce".',
+        },
+        hashtags: {
+          type: 'string',
+          description:
+            'linkedin_post ONLY; empty string for every other channel. Up to five, space separated, as #CamelCase. Tags people actually follow, not a description of the post cut into words.',
+        },
+        imageBrief: {
+          type: 'string',
+          description:
+            'linkedin_post ONLY; empty string for every other channel. What the banner should SHOW — the scene, the subject, the setting. A photographic description, not a layout: the headline, wordmark and URL are set on top of it afterwards, so do not ask for words inside the picture.',
+        },
         group: {
           type: 'string',
           enum: ['versions', 'sequence'],
@@ -216,7 +231,7 @@ export const TOOL_DEFINITIONS = [
       // on a hunch that a fifth required argument had caused a malformed tool
       // call — a hunch with nothing behind it but timing. The defence against
       // malformation is normaliseDraft(), which strips it whatever the cause.
-      required: ['channel', 'subject', 'body', 'label', 'group'],
+      required: ['channel', 'subject', 'body', 'label', 'group', 'headline', 'hashtags', 'imageBrief'],
     },
   },
   {

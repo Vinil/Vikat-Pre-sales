@@ -55,8 +55,51 @@ export const CHANNELS = {
     // LinkedIn truncates a post at 3000 characters.
     bodyChars: 3000,
     hard: true,
+    // A post is not one block of text. It is a headline that has to survive
+    // the "see more" fold on its own, a body, a set of hashtags, and a banner
+    // — four things a rep copies into four different places, so they travel as
+    // four fields rather than as one string the rep has to cut up.
+    headline: true,
+    hashtags: true,
+    image: true,
   },
 };
+
+/**
+ * A headline long enough to be cut off by LinkedIn's own fold.
+ *
+ * ADVISORY, and deliberately not enforced. The fold moves with the device and
+ * the viewport — it is nearer 140 characters on a phone than on a desktop feed
+ * — so trimming at any single number would cut a headline at a figure no
+ * platform actually applies. Nobody here has a sourced figure, and the same
+ * rule applies as to the InMail ceiling above: say it is advisory rather than
+ * inventing a limit. The card marks the fold instead and lets the rep judge.
+ */
+export const FOLD_CHARS = 140;
+
+/** Sanity ceiling on a headline. Not LinkedIn's; a headline is one line. */
+const HEADLINE_CHARS = 220;
+
+/** More than a handful reads as spam and LinkedIn's own guidance says so. */
+const MAX_HASHTAGS = 5;
+const IMAGE_BRIEF_CHARS = 600;
+
+/**
+ * `#Word #Another` out of whatever the model wrote.
+ *
+ * It writes them as "#A, #B", as "A B", and as a sentence about hashtags. All
+ * three become the same thing here rather than being rejected: a rep copying
+ * a tag list wants tags, and the punctuation between them is not information.
+ */
+function cleanHashtags(value) {
+  return String(value == null ? '' : value)
+    .replace(TOOL_MARKUP, ' ')
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/^#+/, '').replace(/[^A-Za-z0-9]/g, ''))
+    .filter(Boolean)
+    .slice(0, MAX_HASHTAGS)
+    .map((t) => '#' + t);
+}
 
 export const CHANNEL_NAMES = Object.keys(CHANNELS);
 
@@ -153,5 +196,49 @@ export function normaliseDraft(input = {}) {
     else draft.subject = subject;
   }
 
+  if (spec.headline) {
+    const headline = clean(input.headline, HEADLINE_CHARS);
+    if (!headline) warnings.push('No headline was written, so the post opens on its body.');
+    else draft.headline = headline;
+  }
+
+  if (spec.hashtags) {
+    const tags = cleanHashtags(input.hashtags);
+    if (tags.length) draft.hashtags = tags;
+  }
+
+  if (spec.image) {
+    const brief = clean(input.imageBrief, IMAGE_BRIEF_CHARS);
+    if (brief) draft.imageBrief = brief;
+  }
+
+  // The 3000 is LinkedIn's own and it covers the WHOLE post, not the body
+  // alone. Checking the body in isolation passes a post that a headline and
+  // five hashtags push over the edge, and the rep finds out in the composer
+  // with the text already pasted.
+  if (spec.hard && spec.headline) {
+    const whole = postText(draft);
+    if (whole.length > spec.bodyChars) {
+      warnings.push(
+        `Headline, body and hashtags come to ${whole.length} characters together, over ${spec.label}'s ${spec.bodyChars}. Something has to come out before this posts.`,
+      );
+    }
+  }
+
   return { ok: true, draft, warnings };
+}
+
+/**
+ * A post as one block, in the order it is published in.
+ *
+ * The rep pastes ONE thing into LinkedIn's composer, so the parts exist for
+ * copying and editing separately but have to be able to come back together in
+ * the published order — and the character count that matters is this string's,
+ * not the body's. Shared with the widget's "Copy whole post" so what is
+ * counted and what is copied can never disagree.
+ */
+export function postText(draft = {}) {
+  return [draft.headline, draft.body, (draft.hashtags || []).join(' ')]
+    .filter(Boolean)
+    .join('\n\n');
 }
