@@ -563,3 +563,55 @@ test('a lowercase score is accepted rather than downgraded', async () => {
 
   assert.equal(storage.leads[0].qualification_score, 'HOT');
 });
+
+test('a post tool result says the preview is already on screen', async () => {
+  // A rep asked to see how a post would look on LinkedIn and was told, twice,
+  // "I genuinely cannot do this. I'm a text assistant" — while the preview was
+  // rendered on the card in front of them. The model cannot see the card, so
+  // the card has to be described to it every time it makes one.
+  const res = await runTool(
+    {
+      name: 'draft_outreach',
+      input: {
+        channel: 'linkedin_post',
+        subject: '',
+        label: 'Launch post',
+        group: 'versions',
+        headline: 'NEWS: something happened',
+        body: 'And here is what it means for you.',
+        hashtags: '#OTSecurity',
+        imageBrief: 'An engineer at a server rack.',
+      },
+    },
+    ctx(),
+  );
+
+  assert.ok(!res.isError, res.content);
+  assert.match(res.content, /as the LinkedIn feed shows it/);
+  assert.match(res.content, /do not tell the rep you cannot show them/i);
+});
+
+test('an email result does not claim a feed preview', async () => {
+  // The line is about a post. On an email it would be a description of
+  // something that is not there, which is the same failure pointed the other
+  // way round.
+  const res = await runTool(
+    {
+      name: 'draft_outreach',
+      input: {
+        channel: 'email',
+        subject: 'A subject',
+        label: 'Opener',
+        group: 'versions',
+        headline: '',
+        body: 'A body.',
+        hashtags: '',
+        imageBrief: '',
+      },
+    },
+    ctx(),
+  );
+
+  assert.ok(!res.isError, res.content);
+  assert.doesNotMatch(res.content, /LinkedIn feed/);
+});

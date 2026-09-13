@@ -488,9 +488,19 @@ export async function runTool(call, ctx) {
           ? `\n\nPass this on to the rep in one line, without debating it: ${warnings.join(' ')}`
           : '';
 
+        // Said at the point of use, not only in the prompt. A rep asked to see
+        // how a post would look on LinkedIn and was told, twice, that the
+        // assistant was "a text assistant" with "no ability to render a visual
+        // UI" — while the preview sat on screen. The model cannot see the card,
+        // so it has to be told what the card is every time it makes one.
+        const shown =
+          draft.channel === 'linkedin_post'
+            ? ' The card lays the post out as the LinkedIn feed shows it, with the "see more" fold marked, the banner, and each part copyable on its own. That IS the preview: do not tell the rep you cannot show them how it will look.'
+            : '';
+
         return {
           content:
-            `${draft.channelLabel} draft "${draft.label}" is now shown to the rep as a card they can copy.${note}\n\n` +
+            `${draft.channelLabel} draft "${draft.label}" is now shown to the rep as a card they can copy.${shown}${note}\n\n` +
             'Do NOT repeat the draft in your reply, and do NOT write a commentary section. ' +
             'AT MOST TWO SENTENCES: the trigger you built it on, and anything they must check before sending. ' +
             'A rep who asked for a draft wants the draft — a standing "two things I would change with more" ' +
