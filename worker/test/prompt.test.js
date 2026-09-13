@@ -229,3 +229,20 @@ test('the invention rules survive losing the tools', () => {
     assert.match(prompt, /I do not need to search, I already know this/, label);
   }
 });
+
+test('the prompt says the card previews a post, and that a past refusal was wrong', async () => {
+  // A rep asked three times to see how a post would look on LinkedIn. Three
+  // times they were told "I genuinely cannot do this. I'm a text assistant" —
+  // with the preview rendered on screen, on a deployed build that had it.
+  //
+  // Two separate things have to be said. That the card lays a post out as the
+  // feed does, because the model cannot see it. And that a refusal ALREADY in
+  // the transcript is not evidence, because the model's own turns outweigh a
+  // rule every time: two confident refusals above kept it refusing a fourth.
+  const text = await prompt();
+
+  assert.match(text, /LinkedIn feed would draw\s+it/, 'the model is never told what the card does');
+  assert.match(text, /Never tell a rep you cannot render, preview/);
+  assert.match(text, /If you have already told this rep you cannot, you were wrong/);
+  assert.match(text, /call \\?`draft_outreach\\?` for the posts/, 'the rule has to name the action');
+});
