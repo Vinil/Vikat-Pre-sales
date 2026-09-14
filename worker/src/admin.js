@@ -19,6 +19,9 @@ import { ingest, SUPPORTED_EXTENSIONS } from './ingest.js';
 import { POSITIONING_KEY, POSITIONING_MAX_CHARS } from './positioning.js';
 import { retrievalStatus } from './retrieve.js';
 import { collateralCount } from './collateral.js';
+import { buildSystemPrompt } from './systemPrompt.js';
+import { TOOL_DEFINITIONS } from './tools.js';
+import { webTools } from './webTools.js';
 
 const MAX_SECTION_CHARS = 200;
 const MAX_CONTENT_CHARS = 20000;
@@ -719,14 +722,64 @@ async function handleUpstream(request, ctx) {
     );
   }
 
+  // Each step adds ONE thing the real chat request carries. A plain request
+  // proves reachability and the key and nothing else — reps were failing on
+  // requests that carry a system prompt, five tool schemas, a server tool the
+  // workspace may not be entitled to, and adaptive thinking, and any of those
+  // can be refused on its own while "hi" sails through.
+  //
+  // max_tokens 1 on every step, so the whole ladder costs a rounding error.
+  const steps = [
+    { name: 'plain', of: () => ({}) },
+    { name: 'system', of: () => ({ system: buildSystemPrompt(cfg, '', {}) }) },
+    { name: 'tools', of: () => ({ tools: TOOL_DEFINITIONS }) },
+    { name: 'web tool', of: () => ({ tools: webTools(cfg) }) },
+    { name: 'thinking', of: () => ({ thinking: { type: 'adaptive' } }) },
+  ];
+
+  const tried = [];
+  for (const step of steps) {
+    const r = await attempt(env.ANTHROPIC_API_KEY, cfg, step);
+    tried.push(r);
+    // Stop at the first refusal: everything after it would be measuring a
+    // request that already contains a known-bad part.
+    if (!r.ok) break;
+  }
+
+  const failed = tried.find((t) => !t.ok);
+  return json(
+    {
+      ok: !failed,
+      reached: tried.some((t) => t.reached),
+      keyTail: String(env.ANTHROPIC_API_KEY).slice(-4),
+      model: cfg.MODEL,
+      tried,
+      diagnosis: diagnose(tried, failed),
+    },
+    200,
+    cors,
+  );
+}
+
+/** One request carrying exactly one extra thing. */
+async function attempt(apiKey, cfg, step) {
+  let extra;
+  try {
+    extra = step.of();
+  } catch (err) {
+    // A step that cannot even be BUILT is its own answer: the system prompt
+    // throwing is a fault in this app, not a refusal from the API.
+    return { step: step.name, ok: false, reached: false, error: String((err && err.message) || err) };
+  }
+
+  const started = Date.now();
   let res;
   let body;
-  const started = Date.now();
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'x-api-key': env.ANTHROPIC_API_KEY,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
@@ -734,20 +787,20 @@ async function handleUpstream(request, ctx) {
         model: cfg.MODEL,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
+        // The whole point of the step. Spread LAST so a step could override a
+        // default if one ever needs to; without this every rung sends the same
+        // bare request and the ladder measures nothing five times.
+        ...extra,
       }),
     });
     body = await res.text();
   } catch (err) {
-    return json(
-      {
-        ok: false,
-        reached: false,
-        error: String((err && err.message) || err),
-        diagnosis: 'The request never completed. This is network egress from the Worker, not the key.',
-      },
-      200,
-      cors,
-    );
+    return {
+      step: step.name,
+      ok: false,
+      reached: false,
+      error: String((err && err.message) || err),
+    };
   }
 
   // The one distinction worth automating, because it is the one everybody gets
@@ -759,30 +812,55 @@ async function handleUpstream(request, ctx) {
   } catch (e) {
     /* not JSON at all, which is itself the answer */
   }
-  const fromApi = Boolean(parsed && (parsed.type === 'error' || parsed.type === 'message'));
 
-  return json(
-    {
-      ok: res.ok,
-      reached: true,
-      status: res.status,
-      ms: Date.now() - started,
-      model: cfg.MODEL,
-      // Never the key. The last four characters are enough to tell two keys
-      // apart when someone has set a different one on each environment.
-      keyTail: String(env.ANTHROPIC_API_KEY).slice(-4),
-      fromApi,
-      // Capped: a block page can be a whole HTML document.
-      body: body.slice(0, 600),
-      requestId: res.headers.get('request-id'),
-      cfRay: res.headers.get('cf-ray'),
-      diagnosis: res.ok
-        ? 'The Worker can reach the Messages API and the key works. If reps are still failing, the fault is in the request this app builds, not in reachability.'
-        : fromApi
-          ? 'The Messages API itself refused this. The body names the reason and it is an account or key matter, not a network one.'
-          : 'Something refused this BEFORE the Messages API saw it: the body is not an API error envelope. The key is not the issue. Take the cf-ray above to whoever runs the edge in front of the API.',
-    },
-    200,
-    cors,
+  return {
+    step: step.name,
+    ok: res.ok,
+    reached: true,
+    status: res.status,
+    ms: Date.now() - started,
+    fromApi: Boolean(parsed && (parsed.type === 'error' || parsed.type === 'message')),
+    // Capped: a block page can be a whole HTML document, and a successful
+    // body is of no interest beyond the fact that it arrived.
+    body: res.ok ? '' : body.slice(0, 500),
+    requestId: res.headers.get('request-id'),
+    cfRay: res.headers.get('cf-ray'),
+  };
+}
+
+/**
+ * What the ladder proves, in one sentence an admin can act on.
+ *
+ * The step that first fails IS the answer, which is the whole point of adding
+ * one thing at a time: a plain request proved reachability and the key and
+ * nothing else, and reps were failing on requests carrying four more things.
+ */
+function diagnose(tried, failed) {
+  if (!failed) {
+    return 'Every part of a real request is accepted: the key works, the system prompt, the tool schemas, the web tool and thinking are all allowed. A failure reps see now is in the conversation, not the configuration.';
+  }
+
+  if (!failed.reached) {
+    return `The "${failed.step}" request never completed: ${failed.error}. This is egress from the Worker or a fault building the request, not the key.`;
+  }
+
+  const where =
+    failed.step === 'plain'
+      ? 'Even a bare request is refused, so nothing about this app is involved: it is the key or the account.'
+      : `Everything before it was accepted, so the refusal is caused by the "${failed.step}" part of the request and nothing else.`;
+
+  const hint =
+    failed.step === 'web tool' && failed.status === 403
+      ? ' A 403 on the web tool alone means this workspace is not entitled to server-side web search. Enable it for the workspace, or set WEB_RESEARCH=off to run without it.'
+      : failed.step === 'tools' && failed.status === 400
+        ? ' A 400 on the tool schemas is the "Schema is too complex" family; the Worker sheds tools one at a time to survive it, and the log names which.'
+        : '';
+
+  return (
+    `${failed.status} on the "${failed.step}" step. ${where}` +
+    (failed.fromApi
+      ? ' The API itself refused it and the body names the reason.'
+      : ' The body is not an API error envelope, so something refused it before the API saw it; take the cf-ray to whoever runs that edge.') +
+    hint
   );
 }

@@ -426,72 +426,124 @@ test('unsupported methods are rejected on every admin route', async () => {
   }
 });
 
-// --- Upstream reachability ------------------------------------------------
+// --- Upstream reachability ---------------------------------------------
 
 /**
- * Stub global fetch for one call and hand back what the probe made of it.
+ * Drive the probe with a scripted reply per rung, and hand back its report.
  *
- * The probe's whole job is telling three failures apart that look identical to
- * everyone downstream, so each of those three is a test.
+ * The probe climbs a ladder — plain, system, tools, web tool, thinking — so a
+ * test has to be able to accept some rungs and refuse others. That IS the
+ * feature: a plain request proves the key and nothing else, and reps were
+ * failing on requests carrying four more things.
  */
-async function probe(response, env = { ANTHROPIC_API_KEY: 'sk-ant-secret-abcd' }) {
+async function probe(reply, env = { ANTHROPIC_API_KEY: 'sk-ant-secret-abcd' }) {
   const { cfg, storage } = setup();
   const real = globalThis.fetch;
-  globalThis.fetch = async () => response;
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    sent.push(body);
+    return reply(body, sent.length - 1);
+  };
   try {
-    return await (await call('/admin/upstream', 'GET', { cfg, storage, cors: {}, env, user: ADMIN })).json();
+    const out = await (
+      await call('/admin/upstream', 'GET', { cfg, storage, cors: {}, env, user: ADMIN })
+    ).json();
+    return { out, sent };
   } finally {
     globalThis.fetch = real;
   }
 }
 
-const reply = (status, body, headers = {}) =>
+const ok = () => new Response('{"type":"message","content":[]}', {
+  status: 200, headers: { 'content-type': 'application/json', 'request-id': 'req_1' },
+});
+const refuse = (status, body, headers = {}) =>
   new Response(body, { status, headers: { 'content-type': 'application/json', ...headers } });
 
-test('a refusal that is not an API error is named as one', async () => {
-  // The production failure, exactly. 403 and a body with no `type: "error"` and
-  // no request_id: the Messages API never saw this. An admin reading "403
-  // forbidden" reasonably concludes the key is dead and rotates a working key,
-  // which is a wasted afternoon and a second secret to look after.
-  const r = await probe(
-    reply(403, '{"error":{"type":"forbidden","message":"Request not allowed"}}', { 'cf-ray': 'a395-BOM' }),
+test('each rung actually carries the thing it is named for', () => {
+  // The bug this exists for: building `extra` and never spreading it into the
+  // request body. Every rung then sends the same bare request, all five pass,
+  // and the probe reports "everything is accepted" about a request it never
+  // made. A ladder that measures nothing is worse than no ladder, because it
+  // is believed.
+  return probe(() => ok()).then(({ sent }) => {
+    assert.equal(sent.length, 5);
+    assert.ok(!sent[0].system && !sent[0].tools && !sent[0].thinking, 'plain must be plain');
+    assert.ok(sent[1].system && sent[1].system.length > 100, 'the system rung sends no prompt');
+    assert.ok(Array.isArray(sent[2].tools) && sent[2].tools.length > 1, 'the tools rung sends no tools');
+    assert.equal(sent[3].tools[0].name, 'web_search', 'the web rung sends no web tool');
+    assert.deepEqual(sent[4].thinking, { type: 'adaptive' }, 'the thinking rung sends no thinking');
+    // A rounding error, deliberately.
+    assert.ok(sent.every((b) => b.max_tokens === 1));
+  });
+});
+
+test('the rung that fails is the answer', async () => {
+  // A 403 on the web tool and nothing else means the workspace is not entitled
+  // to server-side search — which a plain "hi" can never reveal, because it
+  // does not carry one.
+  const { out } = await probe((body) =>
+    body.tools && body.tools[0] && body.tools[0].name === 'web_search'
+      ? refuse(403, '{"type":"error","error":{"type":"permission_error","message":"not allowed"}}')
+      : ok(),
   );
 
-  assert.equal(r.ok, false);
-  assert.equal(r.reached, true);
-  assert.equal(r.status, 403);
-  assert.equal(r.fromApi, false, 'no `type: "error"`, so this was not the API answering');
-  assert.match(r.diagnosis, /BEFORE the Messages API/);
-  assert.match(r.diagnosis, /key is not the issue/);
-  assert.equal(r.cfRay, 'a395-BOM', 'the one identifier whoever runs that edge can act on');
+  assert.equal(out.ok, false);
+  assert.deepEqual(out.tried.map((t) => t.step), ['plain', 'system', 'tools', 'web tool']);
+  assert.match(out.diagnosis, /403 on the "web tool" step/);
+  assert.match(out.diagnosis, /Everything before it was accepted/);
+  assert.match(out.diagnosis, /not entitled to server-side web search/);
+  assert.match(out.diagnosis, /WEB_RESEARCH=off/, 'a diagnosis without a way out is half a diagnosis');
+});
+
+test('the ladder stops at the first refusal', async () => {
+  // Measuring a request that already contains a known-bad part tells you
+  // nothing, and costs money to learn it.
+  const { out, sent } = await probe((body) => (body.system ? refuse(403, 'nope') : ok()));
+
+  assert.equal(sent.length, 2, 'it kept climbing past a refusal');
+  assert.equal(out.tried.length, 2);
+  assert.equal(out.tried[1].step, 'system');
+});
+
+test('a refusal that is not an API error is named as one', async () => {
+  // 403 with no `type: "error"` and no request_id: the Messages API never saw
+  // this. An admin reading "403 forbidden" reasonably concludes the key is
+  // dead and rotates a working key, which is a wasted afternoon.
+  const { out } = await probe(() =>
+    refuse(403, '{"error":{"type":"forbidden","message":"Request not allowed"}}', { 'cf-ray': 'a395-BOM' }),
+  );
+
+  assert.equal(out.tried[0].fromApi, false);
+  assert.match(out.diagnosis, /before the API saw it/);
+  assert.match(out.diagnosis, /cf-ray/);
+  assert.equal(out.tried[0].cfRay, 'a395-BOM', 'the one identifier whoever runs that edge can act on');
 });
 
 test('a real API refusal is attributed to the API', async () => {
-  const r = await probe(
-    reply(401, '{"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}'),
+  const { out } = await probe(() =>
+    refuse(401, '{"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}'),
   );
 
-  assert.equal(r.fromApi, true);
-  assert.match(r.diagnosis, /Messages API itself refused/);
-  assert.doesNotMatch(r.diagnosis, /BEFORE/);
+  assert.equal(out.tried[0].fromApi, true);
+  assert.match(out.diagnosis, /The API itself refused it/);
+  assert.match(out.diagnosis, /it is the key or the account/, 'a bare request failing is not about this app');
 });
 
-test('a working upstream says the fault is ours', async () => {
-  const r = await probe(reply(200, '{"type":"message","content":[]}', { 'request-id': 'req_1' }));
+test('a fully accepted ladder says the configuration is not the problem', async () => {
+  const { out } = await probe(() => ok());
 
-  assert.equal(r.ok, true);
-  assert.equal(r.fromApi, true);
-  assert.equal(r.requestId, 'req_1');
-  assert.match(r.diagnosis, /fault is in the request this app builds/);
+  assert.equal(out.ok, true);
+  assert.match(out.diagnosis, /Every part of a real request is accepted/);
+  assert.match(out.diagnosis, /in the conversation, not the configuration/);
 });
 
 test('a missing key names the per-environment trap', async () => {
-  // Wrangler secrets are per-environment and this has bitten before: a key set
-  // on dev leaves production with nothing, and "401" is all anyone sees.
-  const r = await probe(reply(200, '{}'), {});
+  const { out } = await probe(() => ok(), {});
 
-  assert.equal(r.reached, false);
-  assert.match(r.diagnosis, /per environment/);
+  assert.equal(out.reached, false);
+  assert.match(out.diagnosis, /per environment/);
 });
 
 test('egress that never completes is not blamed on the key', async () => {
@@ -500,18 +552,18 @@ test('egress that never completes is not blamed on the key', async () => {
   globalThis.fetch = async () => {
     throw new Error('connection refused');
   };
-  let r;
+  let out;
   try {
-    r = await (await call('/admin/upstream', 'GET', {
+    out = await (await call('/admin/upstream', 'GET', {
       cfg, storage, cors: {}, env: { ANTHROPIC_API_KEY: 'sk-ant-x' }, user: ADMIN,
     })).json();
   } finally {
     globalThis.fetch = real;
   }
 
-  assert.equal(r.reached, false);
-  assert.match(r.diagnosis, /egress from the Worker, not the key/);
-  assert.match(r.error, /connection refused/);
+  assert.equal(out.ok, false);
+  assert.match(out.diagnosis, /never completed/);
+  assert.match(out.diagnosis, /egress from the Worker.*not the key/);
 });
 
 test('the probe never returns the key', async () => {
@@ -519,10 +571,10 @@ test('the probe never returns the key', async () => {
   // Four characters distinguish two environments' keys; the rest is a secret
   // that would end up in a chat window, which is exactly how this project
   // acquired the credential it still has to rotate.
-  const r = await probe(reply(403, '{"error":{"type":"forbidden","message":"Request not allowed"}}'));
+  const { out } = await probe(() => refuse(403, '{"error":{"type":"forbidden"}}'));
 
-  assert.equal(r.keyTail, 'abcd');
-  assert.doesNotMatch(JSON.stringify(r), /sk-ant-secret/);
+  assert.equal(out.keyTail, 'abcd');
+  assert.doesNotMatch(JSON.stringify(out), /sk-ant-secret/);
 });
 
 test('the probe is GET only', async () => {
