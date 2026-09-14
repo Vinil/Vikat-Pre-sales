@@ -735,6 +735,18 @@ async function handleUpstream(request, ctx) {
     { name: 'tools', of: () => ({ tools: TOOL_DEFINITIONS }) },
     { name: 'web tool', of: () => ({ tools: webTools(cfg) }) },
     { name: 'thinking', of: () => ({ thinking: { type: 'adaptive' } }) },
+    // The same rung twice, deliberately.
+    //
+    // A tools request once measured 33 SECONDS against ~1s for every other
+    // rung, at max_tokens 1. One measurement is an anecdote: it could be a
+    // cold grammar compile for these schemas, or it could be that the request
+    // happened to be slow. The difference matters, because if carrying the
+    // tools costs thirty seconds every time then every rep's first message is
+    // thirty seconds of silence — which is a complaint this project already
+    // has — and if it is a cold cost it is paid once per isolate and is
+    // nobody's problem. Running it a second time is the cheapest way to tell
+    // those apart, and it costs one token.
+    { name: 'tools again', of: () => ({ tools: TOOL_DEFINITIONS }) },
   ];
 
   const tried = [];
@@ -837,7 +849,25 @@ async function attempt(apiKey, cfg, step) {
  */
 function diagnose(tried, failed) {
   if (!failed) {
-    return 'Every part of a real request is accepted: the key works, the system prompt, the tool schemas, the web tool and thinking are all allowed. A failure reps see now is in the conversation, not the configuration.';
+    const base =
+      'Every part of a real request is accepted: the key works, the system prompt, the tool schemas, the web tool and thinking are all allowed. A failure reps see now is in the conversation, not the configuration.';
+
+    // Latency is the other thing this ladder can see, and at max_tokens 1 it
+    // is measuring the cost of ACCEPTING the request rather than of answering
+    // it. A rung several times slower than the rest is worth saying out loud:
+    // it lands on the rep as silence before the first character, which is
+    // indistinguishable from a hang.
+    const first = tried.find((t) => t.step === 'tools');
+    const again = tried.find((t) => t.step === 'tools again');
+    if (first && again && first.ms > 8000) {
+      return (
+        `${base} But carrying the tool schemas took ${(first.ms / 1000).toFixed(1)}s to be accepted, at one token. ` +
+        (again.ms > 8000
+          ? `A second identical request took ${(again.ms / 1000).toFixed(1)}s, so that cost is paid EVERY time and every rep waits it out before their first character.`
+          : `A second identical request took ${(again.ms / 1000).toFixed(1)}s, so it is a one-off warm-up rather than a standing cost.`)
+      );
+    }
+    return base;
   }
 
   if (!failed.reached) {

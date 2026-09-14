@@ -468,7 +468,7 @@ test('each rung actually carries the thing it is named for', () => {
   // made. A ladder that measures nothing is worse than no ladder, because it
   // is believed.
   return probe(() => ok()).then(({ sent }) => {
-    assert.equal(sent.length, 5);
+    assert.equal(sent.length, 6, 'the tools rung is run twice on purpose');
     assert.ok(!sent[0].system && !sent[0].tools && !sent[0].thinking, 'plain must be plain');
     assert.ok(sent[1].system && sent[1].system.length > 100, 'the system rung sends no prompt');
     assert.ok(Array.isArray(sent[2].tools) && sent[2].tools.length > 1, 'the tools rung sends no tools');
@@ -583,4 +583,31 @@ test('the probe is GET only', async () => {
     cfg, storage, cors: {}, env: {}, user: ADMIN,
   });
   assert.equal(res.status, 405);
+});
+
+test('a slow tools rung is reported, and told apart from a warm-up', async () => {
+  // A tools request measured 33 SECONDS at max_tokens 1 against ~1s for every
+  // other rung. One measurement is an anecdote. If carrying the schemas costs
+  // that every time, every rep's first message is thirty seconds of silence —
+  // a complaint this project already has. If it is paid once per isolate it is
+  // nobody's problem. The same rung twice is the cheapest way to tell.
+  let n = 0;
+  const slowFirst = await probe(() => {
+    n += 1;
+    return new Promise((r) => setTimeout(() => r(ok()), n === 3 ? 30 : 0));
+  });
+  // The timing is faked by the clock, so assert on the SHAPE: six rungs, and
+  // the pair present for the comparison to be possible at all.
+  assert.deepEqual(
+    slowFirst.out.tried.map((t) => t.step),
+    ['plain', 'system', 'tools', 'web tool', 'thinking', 'tools again'],
+  );
+});
+
+test('the tools rung is measured twice with the same payload', async () => {
+  // Both must carry the real schemas, or the comparison is between two
+  // different requests and means nothing.
+  const { sent } = await probe(() => ok());
+  assert.deepEqual(sent[2].tools, sent[5].tools);
+  assert.ok(sent[5].tools.length > 1);
 });
