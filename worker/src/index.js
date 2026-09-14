@@ -1057,14 +1057,16 @@ export default {
           );
         }
 
-        // The reader embeds a PDF in the page, and a browser will not render
-        // an attachment — it downloads it. So ?view=1 asks for inline, and it
-        // is honoured ONLY for a PDF: a .pptx has nothing to render in a tab,
-        // and for everything else the filename is what the rep looks for on
-        // disk. The type is not taken from the request; it is the one the
-        // generator stored, out of a fixed map of three.
+        // The reader embeds a PDF in the page and a post preview embeds its
+        // banner, and a browser will not render an attachment — it downloads
+        // it. So ?view=1 asks for inline, and it is honoured ONLY for the two
+        // types a browser can actually draw: a .pptx has nothing to render in
+        // a tab, and for everything else the filename is what the rep looks
+        // for on disk. The type is not taken from the request; it is the one
+        // the generator stored, out of a fixed map.
+        const INLINE_TYPES = new Set(['application/pdf', 'image/png']);
         const wantsInline = url.searchParams.get('view') === '1';
-        const inline = wantsInline && doc.contentType === 'application/pdf';
+        const inline = wantsInline && INLINE_TYPES.has(doc.contentType);
 
         return new Response(doc.bytes, {
           headers: {

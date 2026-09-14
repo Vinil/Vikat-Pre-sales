@@ -189,6 +189,35 @@ export const DEFAULTS = {
   // back as stop_reason 'pause_turn' with a HALF-WRITTEN answer; resuming is
   // what finishes it. Capped so a pathological turn cannot loop forever.
   MAX_TURN_CONTINUATIONS: 3,
+
+  // --- Post banners ------------------------------------------------------
+  //
+  // A LinkedIn post wants a banner, and no browser or Worker can produce a
+  // photograph. gpt-image-1 makes the BACKGROUND only: image models garble
+  // set text, so the headline, wordmark and URL are drawn over it afterwards
+  // where they can be correct and on brand.
+  IMAGE_GENERATION: 'on',
+  IMAGE_MODEL: 'gpt-image-1',
+  // Landscape. LinkedIn's banner is 1.91:1 and this is the nearest size the
+  // model offers; the rest is cropped by LinkedIn, not by us.
+  IMAGE_SIZE: '1536x1024',
+  // Not 'high'. A feed banner is looked at for a second on a phone, and the
+  // quality tier is the biggest lever on what one costs.
+  IMAGE_QUALITY: 'medium',
+
+  // The cap the whole team shares, agreed at $100 a month.
+  IMAGE_MONTHLY_BUDGET_USD: 100,
+  // An ESTIMATE of what one image costs at the size and quality above, and
+  // the only number here that is not a decision.
+  //
+  // It is used to turn the budget into a count, because KV counts images and
+  // not dollars. Check it against OpenAI's current pricing page rather than
+  // trusting it: the rate moves, and nothing in this Worker can see an
+  // invoice. The REAL ceiling is the spend limit set in OpenAI's own billing
+  // console, which refuses over-budget requests whatever this file says — set
+  // that too, and treat this as the thing that keeps reps inside it politely
+  // rather than as the thing that enforces it.
+  IMAGE_COST_USD: 0.08,
 };
 
 const NUMERIC_KEYS = new Set([
@@ -207,6 +236,8 @@ const NUMERIC_KEYS = new Set([
   'MAX_TURN_CONTINUATIONS',
   'WEB_SEARCH_MAX_USES',
   'WEB_FETCH_MAX_USES',
+  'IMAGE_MONTHLY_BUDGET_USD',
+  'IMAGE_COST_USD',
 ]);
 
 const BOOLEAN_KEYS = new Set(['ALLOW_DEV_AUTH']);

@@ -20,6 +20,7 @@
 
 import { deliverLead } from './leadSink.js';
 import { normaliseDraft, CHANNEL_NAMES } from './outreach.js';
+import { generateImage } from './imageGen.js';
 import { searchCollateral, collateralCount } from './collateral.js';
 import { createDocument } from './documents/index.js';
 import { LIMITS } from './documents/spec.js';
@@ -476,6 +477,18 @@ export async function runTool(call, ctx) {
         }
 
         const { draft, warnings } = read;
+
+        // The banner, if this is a post that asked for one.
+        //
+        // Deliberately never fatal. generateImage() reports rather than throws,
+        // and its reason goes to the rep as a warning: a campaign is not worth
+        // losing over a picture, and the brief is still on the card for whoever
+        // makes the banner by hand.
+        if (draft.channel === 'linkedin_post' && draft.imageBrief) {
+          const art = await generateImage(draft.imageBrief, ctx);
+          if (art.ok) draft.imageUrl = art.url;
+          else warnings.push(art.reason);
+        }
 
         // The model is told the draft is ALREADY IN FRONT OF THE REP. Without
         // this it writes the whole email out again underneath, and the rep gets
