@@ -657,8 +657,18 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
         }
 
         // A turn that ends with nothing to show is indistinguishable from a
-        // hang. The widget drops its typing indicator on 'done' and renders
-        // no bubble, so the rep sees their own message and silence — which is
+        // hang.
+        //
+        // Nothing consumes the `done` event. The widget has no branch for it
+        // and never had one — it drops its typing indicator when the STREAM
+        // ends, not on a frame — so every stopReason sent that way has been
+        // going into the void, and each one is a way for a turn to stop dead
+        // in front of a rep without a word. That is what "it stopped after the
+        // first response and nothing" was. Every abnormal stop is reported
+        // here instead, where it reaches somebody. `done` is kept because it
+        // costs nothing and a client may yet want it; it is not a report.
+        //
+        // The rep sees their own message and silence — which is
         // exactly what happened: a deck request spent the whole token budget
         // on thinking, stopped at max_tokens before emitting a character, and
         // looked like the assistant had ignored them.
@@ -673,6 +683,31 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               ? 'That answer was cut off at the length limit — what you can see above is incomplete. Ask for a narrower piece of it and it will finish.'
               : 'That request needed more room than one reply allows, so nothing came back. Ask for it in smaller pieces — one section, or one document at a time.',
             code: 'output_truncated',
+          });
+        } else if (lastStop === 'tool_use') {
+          // The loop exited with the model still asking for tools, which can
+          // only mean the iteration budget ran out: every other stop reason
+          // breaks out above. The rep sees the model announce what it is about
+          // to build and then nothing — "Building a 3-post sequence now" and
+          // silence — because the work it was announcing was the part that
+          // never got a turn to happen in.
+          console.warn(`[chat] session ${sessionId} hit MAX_TOOL_ITERATIONS (${cfg.MAX_TOOL_ITERATIONS})`);
+          send('error', {
+            message:
+              `That turn used all ${cfg.MAX_TOOL_ITERATIONS} rounds of research and tool work before it got to the part it told you it was starting, so that part never ran. ` +
+              'Split it: ask for the research first, then ask for the drafts in a second message.',
+            code: 'tool_budget_spent',
+          });
+        } else if (lastStop === 'pause_turn') {
+          // Server-side research paused more times than the continuation
+          // budget allows. Same shape to a rep: a half-written answer and no
+          // sign that anything is wrong with it.
+          console.warn(`[chat] session ${sessionId} still paused after ${cfg.MAX_TURN_CONTINUATIONS} continuation(s)`);
+          send('error', {
+            message:
+              'That answer stopped part-way through its research, so what you can see above is incomplete. ' +
+              'Ask for a narrower question and it will finish.',
+            code: 'research_unfinished',
           });
         } else if (!fullText.trim()) {
           console.warn(`[chat] session ${sessionId} produced no text (stop_reason ${lastStop})`);

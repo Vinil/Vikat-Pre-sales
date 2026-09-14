@@ -459,3 +459,37 @@ test('an empty turn that was not truncated still says something', async () => {
   assert.match(text, /empty_response/);
   assert.match(text, /returned nothing/);
 });
+
+// --- Turns that stop without saying so ------------------------------------
+
+test('a turn that spends its tool budget says so instead of stopping dead', async () => {
+  // "It stopped after the 1st response and nothing." The model announced what
+  // it was about to build — "Building a 3-post sequence now, all in one go" —
+  // and the loop ran out of iterations before the part it was announcing got a
+  // turn to happen in. The server sent `done` with a stopReason, the widget
+  // has no branch for `done` and never had one, and the rep got silence.
+  const { text } = await chat(stubApi({ rejectWithTools: false, stopReason: 'tool_use' }));
+
+  assert.match(text, /tool_budget_spent/);
+  assert.match(text, /rounds of research and tool work/);
+  assert.match(text, /ask for the drafts in a second message/i, 'a rep needs the way out, not the diagnosis');
+});
+
+test('research that never finishes says so too', async () => {
+  // Same silence, different cause: server-side search paused more times than
+  // the continuation budget allows. What a rep sees either way is half an
+  // answer that reads like a whole one.
+  const { text } = await chat(stubApi({ rejectWithTools: false, stopReason: 'pause_turn' }));
+
+  assert.match(text, /research_unfinished/);
+  assert.match(text, /stopped part-way through its research/);
+});
+
+test('a turn that finishes normally reports nothing at all', async () => {
+  // The check must not cry wolf. An error under a good answer is worse than no
+  // check, and every one of these branches fires after a turn that HAS text.
+  const { text } = await chat(stubApi({ rejectWithTools: false, stopReason: 'end_turn' }));
+
+  assert.match(text, /Answered without tools\./);
+  assert.doesNotMatch(text, /tool_budget_spent|research_unfinished|empty_response|output_truncated/);
+});
