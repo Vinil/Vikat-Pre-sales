@@ -22,6 +22,10 @@ on:
         description: 'Deploy without running tests (not recommended)'
         type: boolean
         default: false
+      skip_sharepoint:
+        description: 'Deploy without refreshing SharePoint material (emergency only)'
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-${{ inputs.environment }}
@@ -51,8 +55,62 @@ jobs:
           npm --prefix scripts install --no-audit --no-fund
           npm --prefix worker install --no-audit --no-fund
 
+      # SharePoint material is merged in HERE, before the knowledge base is
+      # compiled, and this is not an optimisation — it is the difference
+      # between a deploy and a regression.
+      #
+      # build-knowledge.js compiles whatever is in worker/src/knowledge at the
+      # time it runs. The committed knowledge.js is built from the public site
+      # and the curated FAQ alone, because this repository is public. So a
+      # deploy that skips this step ships a Worker that has NEVER SEEN the
+      # internal material, and the agent answers a rep about Vikat from the
+      # marketing site while reporting itself perfectly healthy.
+      #
+      # That is what happened: a nightly sync at 03:20 and a deploy at 03:34
+      # left sharePointChunks at 0, collateral at 0, and the assistant
+      # answering out of public pages for the rest of the day. Every deploy
+      # this week did the same thing, silently, and the only visible trace was
+      # one line the agent itself volunteered to a rep.
+      - name: Restore sync cursor
+        if: ${{ !inputs.skip_sharepoint }}
+        uses: actions/cache/restore@v4
+        with:
+          path: worker/src/knowledge/sharepoint.json
+          key: sharepoint-sync-${{ github.run_id }}
+          restore-keys: sharepoint-sync-
+
+      - name: Merge in SharePoint material
+        if: ${{ !inputs.skip_sharepoint }}
+        env:
+          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+          SHAREPOINT_HOSTNAME: ${{ vars.SHAREPOINT_HOSTNAME }}
+          SHAREPOINT_SITE_PATH: ${{ vars.SHAREPOINT_SITE_PATH }}
+          SHAREPOINT_SITE_ID: ${{ vars.SHAREPOINT_SITE_ID }}
+          SHAREPOINT_LIBRARY: ${{ vars.SHAREPOINT_LIBRARY }}
+          SHAREPOINT_FOLDER: ${{ vars.SHAREPOINT_FOLDER }}
+          SHAREPOINT_GENERATED_FOLDER: ${{ vars.SHAREPOINT_GENERATED_FOLDER }}
+          SHAREPOINT_MAX_FILE_MB: ${{ vars.SHAREPOINT_MAX_FILE_MB }}
+        run: node scripts/sync-sharepoint.js
+
+      # Fails the deploy rather than shipping a knowledge base with a hole in
+      # it. A Graph outage during an urgent rollforward is what
+      # skip_sharepoint is for, and choosing it is then a decision somebody
+      # made rather than one that happened to them.
+      - name: Report a failed merge
+        if: ${{ failure() }}
+        run: echo "::error::SharePoint material could not be merged, so this deploy was stopped before it could ship a Worker without it. Re-run with skip_sharepoint if you need the code change out regardless."
+
       - name: Rebuild the knowledge base from the site
         run: node scripts/build-knowledge.js --pages .site
+
+      - name: Save sync cursor
+        if: ${{ always() && !inputs.skip_sharepoint }}
+        uses: actions/cache/save@v4
+        with:
+          path: worker/src/knowledge/sharepoint.json
+          key: sharepoint-sync-${{ github.run_id }}
 
       # A deploy that fails its own tests is how a broken agent reaches the
       # sales team. The skip exists for an emergency rollforward, not for haste.
