@@ -650,18 +650,67 @@ export function buildSystemPrompt(
   sessionContext = {},
   { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on' } = {},
 ) {
-  const parts = [persona(cfg, toolsAvailable, webAvailable && toolsAvailable), knowledgeBlock];
+  const { stable, perUser } = systemParts(cfg, knowledgeBlock, sessionContext, {
+    toolsAvailable,
+    webAvailable,
+  });
+  return perUser ? `${stable}\n\n${perUser}` : stable;
+}
 
-  // Identity of the authenticated rep. Appended last so the static persona and
-  // the knowledge block stay a stable cache prefix across users.
-  if (sessionContext.user?.email) {
-    const u = sessionContext.user;
-    parts.push(
-      `<current_user>\nYou are talking to ${u.name || u.email} (${u.email}), a Vikat employee. Address them by first name if it reads naturally. Do not ask them to identify themselves.\n</current_user>`,
-    );
-  }
+/**
+ * The prompt split where it stops being the same for everybody.
+ *
+ * The persona and the knowledge base are identical for every rep on every turn
+ * until the next deploy; the line naming who is typing is not. That boundary
+ * was always here — "appended last so the static persona and the knowledge
+ * block stay a stable cache prefix across users" — but nothing ever used it,
+ * because the two were joined into one string before they left this file.
+ *
+ * @returns {{ stable: string, perUser: string }}
+ */
+export function systemParts(
+  cfg,
+  knowledgeBlock,
+  sessionContext = {},
+  { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on' } = {},
+) {
+  const stable = [persona(cfg, toolsAvailable, webAvailable && toolsAvailable), knowledgeBlock].join(
+    '\n\n',
+  );
 
-  return parts.join('\n\n');
+  const u = sessionContext.user;
+  const perUser = u?.email
+    ? `<current_user>\nYou are talking to ${u.name || u.email} (${u.email}), a Vikat employee. Address them by first name if it reads naturally. Do not ask them to identify themselves.\n</current_user>`
+    : '';
+
+  return { stable, perUser };
+}
+
+/**
+ * The system prompt as content blocks, with the cache breakpoint on the part
+ * that does not change.
+ *
+ * The knowledge base is now 67,000 tokens and every turn re-sent all of it at
+ * full price — and a turn is not one request: the tool loop runs up to four,
+ * each carrying the whole thing again. Caching is a PREFIX match, so the
+ * breakpoint goes at the end of the shared part and the rep's name sits after
+ * it, uncached. That way one cache entry serves the whole team rather than one
+ * per person.
+ *
+ * Tools render before system, so this breakpoint covers the tool schemas too.
+ *
+ * The 5-minute TTL is the right one here and the 1-hour is not: a read
+ * refreshes the timer for free, a rep's turns are seconds apart, and the tool
+ * loop's own requests are closer still — so the entry stays warm on its own
+ * while anyone is working. The 1-hour TTL costs 2x on write instead of 1.25x
+ * and would only pay for itself across gaps this traffic does not have.
+ */
+export function systemBlocks(cfg, knowledgeBlock, sessionContext = {}, opts = {}) {
+  const { stable, perUser } = systemParts(cfg, knowledgeBlock, sessionContext, opts);
+
+  const blocks = [{ type: 'text', text: stable, cache_control: { type: 'ephemeral' } }];
+  if (perUser) blocks.push({ type: 'text', text: perUser });
+  return blocks;
 }
 
 /** Exported for tests and for the disclosure-coverage check. */

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSystemPrompt, DISCLOSURE_TOPICS, DISCLOSURE_TAGS } from '../src/systemPrompt.js';
+import { buildSystemPrompt, systemBlocks, DISCLOSURE_TOPICS, DISCLOSURE_TAGS } from '../src/systemPrompt.js';
 import { retrieve, retrievalStatus } from '../src/retrieve.js';
 import { loadConfig } from '../src/config.js';
 
@@ -245,4 +245,57 @@ test('the prompt says the card previews a post, and that a past refusal was wron
   assert.match(text, /Never tell a rep you cannot render, preview/);
   assert.match(text, /If you have already told this rep you cannot, you were wrong/);
   assert.match(text, /call \\?`draft_outreach\\?` for the posts/, 'the rule has to name the action');
+});
+
+// --- Prompt caching -------------------------------------------------------
+
+test('the cache breakpoint sits on the part that never changes', async () => {
+  // The knowledge base is 67,000 tokens and every turn re-sent all of it at
+  // full price. A turn is not one request either: the tool loop runs up to
+  // four, each carrying the whole thing again.
+  const blocks = systemBlocks(cfg, await retrieve('x', {}), { user: REP });
+
+  assert.equal(blocks.length, 2);
+  assert.deepEqual(blocks[0].cache_control, { type: 'ephemeral' });
+  assert.equal(blocks[1].cache_control, undefined, 'a breakpoint on the volatile block caches nothing');
+  assert.match(blocks[1].text, /<current_user>/);
+  assert.doesNotMatch(blocks[0].text, /<current_user>/, 'the rep is named inside the cached prefix');
+});
+
+test('two reps share one cache entry, byte for byte', async () => {
+  // THE invariant. Caching is a prefix match, so a single byte of difference
+  // between two reps' prompts means a separate cache entry each — the write
+  // premium paid per person and the shared prefix never read. The rep's name
+  // is the only thing that differs and it has to be after the breakpoint.
+  const knowledge = await retrieve('x', {});
+  const a = systemBlocks(cfg, knowledge, { user: { email: 'ana@vikat.ai', name: 'Ana' } });
+  const b = systemBlocks(cfg, knowledge, { user: { email: 'bo@vikat.ai', name: 'Bo' } });
+
+  assert.equal(a[0].text, b[0].text);
+  assert.notEqual(a[1].text, b[1].text, 'then the per-user block is not doing its job');
+});
+
+test('an anonymous turn still caches, with no empty block', async () => {
+  // /admin/upstream probes with no user. An empty text block is a 400.
+  const blocks = systemBlocks(cfg, await retrieve('x', {}), {});
+
+  assert.equal(blocks.length, 1);
+  assert.deepEqual(blocks[0].cache_control, { type: 'ephemeral' });
+});
+
+test('the cached prefix is over the minimum that can be cached', async () => {
+  // Sonnet 4.6 silently refuses to cache a prefix under 1024 tokens — no
+  // error, just cache_creation_input_tokens: 0. Four chars per token is rough
+  // and deliberately pessimistic; the real prefix is far larger.
+  const blocks = systemBlocks(cfg, await retrieve('x', {}), { user: REP });
+  assert.ok(blocks[0].text.length / 4 > 1024, `prefix is only ~${Math.round(blocks[0].text.length / 4)} tokens`);
+});
+
+test('the string form still reads as one prompt', async () => {
+  // buildSystemPrompt is what /admin/upstream and every other caller use, and
+  // splitting the blocks must not change what the model is told.
+  const one = buildSystemPrompt(cfg, await retrieve('x', {}), { user: REP });
+  const blocks = systemBlocks(cfg, await retrieve('x', {}), { user: REP });
+
+  assert.equal(one, blocks.map((b) => b.text).join('\n\n'));
 });

@@ -124,6 +124,17 @@ function stubApi({
   };
 }
 
+/**
+ * The whole system prompt as one string.
+ *
+ * It travels as content blocks now, so that the cache breakpoint can sit at
+ * the end of the part every rep shares. These tests are about what the model
+ * is TOLD, which is the blocks' text in order — the split is a billing detail
+ * and asserting around it would make every one of them about plumbing.
+ */
+const systemText = (body) =>
+  Array.isArray(body.system) ? body.system.map((b) => b.text).join('\n\n') : body.system;
+
 async function chat(stub, { user = 'rep@vikat.ai', env = ENV } = {}) {
   const original = globalThis.fetch;
   globalThis.fetch = stub;
@@ -371,7 +382,7 @@ test('the retry stops advertising tools the request no longer carries', async ()
   // The prompt's own "never name a file you have not seen in a tool result"
   // cannot catch that, because the model believed it had seen one.
   const sent = [];
-  const stub = stubApi({ onRequest: (body) => sent.push(body.system) });
+  const stub = stubApi({ onRequest: (body) => sent.push(systemText(body)) });
   await chat(stub);
 
   assert.ok(sent.length >= 2, 'at least one retry');
@@ -401,7 +412,7 @@ test('the toolless prompt says the capability is down, not absent', async () => 
   // search it right now, and the Collateral tab lists everything" is true and
   // still gets them the document.
   const sent = [];
-  const stub = stubApi({ onRequest: (body) => sent.push(body.system) });
+  const stub = stubApi({ onRequest: (body) => sent.push(systemText(body)) });
   await chat(stub);
 
   assert.match(sent.at(-1), /UNAVAILABLE THIS TURN/, 'the outage must be stated plainly');
@@ -417,7 +428,7 @@ test('the prompt is rebuilt only when the tools are actually dropped', async () 
   // A model that refuses `thinking` keeps its tools, so it must keep the
   // prompt that describes them.
   const sent = [];
-  const stub = stubApi({ rejectWithTools: false, onRequest: (body) => sent.push(body.system) });
+  const stub = stubApi({ rejectWithTools: false, onRequest: (body) => sent.push(systemText(body)) });
   await chat(stub);
 
   for (const [i, system] of sent.entries()) {
@@ -492,4 +503,22 @@ test('a turn that finishes normally reports nothing at all', async () => {
 
   assert.match(text, /Answered without tools\./);
   assert.doesNotMatch(text, /tool_budget_spent|research_unfinished|empty_response|output_truncated/);
+});
+
+test('every request carries exactly one cache breakpoint, on the shared prefix', async () => {
+  // Asserted on the REQUEST rather than on the builder, because this is the
+  // thing that gets billed. The knowledge base is 67,000 tokens and the tool
+  // loop re-sends it up to four times per turn; a breakpoint that never
+  // reaches the wire costs the same as no breakpoint at all.
+  const sent = [];
+  const stub = stubApi({ rejectWithTools: false, onRequest: (body) => sent.push(body.system) });
+  await chat(stub);
+
+  for (const [i, system] of sent.entries()) {
+    assert.ok(Array.isArray(system), `attempt ${i + 1} sent the prompt as one uncacheable string`);
+    const marked = system.filter((b) => b.cache_control);
+    assert.equal(marked.length, 1, `attempt ${i + 1} has ${marked.length} breakpoints`);
+    assert.equal(marked[0], system[0], 'the breakpoint must be on the shared prefix, not after it');
+    assert.doesNotMatch(marked[0].text, /<current_user>/, 'the rep is named inside the cached prefix');
+  }
 });

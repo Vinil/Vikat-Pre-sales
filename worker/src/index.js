@@ -27,7 +27,7 @@ import { retrieve, retrievalStatus } from './retrieve.js';
 import { searchCollateral, searchCollateralWith, collateralCount } from './collateral.js';
 import { loadFonts } from './documents/fonts.js';
 import { documentStoreStatus } from './documentStore.js';
-import { buildSystemPrompt } from './systemPrompt.js';
+import { systemBlocks } from './systemPrompt.js';
 import { refusedTools, noteRefusal, schemaCost } from './toolHealth.js';
 
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
@@ -288,7 +288,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
   };
 
   const knowledge = await retrieve(userMessage, sessionContext);
-  const system = buildSystemPrompt(cfg, knowledge, sessionContext);
+  const system = systemBlocks(cfg, knowledge, sessionContext);
 
   // Built lazily, and only if the tools are ever dropped. Dropping them from
   // the REQUEST while the prompt still describes them is what produced an
@@ -306,7 +306,7 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
     if (!variants.has(key)) {
       variants.set(
         key,
-        buildSystemPrompt(cfg, knowledge, sessionContext, { toolsAvailable: toolsOn, webAvailable: webOn }),
+        systemBlocks(cfg, knowledge, sessionContext, { toolsAvailable: toolsOn, webAvailable: webOn }),
       );
     }
     return variants.get(key);
