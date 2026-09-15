@@ -158,3 +158,15 @@ test('the prompt carries the arc, the headline rule and the visual rule', () => 
   assert.match(ARTICULATION_BLOCK, /A deck is looked at, not read/);
   assert.match(ARTICULATION_BLOCK, /Never call your own work ready/);
 });
+
+test('the dash rule is checked here, not only where copy is rendered', () => {
+  // §07's first rule, and it was missing until the message announcing this
+  // component was run through it and came back clean while containing three.
+  // noDashes() is applied in outreach.js and through brandSafe, so the rule
+  // was enforced in both places that RENDER and neither place that READS.
+  assert.match(notes('Two surfaces — both new — land this quarter.'), /2 dashes in the copy/);
+  assert.match(notes('One thought – then another.'), /1 dash in the copy/);
+  assert.match(notes('A dash here — like this.'), /comma, a full stop or a new sentence/);
+  // A hyphen inside a word is not a dash.
+  assert.equal(notes('Vendor-neutral, self-hosted, board-ready.'), '');
+});

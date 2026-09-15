@@ -333,6 +333,22 @@ export function checkArticulation(text) {
 
   if (EMOJI.test(copy)) notes.push('No emoji in brand materials.');
 
+  // §07, first rule on the page: "No dashes in narrative copy. Use commas,
+  // periods or a new sentence instead."
+  //
+  // This was missing until the message ANNOUNCING this component was run
+  // through it and came back clean while containing three. noDashes() is
+  // applied to drafts in outreach.js and to documents through brandSafe, so
+  // the rule was enforced in both places that render and in neither place that
+  // reads — and the module whose entire job is how the writing sounds was the
+  // one not looking for it.
+  const dashes = (copy.match(/[—–]/g) || []).length;
+  if (dashes) {
+    notes.push(
+      `${dashes} dash${dashes > 1 ? 'es' : ''} in the copy. §07 wants a comma, a full stop or a new sentence: a dash is usually two thoughts that have not been separated yet.`,
+    );
+  }
+
   for (const re of SELF_CONGRATULATION) {
     if (re.test(copy)) {
       notes.push(
