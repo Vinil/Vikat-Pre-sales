@@ -27,6 +27,20 @@ jobs:
           npm --prefix scripts install --no-audit --no-fund
           npm --prefix worker install --no-audit --no-fund
 
+      # Build the Worker the way the deploy does.
+      #
+      # `npm test` never invokes wrangler: test/ttf-loader.mjs registers its
+      # own Node hook for the binary imports and has no opinion about
+      # wrangler.toml. So a module rule that shadowed another one passed 692
+      # tests and failed every deploy at the bundler, and the only signal was
+      # a red Deploy run someone had to launch by hand.
+      #
+      # --dry-run authenticates with nothing and uploads nothing. It is the
+      # same esbuild pass the deploy runs, which is the point.
+      - name: Build (dry run, same bundler as the deploy)
+        working-directory: worker
+        run: npx wrangler deploy --env= --dry-run --outdir /tmp/build-check
+
       # The widget tests need a real browser. They skip cleanly without one, so
       # installing it here is the difference between covering renderBody's XSS
       # behaviour and silently not covering it.

@@ -32,20 +32,27 @@ workers_dev = true
 # nothing else changes — Access follows the Worker, not the hostname:
 #   routes = [{ pattern = "sales-assistant.vikat.ai/*", zone_name = "vikat.ai" }]
 
-# The brand typefaces are compiled into the Worker as binary modules rather
-# than fetched at runtime. Generated collateral must never fall back to a
-# system font — see worker/src/fonts/README.md.
+# Everything the Worker imports as bytes, in ONE rule.
+#
+#  - The brand typefaces, compiled in rather than fetched at runtime, because
+#    generated collateral must never fall back to a system font. See
+#    worker/src/fonts/README.md.
+#  - The Vikat mark, as artwork rather than retyped letterforms, bundled for
+#    the same reason: a cover that fetches its logo at runtime is a cover that
+#    sometimes has no logo.
+#
+# One rule and not two, and that is the whole point of this comment. These were
+# two blocks, both `fallthrough = false`, and wrangler stops at the first rule
+# of a given type unless it says otherwise. So the png rule was unreachable and
+# every deploy failed at the bundler with "matched a module rule ... but was
+# ignored because a previous rule with the same type was not marked as
+# fallthrough". The test suite never saw it: test/ttf-loader.mjs registers its
+# own Node hook for these extensions and had never read this file.
+#
+# A single rule cannot shadow itself. A third binary type joins the globs here.
 [[rules]]
 type = "Data"
-globs = ["**/*.ttf"]
-fallthrough = false
-
-# The Vikat mark, as artwork rather than as retyped letterforms. Bundled for
-# the same reason the fonts are: a cover that fetches its logo at runtime is a
-# cover that sometimes has no logo.
-[[rules]]
-type = "Data"
-globs = ["**/*.png"]
+globs = ["**/*.ttf", "**/*.png"]
 fallthrough = false
 
 # The admin panel and the assistant page are served by this same Worker, so
