@@ -352,3 +352,50 @@ test('an unforeseen verification failure fails closed', () => {
   assert.equal(said.code, 'unauthorized');
   assert.equal(authStatus({ reason: 'invalid_token' }), 401);
 });
+
+test('a mismatch names the one setting to change, and tells nobody the values', async () => {
+  // Grouping audience and issuer under "the audience or team domain" left an
+  // administrator with two settings in two places and no way to tell which.
+  // Distinguishing them is free: the reason already did.
+  await withJwks(async () => {
+    const wrongAud = await mintToken({ aud: 'someone-elses-app' });
+    const a = authFailure({ reason: (await authenticate(req({ 'Cf-Access-Jwt-Assertion': wrongAud }), {}, cfg)).reason }, cfg);
+    assert.match(a.error, /CF_ACCESS_AUD/);
+    assert.doesNotMatch(a.error, /CF_ACCESS_TEAM_DOMAIN/, 'naming both is naming neither');
+
+    const wrongIss = await mintToken({ iss: 'https://someone-else.cloudflareaccess.com' });
+    const i = authFailure({ reason: (await authenticate(req({ 'Cf-Access-Jwt-Assertion': wrongIss }), {}, cfg)).reason }, cfg);
+    assert.match(i.error, /CF_ACCESS_TEAM_DOMAIN/);
+    assert.doesNotMatch(i.error, /CF_ACCESS_AUD/);
+
+    // The expected and actual values go to the log, never to the caller. They
+    // are committed in wrangler.toml and so are not secret, but an
+    // unauthenticated caller should not be handed a deployment's config by its
+    // own error messages.
+    for (const said of [a, i]) {
+      assert.doesNotMatch(said.error, /someone-elses-app|someone-else\.cloudflareaccess/);
+      assert.doesNotMatch(said.error, new RegExp(cfg.CF_ACCESS_AUD), 'the expected AUD is not echoed either');
+    }
+  });
+});
+
+test('the log line carries what the client message deliberately omits', async () => {
+  // Without this the administrator has the name of a setting and no idea what
+  // the token actually said, which is the whole question.
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    await withJwks(async () => {
+      const token = await mintToken({ aud: 'someone-elses-app' });
+      await authenticate(req({ 'Cf-Access-Jwt-Assertion': token }), {}, cfg);
+    });
+  } finally {
+    console.warn = realWarn;
+  }
+
+  const line = warnings.find((w) => /audience_mismatch/.test(w));
+  assert.ok(line, `no audience_mismatch warning in:\n${warnings.join('\n')}`);
+  assert.match(line, /someone-elses-app/, 'what the token carried');
+  assert.match(line, new RegExp(cfg.CF_ACCESS_AUD), 'and what was expected');
+});

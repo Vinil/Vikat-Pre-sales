@@ -795,6 +795,28 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
  * remedy offered has nothing to do with the cause, so each cause now names
  * itself and says whether signing in again is even the right move.
  */
+/**
+ * Which setting to go and look at, per mismatch.
+ *
+ * These three shared one sentence naming "the audience or team domain", which
+ * is two settings in two different places and left an administrator to guess
+ * which. The reason already distinguishes them, so the remedy can too.
+ *
+ * No values here. `wrangler tail` carries the expected and actual pair from
+ * auth.js, which is the right audience for them.
+ */
+const MISMATCH_FIX = {
+  audience_mismatch:
+    'CF_ACCESS_AUD does not match the Application Audience (AUD) tag of the Access application ' +
+    'protecting this Worker. It is on that application\'s Overview tab in Zero Trust, and it ' +
+    'changes if the application is deleted and recreated.',
+  issuer_mismatch:
+    'CF_ACCESS_TEAM_DOMAIN does not match the Zero Trust team domain that issued this sign-in.',
+  unexpected_alg:
+    'the sign-in was signed with an algorithm this assistant does not accept, which usually means ' +
+    'it came from a different identity provider than the one configured.',
+};
+
 export function authFailure(auth, cfg) {
   switch (auth.reason) {
     case 'misconfigured':
@@ -842,8 +864,8 @@ export function authFailure(auth, cfg) {
       return {
         error:
           'Your sign-in is valid, but it was not issued for this assistant, so signing in again ' +
-          'will not help. Flag this to whoever deployed it: the Access application audience or ' +
-          'team domain does not match what the assistant expects.',
+          'will not help. Flag this to whoever deployed it: ' +
+          MISMATCH_FIX[auth.reason],
         code: 'misconfigured',
         reason: auth.reason,
         retry: 'never',

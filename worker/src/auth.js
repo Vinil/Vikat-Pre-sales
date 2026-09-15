@@ -112,11 +112,26 @@ async function verifyRs256(token, { jwksUrl, issuer, audience }) {
   if (typeof payload.exp === 'number' && payload.exp < now - 60) throw fail('token_expired', 'token expired');
   if (typeof payload.nbf === 'number' && payload.nbf > now + 60) throw fail('token_not_yet_valid', 'token not yet valid');
 
-  if (issuer && payload.iss !== issuer) throw fail('issuer_mismatch', 'issuer mismatch');
+  // Both mismatches carry WHAT they compared, because these are the two that
+  // an administrator has to fix in configuration and "audience mismatch" alone
+  // does not say which value to change or what to change it to.
+  //
+  // Server-side only: the message reaches `wrangler tail` and never the
+  // caller. The values are not secret — the expected pair is committed in
+  // wrangler.toml — but an unauthenticated caller has no business being handed
+  // a deployment's configuration by its own error messages.
+  if (issuer && payload.iss !== issuer) {
+    throw fail('issuer_mismatch', `issuer mismatch: token says "${payload.iss}", expected "${issuer}"`);
+  }
 
   if (audience) {
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(audience)) throw fail('audience_mismatch', 'audience mismatch');
+    if (!aud.includes(audience)) {
+      throw fail(
+        'audience_mismatch',
+        `audience mismatch: token carries [${aud.join(', ')}], expected "${audience}"`,
+      );
+    }
   }
 
   return payload;
