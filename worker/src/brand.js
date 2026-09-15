@@ -175,7 +175,27 @@ export function sentenceCase(text) {
     ? lowered
     : lowered.charAt(0).toUpperCase() + lowered.slice(1);
 
-  return restoreBrandTerms(opened);
+  // Every sentence, not just the first one.
+  //
+  // A heading is often two: "Every console returns severity. The board asks
+  // consequence." The minor-word pass above lowercases "the" wherever it is
+  // not word zero, so that shipped to a customer as "…severity. the board asks
+  // consequence." Twice, on one page of a four-page document, in the two
+  // headings that carried the argument.
+  //
+  // Nothing caught it because every test fixture was a single sentence, and a
+  // single sentence is exactly the case where this function was already right.
+  // The lookbehind keeps an abbreviation from counting as a sentence end.
+  // "Across the U.S. and Canada" has a full stop followed by a space followed
+  // by a lower-case letter and is one sentence; the letter before the stop is
+  // a capital, which is what tells them apart. Caught by its own test, which
+  // is the only reason it is here.
+  const sentences = opened.replace(
+    /(?<![A-Z])([.!?]\s+)([a-z])/g,
+    (_, gap, letter) => gap + letter.toUpperCase(),
+  );
+
+  return restoreBrandTerms(sentences);
 }
 
 /**

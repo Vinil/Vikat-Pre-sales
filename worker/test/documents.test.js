@@ -998,3 +998,38 @@ test('a bar never spans more of the grid than it has', () => {
   }
   assert.match(doc, />100</, 'the real figure is printed, so the scaling cannot overstate it');
 });
+
+test('a heading that is two sentences capitalises both', () => {
+  // Shipped to a customer, twice on one page of a four-page document, in the
+  // two headings that carried the argument:
+  //   "Every console returns severity. the board asks consequence."
+  //   "Severity misprices risk. the loss from an intrusion is set by…"
+  // The minor-word pass lowercases "the" wherever it is not word zero, and
+  // only the first word of the whole string was ever re-capitalised.
+  assert.equal(
+    sentenceCase('Every console returns severity. The board asks consequence.'),
+    'Every console returns severity. The board asks consequence.',
+  );
+  assert.equal(
+    sentenceCase('Severity misprices risk. The loss is set by what the business was doing.'),
+    'Severity misprices risk. The loss is set by what the business was doing.',
+  );
+  // Question and exclamation ends the same way.
+  assert.equal(sentenceCase('Why now? The window is open.'), 'Why now? The window is open.');
+});
+
+test('a single sentence is unchanged, which is why this went unnoticed', () => {
+  // Every fixture in this file was one sentence, and one sentence is exactly
+  // the case the function already got right.
+  assert.equal(
+    sentenceCase('Severity scores do not know your delivery window'),
+    'Severity scores do not know your delivery window',
+  );
+  assert.equal(sentenceCase('The reliability layer for production AI'), 'The reliability layer for production AI');
+});
+
+test('a mid-sentence abbreviation is not treated as a new sentence', () => {
+  // "U.S. the" would be wrong to capitalise; the rule needs whitespace after
+  // the stop, which an abbreviation inside a word does not have.
+  assert.match(sentenceCase('Across the U.S. and Canada'), /U\.S\. and Canada/);
+});
