@@ -831,9 +831,56 @@ export function authFailure(auth, cfg) {
         retry: 'never',
       };
 
+    // A token this deployment cannot accept no matter who presents it. The
+    // signature is good and the sign-in worked; the token was issued for a
+    // different Access application or a different team, so a fresh one is
+    // identical in the way that matters. Offering a sign-in here is the loop
+    // domain_not_allowed above exists to prevent.
+    case 'issuer_mismatch':
+    case 'audience_mismatch':
+    case 'unexpected_alg':
+      return {
+        error:
+          'Your sign-in is valid, but it was not issued for this assistant, so signing in again ' +
+          'will not help. Flag this to whoever deployed it: the Access application audience or ' +
+          'team domain does not match what the assistant expects.',
+        code: 'misconfigured',
+        reason: auth.reason,
+        retry: 'never',
+      };
+
+    // Cloudflare could not be asked whether the token is genuine. Nothing the
+    // rep does changes that, and it is usually over in seconds.
+    case 'jwks_unavailable':
+      return {
+        error: 'The assistant could not reach the sign-in service. Try again in a moment.',
+        code: 'unavailable',
+        reason: auth.reason,
+        retry: 'later',
+      };
+
+    // The common one, and the one worth naming: the session simply ran out.
+    // "Sign in with your Vikat account" reads as though they never had one.
+    case 'token_expired':
+    case 'token_not_yet_valid':
+      return {
+        error: 'Your sign-in has expired. Sign in again to carry on.',
+        code: 'unauthorized',
+        reason: auth.reason,
+        retry: 'signin',
+      };
+
     default:
-      // no_access_token, invalid_token, no_bearer_token: a fresh sign-in is
-      // genuinely the fix, so this is the only case worth reloading for.
+      // no_access_token, no_bearer_token, malformed_token, signing_key_unknown,
+      // bad_signature and anything unforeseen. A fresh sign-in genuinely is the
+      // fix for these: each one describes a token that is absent or not
+      // trustworthy, and signing in replaces it.
+      //
+      // bad_signature stays here deliberately rather than being treated as a
+      // configuration fault. Access does not issue tokens that fail their own
+      // signature, so the realistic causes are a tampered token or a stale
+      // cached key — and reporting a probe as "the server is broken" would be
+      // both wrong and a hint.
       return {
         error: 'Sign in with your Vikat account to use the sales assistant.',
         code: 'unauthorized',
@@ -846,6 +893,17 @@ export function authFailure(auth, cfg) {
 /** 401 only where signing in again can help. */
 export function authStatus(auth) {
   if (auth.reason === 'misconfigured' || auth.reason === 'dev_auth_disabled') return 503;
+  // A valid token for the wrong application is a deployment fault, not a
+  // credential the rep can do anything about, and 401 would tell the client to
+  // send them round the sign-in loop again.
+  if (
+    auth.reason === 'issuer_mismatch' ||
+    auth.reason === 'audience_mismatch' ||
+    auth.reason === 'unexpected_alg' ||
+    auth.reason === 'jwks_unavailable'
+  ) {
+    return 503;
+  }
   if (auth.reason === 'domain_not_allowed' || auth.reason === 'no_email_claim') return 403;
   return 401;
 }

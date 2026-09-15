@@ -67,6 +67,8 @@
             var err = new Error(body.error || 'HTTP ' + r.status);
             err.status = r.status;
             err.code = body.code || '';
+            // The server's own judgement about whether a retry helps.
+            err.retry = body.retry || '';
             throw err;
           });
       },
@@ -87,6 +89,26 @@
    */
   function reason(err) {
     var status = err && err.status;
+
+    // The server says whether signing in again is even the right move, in
+    // `retry`, and it is now careful about the answer: an expired session says
+    // "signin", a token issued for another Access application says "never"
+    // because a fresh one mismatches identically. Trust that over the status,
+    // and fall back to the status only where there is nothing to trust.
+    if (err && err.retry === 'never') {
+      return { text: err.message || 'This cannot be fixed by signing in again.', reload: false };
+    }
+    if (err && err.retry === 'later') {
+      return { text: err.message || 'Try again in a moment.', reload: false };
+    }
+    if (err && err.retry === 'signin') {
+      return { text: err.message, reload: true };
+    }
+
+    // No `retry` to go on: either an older Worker or a request that never
+    // reached one. A rejected fetch is status 0, which is what an expired
+    // Access session looks like from here — the redirect to the login host is
+    // cross-origin, so it never resolves to a status at all.
     if (status === 401 || status === 0) {
       return {
         text: 'Your sign-in could not be confirmed. Reload the page to sign in again.',

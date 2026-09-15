@@ -832,7 +832,7 @@ async function openRefusedApp(auth) {
       return route.fulfill({
         status: auth.status,
         contentType: 'application/json',
-        body: JSON.stringify({ error: auth.error, code: auth.code }),
+        body: JSON.stringify({ error: auth.error, code: auth.code, retry: auth.retry }),
       });
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{"documents":[],"total":0}' });
@@ -880,6 +880,44 @@ test('an account without access is told that, and NOT offered a reload', async (
     { timeout: 5000 },
   );
   assert.equal(await app.locator('#chats-body .rail-retry').count(), 0, 'a reload cannot fix a 403');
+  await app.close();
+});
+
+test('the rail follows the server when it says a sign-in will not help', async () => {
+  // A token issued for a different Access application: valid, correctly
+  // signed, and refused. The Worker answers 503 + retry:"never" precisely so
+  // nobody is sent round the loop, and the rail must not override that with
+  // its own reading of the status.
+  const app = await openRefusedApp({
+    status: 503,
+    error: 'Your sign-in is valid, but it was not issued for this assistant, so signing in again will not help.',
+    code: 'misconfigured',
+    retry: 'never',
+  });
+
+  await app.waitForFunction(
+    () => /will not help/i.test(document.querySelector('#chats-body').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  assert.equal(await app.locator('#chats-body .rail-retry').count(), 0, 'no reload: it cannot work');
+  await app.close();
+});
+
+test('an expired session is named as expired, not as a missing account', async () => {
+  const app = await openRefusedApp({
+    status: 401,
+    error: 'Your sign-in has expired. Sign in again to carry on.',
+    code: 'unauthorized',
+    retry: 'signin',
+  });
+
+  await app.waitForFunction(
+    () => /expired/i.test(document.querySelector('#chats-body').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  assert.equal(await app.locator('#chats-body .rail-retry').count(), 1);
   await app.close();
 });
 

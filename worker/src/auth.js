@@ -41,7 +41,7 @@ async function getJwks(url) {
   if (hit && hit.expiresAt > Date.now()) return hit.keys;
 
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`JWKS fetch failed: ${res.status}`);
+  if (!res.ok) throw fail('jwks_unavailable', `JWKS fetch failed: ${res.status}`);
   const body = await res.json();
   const keys = body.keys || [];
 
@@ -55,19 +55,41 @@ async function getJwks(url) {
  * Checks signature, expiry, not-before, issuer and audience. Anything that
  * fails throws; callers turn that into a 401.
  */
+/**
+ * A verification failure that says which one it was.
+ *
+ * Every throw below used to be a bare Error, and authenticate() caught all of
+ * them as one reason, `invalid_token`, which index.js then answered with
+ * `retry: "signin"`. That advice is right for an expired session and wrong for
+ * half the others: an audience or issuer mismatch means a correctly signed,
+ * entirely valid token that this deployment is not configured to accept, so
+ * signing in again produces a fresh token that fails in exactly the same way.
+ * The rep is told to sign in, does, and is told to sign in.
+ *
+ * That is the same trap the domain_not_allowed branch in index.js was written
+ * to avoid, and its comment says so: "Reloading re-runs the same successful
+ * sign-in and fails identically." The rule simply never reached the catch that
+ * everything else funnels through.
+ */
+function fail(reason, message) {
+  const err = new Error(message);
+  err.reason = reason;
+  return err;
+}
+
 async function verifyRs256(token, { jwksUrl, issuer, audience }) {
   const parts = token.split('.');
-  if (parts.length !== 3) throw new Error('malformed token');
+  if (parts.length !== 3) throw fail('malformed_token', 'malformed token');
 
   const [headerB64, payloadB64, signatureB64] = parts;
   const header = b64urlToJson(headerB64);
   const payload = b64urlToJson(payloadB64);
 
-  if (header.alg !== 'RS256') throw new Error(`unexpected alg ${header.alg}`);
+  if (header.alg !== 'RS256') throw fail('unexpected_alg', `unexpected alg ${header.alg}`);
 
   const keys = await getJwks(jwksUrl);
   const jwk = keys.find((k) => k.kid === header.kid);
-  if (!jwk) throw new Error('signing key not found in JWKS');
+  if (!jwk) throw fail('signing_key_unknown', 'signing key not found in JWKS');
 
   const key = await crypto.subtle.importKey(
     'jwk',
@@ -83,18 +105,18 @@ async function verifyRs256(token, { jwksUrl, issuer, audience }) {
     b64urlToBytes(signatureB64),
     new TextEncoder().encode(`${headerB64}.${payloadB64}`),
   );
-  if (!ok) throw new Error('signature verification failed');
+  if (!ok) throw fail('bad_signature', 'signature verification failed');
 
   const now = Math.floor(Date.now() / 1000);
   // 60s of clock skew tolerance, which is conventional for JWT verification.
-  if (typeof payload.exp === 'number' && payload.exp < now - 60) throw new Error('token expired');
-  if (typeof payload.nbf === 'number' && payload.nbf > now + 60) throw new Error('token not yet valid');
+  if (typeof payload.exp === 'number' && payload.exp < now - 60) throw fail('token_expired', 'token expired');
+  if (typeof payload.nbf === 'number' && payload.nbf > now + 60) throw fail('token_not_yet_valid', 'token not yet valid');
 
-  if (issuer && payload.iss !== issuer) throw new Error('issuer mismatch');
+  if (issuer && payload.iss !== issuer) throw fail('issuer_mismatch', 'issuer mismatch');
 
   if (audience) {
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(audience)) throw new Error('audience mismatch');
+    if (!aud.includes(audience)) throw fail('audience_mismatch', 'audience mismatch');
   }
 
   return payload;
@@ -221,10 +243,16 @@ export async function authenticate(request, env, cfg) {
         return { ok: false, reason: 'misconfigured' };
     }
   } catch (err) {
-    // A verification failure is expected traffic (expired tab, replayed token),
-    // not an incident. Log the reason, return a flat 401 to the caller.
-    console.warn('[auth] rejected:', err?.message || err);
-    return { ok: false, reason: 'invalid_token' };
+    // Most of these are expected traffic (an expired tab, a replayed token),
+    // not an incident, so they are warned rather than errored. The reason is
+    // carried out to the caller now instead of being flattened: it decides
+    // which remedy the rep is offered, and it is the difference between "your
+    // session expired" and a sign-in loop nobody can escape.
+    //
+    // invalid_token remains the fallback for anything unforeseen, so a new
+    // throw fails closed rather than being reported as something it is not.
+    console.warn('[auth] rejected:', err?.reason || 'invalid_token', err?.message || err);
+    return { ok: false, reason: err?.reason || 'invalid_token' };
   }
 }
 

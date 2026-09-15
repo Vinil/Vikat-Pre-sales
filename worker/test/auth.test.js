@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 
 import { authenticate, __internals } from '../src/auth.js';
+import { authFailure, authStatus } from '../src/index.js';
 import { loadConfig } from '../src/config.js';
 import { req } from './helpers.js';
 
@@ -128,7 +129,12 @@ test('a token signed by the wrong key is refused', async () => {
     const token = await mintToken({}, { sign: false });
     const r = await authenticate(req({ 'Cf-Access-Jwt-Assertion': token }), {}, cfg);
     assert.equal(r.ok, false, 'a forged signature must not authenticate');
-    assert.equal(r.reason, 'invalid_token');
+    assert.equal(r.reason, 'bad_signature');
+    // Reported as a credential problem, not a server fault. Access does not
+    // issue tokens that fail their own signature, so this is a tampered token
+    // or a stale cached key; answering "the assistant is misconfigured" would
+    // be wrong and would confirm something to whoever sent it.
+    assert.equal(authStatus({ reason: r.reason }), 401);
   });
 });
 
@@ -138,15 +144,34 @@ test('an expired token is refused', async () => {
     const token = await mintToken({ exp: past, iat: past - 3600 });
     const r = await authenticate(req({ 'Cf-Access-Jwt-Assertion': token }), {}, cfg);
     assert.equal(r.ok, false);
-    assert.equal(r.reason, 'invalid_token');
+    assert.equal(r.reason, 'token_expired');
+
+    // The common failure, and the one a rep can act on. It used to answer
+    // "Sign in with your Vikat account", which reads as though they never had
+    // one — the actual situation is that they did and it ran out.
+    const said = authFailure({ reason: r.reason }, cfg);
+    assert.equal(said.retry, 'signin');
+    assert.match(said.error, /expired/i);
+    assert.equal(authStatus({ reason: r.reason }), 401);
   });
 });
 
-test('a token for a different audience is refused', async () => {
+test('a token for a different audience is refused, and NOT with a sign-in loop', async () => {
+  // This is the case the flattening got dangerously wrong. The token is
+  // genuine and correctly signed; it was issued for another Access
+  // application. Every reason fell through to `retry: "signin"`, so a rep
+  // signed in, received a fresh token that mismatched identically, and was
+  // told to sign in. Forever.
   await withJwks(async () => {
     const token = await mintToken({ aud: 'someone-elses-app' });
     const r = await authenticate(req({ 'Cf-Access-Jwt-Assertion': token }), {}, cfg);
     assert.equal(r.ok, false, 'audience confusion must not authenticate');
+    assert.equal(r.reason, 'audience_mismatch');
+
+    const said = authFailure({ reason: r.reason }, cfg);
+    assert.equal(said.retry, 'never', 'signing in again cannot fix an audience mismatch');
+    assert.match(said.error, /will not help/i, 'and the rep has to be told that');
+    assert.equal(authStatus({ reason: r.reason }), 503, 'this is a deployment fault, not a credential one');
   });
 });
 
@@ -276,4 +301,54 @@ test('an empty ALLOWED_EMAIL_DOMAINS disables the domain gate', () => {
   const c = loadConfig({});
   c.ALLOWED_EMAIL_DOMAINS = [];
   assert.ok(__internals.domainAllowed('anyone@anywhere.com', c));
+});
+
+test('an issuer mismatch is a deployment fault, not a credential one', async () => {
+  // Same shape as the audience case: a valid token from the wrong team.
+  await withJwks(async () => {
+    const token = await mintToken({ iss: 'https://someone-else.cloudflareaccess.com' });
+    const r = await authenticate(req({ 'Cf-Access-Jwt-Assertion': token }), {}, cfg);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'issuer_mismatch');
+    assert.equal(authFailure({ reason: r.reason }, cfg).retry, 'never');
+    assert.equal(authStatus({ reason: r.reason }), 503);
+  });
+});
+
+test('every refusal names a remedy that could actually work', () => {
+  // The rule the rest of authFailure was written to, applied to the whole set
+  // rather than to the branches somebody remembered. `signin` is a promise: it
+  // says a fresh token would be accepted. For any reason where a fresh token
+  // fails identically, making that promise costs the rep a round trip and
+  // their confidence in the message.
+  const FRESH_TOKEN_WOULD_FAIL_THE_SAME_WAY = [
+    'issuer_mismatch',
+    'audience_mismatch',
+    'unexpected_alg',
+    'domain_not_allowed',
+    'no_email_claim',
+    'misconfigured',
+    'dev_auth_disabled',
+    'jwks_unavailable',
+  ];
+
+  for (const reason of FRESH_TOKEN_WOULD_FAIL_THE_SAME_WAY) {
+    const said = authFailure({ reason, email: 'someone@example.com' }, cfg);
+    assert.notEqual(said.retry, 'signin', `${reason} must not send the rep round the sign-in loop`);
+    assert.ok(said.error, `${reason} must still say something`);
+    assert.equal(said.reason, reason, 'the reason travels, so a log line explains the screen');
+  }
+
+  // And the converse: where a fresh token IS the fix, say so.
+  for (const reason of ['no_access_token', 'token_expired', 'bad_signature', 'malformed_token']) {
+    assert.equal(authFailure({ reason }, cfg).retry, 'signin', `${reason} is fixed by signing in`);
+  }
+});
+
+test('an unforeseen verification failure fails closed', () => {
+  // fail() attaches a reason; anything that throws without one must still be
+  // refused rather than sailing past the switch into a default that permits.
+  const said = authFailure({ reason: 'invalid_token' }, cfg);
+  assert.equal(said.code, 'unauthorized');
+  assert.equal(authStatus({ reason: 'invalid_token' }), 401);
 });
