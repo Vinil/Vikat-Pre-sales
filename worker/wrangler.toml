@@ -84,11 +84,18 @@ AUTH_MODE = "cf-access"
 CF_ACCESS_TEAM_DOMAIN = "sparkling-hat-8db3.cloudflareaccess.com"
 # Application Audience (AUD) tag from the Access application's Overview tab.
 #
-# THIS VALUE GOES STALE SILENTLY. It belongs to one Access application, and
-# deleting and recreating that application mints a new one — the Worker keeps
-# rejecting every sign-in, and nothing says so: the token verifies, /health
-# still answers ok:true, and the only symptom is that no human being can use
-# the assistant. That is exactly how it failed on 2026-09-15.
+# A mismatch here is one of TWO faults that look identical. The value belongs
+# to one Access application, so it goes stale if that application is deleted
+# and recreated — but the same audience_mismatch appears when the value is
+# perfectly correct and the application is simply no longer in front of this
+# Worker, because the browser then presents a leftover CF_Authorization cookie
+# from whatever minted it. Access injects Cf-Access-Jwt-Assertion only for a
+# Worker it actually guards, so the log line says "via access-header" for the
+# first and "via cookie" for the second.
+#
+# Either way nothing announces it: the token verifies, /health still answers
+# ok:true, and the only symptom is that no human being can use the assistant.
+# That is exactly how it failed on 2026-09-15.
 #
 # Nothing can validate it from here. It is checkable only against a real token,
 # so the checks in auth.js can confirm it is SET and never that it is right. If

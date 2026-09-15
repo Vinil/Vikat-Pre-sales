@@ -5,6 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { webcrypto } from 'node:crypto';
 
 import { authenticate, __internals } from '../src/auth.js';
@@ -398,4 +399,51 @@ test('the log line carries what the client message deliberately omits', async ()
   assert.ok(line, `no audience_mismatch warning in:\n${warnings.join('\n')}`);
   assert.match(line, /someone-elses-app/, 'what the token carried');
   assert.match(line, new RegExp(cfg.CF_ACCESS_AUD), 'and what was expected');
+});
+
+test('the log says whether Access injected the token or the browser did', async () => {
+  // A stale CF_ACCESS_AUD and an Access application that is no longer in front
+  // of the Worker produce the identical audience_mismatch, and the fixes are
+  // opposite: re-copy a tag, versus re-attach the application. Access injects
+  // the header and only for a Worker it actually guards; a cookie outlives the
+  // application that minted it. So the source answers which.
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+
+  try {
+    await withJwks(async () => {
+      const token = await mintToken({ aud: 'someone-elses-app' });
+
+      await authenticate(req({ 'Cf-Access-Jwt-Assertion': token }), {}, cfg);
+      assert.match(
+        warnings.find((w) => /audience_mismatch/.test(w)) || '',
+        /via access-header/,
+        'a header means Access is in front and the configured AUD is the wrong one',
+      );
+
+      warnings.length = 0;
+      await authenticate(req({ Cookie: `CF_Authorization=${token}` }), {}, cfg);
+      assert.match(
+        warnings.find((w) => /audience_mismatch/.test(w)) || '',
+        /via cookie/,
+        'a cookie with no header means Access is not enforcing ahead of this Worker',
+      );
+    });
+  } finally {
+    console.warn = realWarn;
+  }
+});
+
+test('a cookie is held to exactly the same checks as an injected header', () => {
+  // The source is recorded, never trusted. Recording it would be a real
+  // weakness if it ever became a reason to skip a check.
+  const src = fs.readFileSync(new URL('../src/auth.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf("case 'cf-access'"), src.indexOf("case 'entra'"));
+  assert.doesNotMatch(block, /tokenSource\s*===/, 'nothing may branch on where the token came from');
+  assert.equal(
+    (block.match(/verifyRs256\(/g) || []).length,
+    1,
+    'one verification path, so a cookie cannot take a softer one',
+  );
 });

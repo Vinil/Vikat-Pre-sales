@@ -184,9 +184,24 @@ export async function authenticate(request, env, cfg) {
       case 'cf-access': {
         // Access injects this after the user completes SSO. It cannot be set by
         // a browser cross-origin, and Access strips any client-supplied copy.
-        const token =
-          request.headers.get('Cf-Access-Jwt-Assertion') ||
-          getCookie(request, 'CF_Authorization');
+        // Which of the two the token came from is a diagnosis in itself.
+        //
+        // Access INJECTS the header, and only for a Worker it is actually in
+        // front of. The cookie is just a cookie the browser still holds, and it
+        // survives the application that minted it being deleted. So a request
+        // arriving with a cookie and no header means Access is not enforcing
+        // anything ahead of this Worker, and the token being judged was issued
+        // by some other application — which produces exactly the same
+        // audience_mismatch as a stale CF_ACCESS_AUD, with an entirely
+        // different fix.
+        //
+        // Nothing here trusts one more than the other: both go through the
+        // same signature, issuer and audience checks, so the fallback is safe.
+        // It is recorded because the two are indistinguishable from the error
+        // otherwise, and telling them apart cost a round trip.
+        const header = request.headers.get('Cf-Access-Jwt-Assertion');
+        const token = header || getCookie(request, 'CF_Authorization');
+        const tokenSource = header ? 'access-header' : 'cookie';
 
         if (!token) return { ok: false, reason: 'no_access_token' };
 
@@ -196,11 +211,20 @@ export async function authenticate(request, env, cfg) {
         }
 
         const issuer = `https://${cfg.CF_ACCESS_TEAM_DOMAIN}`;
-        const payload = await verifyRs256(token, {
-          jwksUrl: `${issuer}/cdn-cgi/access/certs`,
-          issuer,
-          audience: cfg.CF_ACCESS_AUD,
-        });
+        let payload;
+        try {
+          payload = await verifyRs256(token, {
+            jwksUrl: `${issuer}/cdn-cgi/access/certs`,
+            issuer,
+            audience: cfg.CF_ACCESS_AUD,
+          });
+        } catch (err) {
+          // Re-thrown with the source attached, so the one log line carries
+          // both halves of the question: what the token claimed, and whether
+          // Access put it there.
+          err.message = `${err.message} [via ${tokenSource}]`;
+          throw err;
+        }
 
         const email = emailFrom(payload);
         if (!email) return { ok: false, reason: 'no_email_claim' };
