@@ -85,11 +85,17 @@ export const WHEN_IN_DOUBT =
  * exactly that under Protect the mark. The asset has to arrive.
  */
 export const LOGO = {
-  status: 'missing',
-  needs: ['Vikat.AI primary lockup', 'Vikat.AI emblem', 'the suite mark'],
-  formats: 'SVG preferred, or PNG at 4x the largest use',
-  currently: 'The wordmark is set in Inter Black, which is a redrawn lockup.',
-  source: '§02, §03, §06; TM3 §07',
+  status: 'placed',
+  // Extracted from the guidelines themselves, which carry them as embedded
+  // rasters with soft masks. Not redrawn, and not approximated: the artwork.
+  files: ['vikat-lockup.png', 'vikat-lockup-reversed.png', 'vikat-emblem.png'],
+  source: '§02, §03, §06; TM3 §04, §07',
+  // Still open, and worth knowing before somebody puts a mark on a poster:
+  // 466x232 is the true resolution of the discrete artwork in TM3. It clears
+  // the guidelines' own minimum with room on screen, and it is not enough for
+  // large-format print. TM4 has the same marks only as full-page 300dpi scans,
+  // where they cannot be separated from the page.
+  ceiling: 'Screen and ordinary print. A vector original is still worth having for anything larger.',
 };
 
 /** §08 · Trademark line, reproduced exactly. */

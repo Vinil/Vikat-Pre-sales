@@ -40,6 +40,14 @@ type = "Data"
 globs = ["**/*.ttf"]
 fallthrough = false
 
+# The Vikat mark, as artwork rather than as retyped letterforms. Bundled for
+# the same reason the fonts are: a cover that fetches its logo at runtime is a
+# cover that sometimes has no logo.
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = false
+
 # The admin panel and the assistant page are served by this same Worker, so
 # there is one origin, one Access policy and no cross-origin requests at all.
 [assets]

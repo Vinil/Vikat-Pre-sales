@@ -1,5 +1,5 @@
 /**
- * ttf-loader.mjs — let `node --test` import .ttf the way Wrangler does.
+ * ttf-loader.mjs — let `node --test` import .ttf and .png the way Wrangler does.
  *
  * The Worker imports font files directly, because wrangler.toml declares
  * `type = "Data"` for every .ttf and hands each import an ArrayBuffer. Node
@@ -17,15 +17,24 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerHooks } from 'node:module';
 
+/**
+ * Both extensions wrangler.toml declares as Data: the fonts, and the Vikat
+ * mark. The mark is artwork extracted from the brand guidelines rather than
+ * letterforms retyped, so it is a file the renderer imports exactly like a
+ * font, and the same hook has to cover it or the tests import a thing the
+ * deployed Worker does not.
+ */
+const BINARY = /\.(?:ttf|png)$/;
+
 registerHooks({
   resolve(specifier, context, next) {
-    if (!specifier.endsWith('.ttf')) return next(specifier, context);
+    if (!BINARY.test(specifier)) return next(specifier, context);
     const url = new URL(specifier, context.parentURL).href;
     return { url, format: 'module', shortCircuit: true };
   },
 
   load(url, context, next) {
-    if (!url.endsWith('.ttf')) return next(url, context);
+    if (!BINARY.test(url)) return next(url, context);
 
     const bytes = readFileSync(fileURLToPath(url));
     // Node caches the compiled source, not the file, so the base64 round trip

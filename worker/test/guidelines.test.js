@@ -225,12 +225,12 @@ test('a deck that is mostly drawn passes', () => {
   assert.equal(checkGuidelines(good).problems.length, 0);
 });
 
-test('the missing logo is recorded as missing, not approximated', () => {
-  // Both documents forbid a redrawn lockup by name, and the renderer typesets
-  // "vikat.AI" in Inter Black. Drawing a mark from a description in a PDF
-  // would be inventing a trademark, so the gap is stated and the asset is
-  // requested rather than guessed at.
-  assert.equal(LOGO.status, 'missing');
-  assert.match(LOGO.currently, /redrawn lockup/);
-  assert.ok(LOGO.needs.length >= 2);
+test('the logo is the real artwork, and its ceiling is recorded', () => {
+  // Extracted from the guidelines rather than redrawn. What remains true is
+  // the resolution: 466x232 is the real size of the discrete artwork, which
+  // clears the guidelines' own screen minimum and is not enough for large
+  // format. Saying so beats finding out on a trade-show banner.
+  assert.equal(LOGO.status, 'placed');
+  assert.equal(LOGO.files.length, 3);
+  assert.match(LOGO.ceiling, /vector original/);
 });

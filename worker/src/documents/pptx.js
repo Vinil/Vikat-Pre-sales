@@ -17,6 +17,8 @@
 
 import { zipSync, strToU8 } from 'fflate';
 
+import { markMedia } from './marks.js';
+
 import { COLOR, INK, ON_NAVY, FONT, GRADIENT, WORDMARK, TAGLINE, copyrightLine, eyebrowCase } from '../brand.js';
 import { DISCLOSURE_LABELS } from './spec.js';
 import { wrap } from './measure.js';
@@ -187,27 +189,38 @@ function inlineText(box, runs, { align = 'l', anchor = 't' } = {}) {
 }
 
 /**
- * The wordmark, set in Inter Black.
+ * The mark. The real artwork, placed, not letterforms retyped.
  *
- * The full lockup pairs this with the chip-in-orbit emblem, which is a
- * supplied asset and not something to approximate — the guidelines prohibit
- * altering or reconstructing a mark. The wordmark is registered on its own,
- * so using it alone is a legitimate variant rather than a compromise. Drop
- * the emblem SVG into the repo and this becomes the full lockup.
+ * This used to set "vikat.AI" in Inter Black and it looked close, which is the
+ * problem: TM3 §07 says "the logotype is a designed lockup, never retype it",
+ * and a good imitation survives being forwarded in a way an obvious one does
+ * not. The artwork now lives in src/brandassets, extracted from the guidelines
+ * themselves rather than redrawn.
+ *
+ * Two files, because TM3 §04 gives two and is explicit about which goes where:
+ * the full-colour lockup on white and light backgrounds, the reversed one on
+ * navy and dark surfaces ONLY. Putting the colour lockup on navy is listed
+ * under prohibited uses, so the choice is made from the ground it sits on
+ * rather than left to a caller.
+ *
+ * The source is 466 x 232, so the aspect is fixed at 2.009 and the height
+ * follows the width. Stretching a mark is prohibited too, and the way that
+ * happens is someone passing a height that seemed about right.
  */
-function wordmark(x, y, onDark) {
-  return text(
-    { x, y, w: 3, h: 0.45 },
-    [
-      {
-        text: WORDMARK,
-        role: 'display',
-        size: SIZE.wordmark,
-        tracking: -0.03,
-        lineHeight: 1,
-        color: onDark ? ON_NAVY.strong : COLOR.navy,
-      },
-    ],
+const LOCKUP_ASPECT = 466 / 232;
+const EMU = (inches) => Math.round(inches * 914400);
+
+function wordmark(x, y, onDark, w = 1.9) {
+  const h = w / LOCKUP_ASPECT;
+  const rel = onDark ? 'rId3' : 'rId2';
+  const name = onDark ? 'Vikat lockup, reversed' : 'Vikat lockup';
+
+  return (
+    `<p:pic><p:nvPicPr><p:cNvPr id="${nextId()}" name="${name}" descr="Vikat.AI"/>` +
+    '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>' +
+    `<p:blipFill><a:blip r:embed="${rel}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
+    `<p:spPr><a:xfrm><a:off x="${EMU(x)}" y="${EMU(y)}"/><a:ext cx="${EMU(w)}" cy="${EMU(h)}"/></a:xfrm>` +
+    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
   );
 }
 
@@ -1274,6 +1287,12 @@ export function renderPptx(spec, meta, fonts) {
     'ppt/slideLayouts/slideLayout1.xml': strToU8(part.slideLayout),
     'ppt/slideLayouts/_rels/slideLayout1.xml.rels': strToU8(part.slideLayoutRels),
   };
+
+  // The artwork itself. Every slide's rels name rId2 and rId3, so the parts
+  // have to be in the package even on a deck where only the cover draws one:
+  // a relationship pointing at a missing part is a file PowerPoint refuses to
+  // open, which is a worse failure than a missing logo.
+  Object.assign(files, markMedia());
 
   slides.forEach((s, i) => {
     files[`ppt/slides/slide${i + 1}.xml`] = strToU8(s);
