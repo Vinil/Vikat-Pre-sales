@@ -81,3 +81,34 @@ test('a failed merge stops the deploy rather than shipping a hole', () => {
   assert.match(yml, /::error::SharePoint material could not be merged/);
   assert.match(yml, /skip_sharepoint if you need the code change out/);
 });
+
+test('no browser test loads a page over file://', () => {
+  // Ten admin tests were red in CI for weeks while passing locally, all with
+  // "page.waitForFunction: Timeout 5000ms exceeded". They loaded admin.html
+  // from file://, and admin.js calls fetch('/admin/summary'), which on a file
+  // origin resolves to file:///admin/summary rather than a request
+  // page.route('**' + '/admin/**') can answer.
+  //
+  // Whether that fetch is interceptable at all depends on the Chromium build,
+  // which is why it passed on one machine and timed out on another. The
+  // reason was already written in widget.test.js, for the app tests, and had
+  // simply never been applied to the admin ones.
+  //
+  // A real origin is also what the app actually runs on, so this is the more
+  // honest harness as well as the working one.
+  const dir = path.join(root, 'worker/test');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.test.js'))) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    const offenders = src
+      .split('\n')
+      .map((line, i) => [i + 1, line])
+      .filter(([, line]) => /\.goto\(\s*`?file:\/\//.test(line));
+
+    assert.deepEqual(
+      offenders,
+      [],
+      `${f} loads a page over file://, where fetch() cannot be intercepted:\n` +
+        offenders.map(([n, l]) => `  ${n}: ${l.trim()}`).join('\n'),
+    );
+  }
+});

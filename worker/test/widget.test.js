@@ -20,11 +20,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 
-const ADMIN_HTML = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../widget/admin.html',
-);
-
 const WIDGET = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../widget/vikat-chat.js',
@@ -329,7 +324,7 @@ test('every admin tab loads its data, not just the first', async () => {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 
-  await admin.goto(`file://${ADMIN_HTML}`);
+  await admin.goto(ADMIN_URL);
   await admin.waitForFunction(
     () => !document.querySelector('#sp-hostname').textContent.includes('—'),
     null,
@@ -361,7 +356,7 @@ test('one failing loader does not cancel the others', async () => {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 
-  await admin.goto(`file://${ADMIN_HTML}`);
+  await admin.goto(ADMIN_URL);
   await admin.waitForFunction(
     () => document.querySelector('#whoami').textContent.includes('boss@vikat.ai'),
     null,
@@ -688,6 +683,21 @@ const server = http.createServer((req, res) => {
 
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const APP_URL = `http://127.0.0.1:${server.address().port}/index.html`;
+
+/**
+ * The admin panel, over the same origin, for the same reason.
+ *
+ * These tests loaded admin.html from file:// and had been red in CI for
+ * weeks while passing locally. admin.js calls fetch('/admin/summary'), which
+ * on a file origin resolves to file:///admin/summary — not a request
+ * page.route('**\/admin/**') can answer. Whether that fetch is interceptable
+ * at all depends on the Chromium build, which is exactly why it passed on one
+ * machine and timed out on another, ten tests at a time, every push.
+ *
+ * The reason was already written down four lines above, for the app tests. It
+ * was simply never applied here.
+ */
+const ADMIN_URL = `http://127.0.0.1:${server.address().port}/admin.html`;
 test.after(() => server.close());
 
 /** The app shell with /chats and /whoami stubbed. */
@@ -962,7 +972,7 @@ async function openAdminUsers({ lagList = false } = {}) {
     });
   });
 
-  await admin.goto(`file://${ADMIN_HTML}`);
+  await admin.goto(ADMIN_URL);
   await admin.waitForFunction(() => document.querySelector('#whoami').textContent.includes('boss@vikat.ai'), null, {
     timeout: 5000,
   });
@@ -983,7 +993,7 @@ async function openAdminRejected(status, body) {
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }),
   );
 
-  await page.goto(`file://${ADMIN_HTML}`);
+  await page.goto(ADMIN_URL);
   return { page, reloads: () => reloads };
 }
 
@@ -1035,7 +1045,7 @@ test('a 401 that a fresh sign-in cannot fix reloads once, then stops', async () 
   );
 
   page.on('load', () => { loads += 1; });
-  await page.goto(`file://${ADMIN_HTML}`);
+  await page.goto(ADMIN_URL);
 
   // The one reload it is allowed. Driven rather than waited for, so the test
   // does not depend on the 1500ms timer firing inside a headless page.
@@ -1072,7 +1082,7 @@ test('signing in successfully clears the record of the attempt', async () => {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 
-  await page.goto(`file://${ADMIN_HTML}`);
+  await page.goto(ADMIN_URL);
   await page.waitForFunction(() => /Reloading/.test(document.body.textContent), null, { timeout: 5000 });
 
   fail = false;
