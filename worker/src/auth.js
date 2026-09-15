@@ -124,10 +124,15 @@ async function verifyRs256(token, { jwksUrl, issuer, audience }) {
     throw fail('issuer_mismatch', `token iss "${payload.iss}" expected "${issuer}"`);
   }
 
-  if (audience) {
+  // Both sides are sets. A token carries one or more audiences, and this
+  // deployment accepts one or more applications, so the test is whether they
+  // intersect. `audience` still accepts a bare string, which is what the entra
+  // branch passes.
+  const accepted = audience == null ? [] : Array.isArray(audience) ? audience : [audience];
+  if (accepted.length) {
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(audience)) {
-      throw fail('audience_mismatch', `token aud [${aud.join(', ')}] expected [${audience}]`);
+    if (!aud.some((a) => accepted.includes(a))) {
+      throw fail('audience_mismatch', `token aud [${aud.join(', ')}] accepted [${accepted.join(', ')}]`);
     }
   }
 
@@ -202,7 +207,12 @@ export async function authenticate(request, env, cfg) {
 
         if (!token) return { ok: false, reason: 'no_access_token' };
 
-        if (!cfg.CF_ACCESS_TEAM_DOMAIN || !cfg.CF_ACCESS_AUD) {
+        // .length, not truthiness: CF_ACCESS_AUD is a list now, and an empty
+        // array is truthy. Getting this wrong would send an unconfigured
+        // deployment past the guard and into verifyRs256 with nothing to
+        // compare against, where `if (audience)` would skip the check entirely
+        // and accept any correctly signed token from the team.
+        if (!cfg.CF_ACCESS_TEAM_DOMAIN || !cfg.CF_ACCESS_AUD.length) {
           console.error('[auth] AUTH_MODE=cf-access but CF_ACCESS_TEAM_DOMAIN/CF_ACCESS_AUD are unset');
           return { ok: false, reason: 'misconfigured' };
         }

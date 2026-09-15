@@ -807,9 +807,10 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
  */
 const MISMATCH_FIX = {
   audience_mismatch:
-    'CF_ACCESS_AUD does not match the Application Audience (AUD) tag of the Access application ' +
-    'protecting this Worker. It is on that application\'s Overview tab in Zero Trust, and it ' +
-    'changes if the application is deleted and recreated.',
+    'CF_ACCESS_AUD does not list the Application Audience (AUD) tag of the Access application that ' +
+    'issued this sign-in. More than one application can match one Worker, and the most specific ' +
+    'wins, so the one minting tokens may not be the one the Worker page shows as linked. The log ' +
+    'names both the tag the token carried and the tags configured.',
   issuer_mismatch:
     'CF_ACCESS_TEAM_DOMAIN does not match the Zero Trust team domain that issued this sign-in.',
   unexpected_alg:

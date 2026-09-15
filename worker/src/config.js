@@ -37,7 +37,12 @@ export const DEFAULTS = {
   // 'cf-access' | 'entra' | 'dev'
   AUTH_MODE: 'cf-access',
   CF_ACCESS_TEAM_DOMAIN: '', // e.g. vikat.cloudflareaccess.com
-  CF_ACCESS_AUD: '', // Application Audience tag from the Access app
+  // A LIST. More than one Access application can match one Worker — a Worker
+  // policy and the account-wide "All Workers" policy both do on a workers.dev
+  // URL — and whichever is most specific mints the token. Naming only one means
+  // every sign-in is refused the moment a different policy starts winning,
+  // which is not a hypothetical: see the note in wrangler.toml.
+  CF_ACCESS_AUD: [], // Application Audience tag(s), comma-separated
   ENTRA_TENANT_ID: '',
   ENTRA_AUDIENCE: '',
   // Second gate behind SSO. Empty list disables the check.
@@ -242,6 +247,17 @@ const NUMERIC_KEYS = new Set([
 
 const BOOLEAN_KEYS = new Set(['ALLOW_DEV_AUTH']);
 
+/**
+ * Lists of case-sensitive IDENTIFIERS, split and trimmed but never lowercased.
+ *
+ * Separate from LIST_KEYS because that set lowercases, which is right for a
+ * hostname or an email domain and wrong for anything compared byte for byte.
+ * An AUD tag is hex today, so lowercasing happens to be harmless today; a
+ * silent case transform on a value that gates authentication is the kind of
+ * thing that is harmless right up until the format changes.
+ */
+const EXACT_LIST_KEYS = new Set(['CF_ACCESS_AUD']);
+
 const LIST_KEYS = new Set([
   'ALLOWED_ORIGINS',
   'ALLOWED_EMAIL_DOMAINS',
@@ -265,6 +281,16 @@ export function loadConfig(env = {}) {
   for (const key of Object.keys(DEFAULTS)) {
     const raw = env[key];
     if (raw === undefined || raw === null || raw === '') continue;
+
+    if (EXACT_LIST_KEYS.has(key)) {
+      cfg[key] = Array.isArray(raw)
+        ? raw
+        : String(raw)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+      continue;
+    }
 
     if (LIST_KEYS.has(key)) {
       cfg[key] = Array.isArray(raw)

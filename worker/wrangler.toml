@@ -82,31 +82,34 @@ RATE_LIMIT_WINDOW_SECONDS = "600"
 AUTH_MODE = "cf-access"
 # From Zero Trust > Settings > Custom Pages, or your team domain.
 CF_ACCESS_TEAM_DOMAIN = "sparkling-hat-8db3.cloudflareaccess.com"
-# Application Audience (AUD) tag from the Access application's Overview tab.
+# Application Audience (AUD) tag(s). A COMMA-SEPARATED LIST, and it is a list
+# for a reason worth reading before you shorten it.
 #
-# A mismatch here is one of TWO faults that look identical. The value belongs
-# to one Access application, so it goes stale if that application is deleted
-# and recreated — but the same audience_mismatch appears when the value is
-# perfectly correct and the application is simply no longer in front of this
-# Worker, because the browser then presents a leftover CF_Authorization cookie
-# from whatever minted it. Access injects Cf-Access-Jwt-Assertion only for a
-# Worker it actually guards, so the log line says "via access-header" for the
-# first and "via cookie" for the second.
+# More than one Access application can match one Worker, and Cloudflare uses
+# the most specific: hostname policies, then Worker policies, then account
+# policies. On a workers.dev URL the account-wide "All Workers" policy wins, so
+# the token carries ITS audience, not the audience of the application the
+# Worker's Access tab shows as "linked". Those are different applications with
+# different AUD tags.
 #
-# Either way nothing announces it: the token verifies, /health still answers
-# ok:true, and the only symptom is that no human being can use the assistant.
-# That is exactly how it failed on 2026-09-15.
+# That is how this failed on 2026-09-15. The Access tab showed an AUD matching
+# this file exactly, and every sign-in was refused, because the tokens were
+# being minted by the other policy. Listing both means the Worker keeps working
+# whichever one wins — including later, when adding a custom domain makes the
+# Worker policy start winning and would otherwise break it all over again.
 #
-# Nothing can validate it from here. It is checkable only against a real token,
-# so the checks in auth.js can confirm it is SET and never that it is right. If
-# sign-in is refused with reason "audience_mismatch", this line is the cause:
-# re-copy the tag from Zero Trust > Access > Applications > (the app protecting
-# this Worker) > Overview.
+# Nothing here can validate these. auth.js can confirm the list is non-empty
+# and never that an entry is right, so a wrong tag is only ever discovered by a
+# refused sign-in. When that happens the rejection log names the tag the token
+# carried and the tags configured:
 #
-# Take it from the DASHBOARD. `wrangler tail` logs the aud a rejected token
-# carried, which is a useful cross-check and a bad source of truth: copying it
-# in configures the Worker to trust whichever application issued the token
-# somebody happened to present.
+#   [auth] rejected: audience_mismatch via access-header: token aud [X]
+#   accepted [Y, Z]
+#
+# Add tags from the Zero Trust DASHBOARD, not from that log line: the logged
+# value is whatever application issued the token somebody happened to present,
+# and pasting it in is how a Worker ends up trusting an application nobody
+# chose. Each entry widens what is accepted, so add them deliberately.
 CF_ACCESS_AUD = "ac7c78ef971056857ecde19e25763644844741c36cb227ee7dbc85910777c759"
 ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].

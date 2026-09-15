@@ -470,3 +470,84 @@ test('the rejection line identifies the fault before a log table truncates it', 
     'the reason is not repeated in prose after being named',
   );
 });
+
+// --- More than one Access application ---------------------------------------
+
+const SECOND_AUD = 'aFB2-Second-App-Tag';
+const multiCfg = loadConfig({
+  AUTH_MODE: 'cf-access',
+  CF_ACCESS_TEAM_DOMAIN: TEAM,
+  CF_ACCESS_AUD: `${AUD}, ${SECOND_AUD}`,
+});
+
+test('a token from either configured application authenticates', async () => {
+  // Cloudflare matches the most specific policy of several that can cover one
+  // Worker: a hostname policy beats a Worker policy beats an account policy.
+  // On a workers.dev URL the account-wide "All Workers" policy wins, so the
+  // token carries ITS audience and not the one the Worker's Access tab shows
+  // as linked. Naming a single application means every sign-in breaks the day
+  // the winning policy changes — by adding a custom domain, for instance.
+  await withJwks(async () => {
+    for (const aud of [AUD, SECOND_AUD]) {
+      const r = await authenticate(
+        req({ 'Cf-Access-Jwt-Assertion': await mintToken({ aud }) }),
+        {},
+        multiCfg,
+      );
+      assert.equal(r.ok, true, `${aud} should authenticate: ${r.reason}`);
+    }
+  });
+});
+
+test('an application on neither list is still refused', async () => {
+  // The allowlist widens what is accepted; it must not stop being a list.
+  await withJwks(async () => {
+    const r = await authenticate(
+      req({ 'Cf-Access-Jwt-Assertion': await mintToken({ aud: 'a-third-app' }) }),
+      {},
+      multiCfg,
+    );
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'audience_mismatch');
+  });
+});
+
+test('a token carrying several audiences passes if ANY is accepted', async () => {
+  // Both sides are sets: aud is an array in the JWT spec.
+  await withJwks(async () => {
+    const r = await authenticate(
+      req({ 'Cf-Access-Jwt-Assertion': await mintToken({ aud: ['a-third-app', SECOND_AUD] }) }),
+      {},
+      multiCfg,
+    );
+    assert.equal(r.ok, true, r.reason);
+  });
+});
+
+test('the list is split and trimmed, never lowercased', () => {
+  // LIST_KEYS lowercases, which is right for a hostname and wrong for anything
+  // compared byte for byte. An AUD is hex today, so this would be harmless
+  // today and silent when it stopped being.
+  const c = loadConfig({ CF_ACCESS_AUD: ' AbC123 , dEf456 ' });
+  assert.deepEqual(c.CF_ACCESS_AUD, ['AbC123', 'dEf456']);
+});
+
+test('an empty audience list is misconfigured, NOT a free pass', async () => {
+  // The dangerous shape of this change. `[]` is truthy, so a guard written as
+  // `!cfg.CF_ACCESS_AUD` would wave an unconfigured deployment through to
+  // verifyRs256, where `if (accepted.length)` skips the audience check and
+  // every correctly signed token from the team is accepted — including one
+  // minted for somebody else's application entirely.
+  const blank = loadConfig({ AUTH_MODE: 'cf-access', CF_ACCESS_TEAM_DOMAIN: TEAM });
+  assert.deepEqual(blank.CF_ACCESS_AUD, []);
+
+  await withJwks(async () => {
+    const r = await authenticate(
+      req({ 'Cf-Access-Jwt-Assertion': await mintToken({ aud: 'anything-at-all' }) }),
+      {},
+      blank,
+    );
+    assert.equal(r.ok, false, 'an unconfigured deployment must refuse, not accept');
+    assert.equal(r.reason, 'misconfigured');
+  });
+});
