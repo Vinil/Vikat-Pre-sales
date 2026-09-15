@@ -113,6 +113,8 @@
     letter-spacing: .5px; text-transform: uppercase; color: var(--w40);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 34vw;
   }
+  /* An identity the server would not confirm must not read like one it did. */
+  .who[data-warn] { color: #E6A23C; }
 
   /* ── Panes ──────────────────────────────────────────────── */
 
@@ -249,6 +251,15 @@
   .rail-item .d { margin-top: 2px; font-size: 11px; color: var(--w40); }
 
   .rail-empty { padding: 10px; font-size: 12px; line-height: 1.5; color: var(--w40); }
+
+  /* The one action attached to a rail message: reloading re-runs the Access
+     handshake, which is what an unconfirmed sign-in needs. */
+  .rail-retry {
+    margin: 0 10px 10px; padding: 5px 12px; font: inherit; font-size: 12px;
+    color: var(--w80); background: var(--w08); border: 1px solid var(--w16);
+    border-radius: 999px; cursor: pointer;
+  }
+  .rail-retry:hover { background: var(--w16); color: var(--w); }
 
   .asset {
     display: block;
@@ -540,7 +551,7 @@
     <button class="tab" role="tab" id="tab-collateral" aria-controls="pane-collateral" aria-selected="false">Collateral</button>
   </nav>
 
-  <div class="who" id="who">Internal · logged</div>
+  <div class="who" id="who">Conversations are logged</div>
 </header>
 
 <main>

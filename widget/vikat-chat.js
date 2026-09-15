@@ -1431,18 +1431,43 @@
 
   // --- Identity ------------------------------------------------------------
 
-  // Cosmetic only — the backend is the authority on identity. This just tells
-  // the rep which account they are signed in as.
+  // The backend remains the authority on identity; this is what the rep is
+  // shown. It is not "cosmetic only", which is what the comment here used to
+  // say and what let the failure branch be a silent no-op: when /whoami fails,
+  // whatever the page already claims about being signed in stays on screen,
+  // and the app shell's header claims exactly that.
+  //
+  // The result is remembered and emitted. vikat-rails.js is a deferred script
+  // that runs after this one and subscribes during its own init, so a call
+  // that resolved first would have had nobody listening. A network round trip
+  // essentially never wins that race, and "essentially never" is how a header
+  // ends up permanently blank.
+  var identity = null;
+
   function loadIdentity() {
     fetch(ENDPOINT + '/whoami', { credentials: 'include' })
-      .then(function (r) {
-        return r.ok ? r.json() : null;
-      })
+      .then(
+        function (r) {
+          if (r.ok) return r.json();
+          return r
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (b) {
+              return { error: b.error || 'HTTP ' + r.status, code: b.code || '', status: r.status };
+            });
+        },
+        function () {
+          // An expired Access session redirects to the login host, which is
+          // cross-origin, so this never reaches a status.
+          return { error: 'The assistant could not be reached.', code: 'unreachable', status: 0 };
+        },
+      )
       .then(function (me) {
-        if (me && me.email) sub.textContent = 'Internal · ' + me.email + ' · logged';
-      })
-      .catch(function () {
-        /* leave the default subtitle */
+        identity = me || { error: 'Unknown', status: 0 };
+        if (identity.email) sub.textContent = 'Internal · ' + identity.email + ' · logged';
+        emit('identity', identity);
       });
   }
 
@@ -1487,6 +1512,11 @@
     open: openChat,
     sessionId: sessionId,
     on: on,
+    // Null until /whoami answers. A late subscriber reads this instead of
+    // waiting for an event that has already fired.
+    identity: function () {
+      return identity;
+    },
   };
 
   window.VikatChatInternals = {

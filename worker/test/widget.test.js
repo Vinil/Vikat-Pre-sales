@@ -813,6 +813,138 @@ test('the chat rail lists the conversations the server returns', async () => {
   await app.close();
 });
 
+/**
+ * index.html where the authenticated calls fail the way a real refusal does.
+ *
+ * `auth` decides what /chats and /whoami answer. Everything else is served
+ * normally, because that is the situation being reproduced: the page and its
+ * scripts load fine and only the calls that need an identity are refused, so
+ * the page looks completely healthy apart from one sentence in a rail.
+ */
+async function openRefusedApp(auth) {
+  const app = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+
+  await app.route('**/*', (route) => {
+    const url = route.request().url();
+    if (/\.(html|js|css)(\?|$)/.test(url)) return route.continue();
+    if (url.includes('/chats') || url.includes('/whoami')) {
+      if (auth.abort) return route.abort('failed');
+      return route.fulfill({
+        status: auth.status,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: auth.error, code: auth.code }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"documents":[],"total":0}' });
+  });
+
+  await app.goto(APP_URL);
+  await app.waitForFunction(() => Boolean(window.VikatChat), null, { timeout: 5000 });
+  return app;
+}
+
+test('an expired sign-in says so, and offers the reload that fixes it', async () => {
+  // What the rep actually saw: "Could not load your conversations." and
+  // nothing else. api() threw `new Error(String(r.status))` and loadChats
+  // caught it with a handler that took no argument, so the 401 the Worker had
+  // gone to the trouble of sending was discarded one line after it arrived.
+  //
+  // Reloading re-runs the Access handshake, which is the fix, and there was
+  // no way for a rep to know that.
+  const app = await openRefusedApp({ status: 401, error: 'Sign in again.', code: 'unauthenticated' });
+
+  await app.waitForFunction(
+    () => /sign-in/i.test(document.querySelector('#chats-body').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  const body = await app.textContent('#chats-body');
+  assert.match(body, /Reload the page/i, 'the message has to name the action');
+  assert.equal(await app.locator('#chats-body .rail-retry').count(), 1, 'and offer it');
+  await app.close();
+});
+
+test('an account without access is told that, and NOT offered a reload', async () => {
+  // 403 is the case where signing in again cannot help — the Worker's own
+  // comment says so where it sends it. Offering a reload here would send a
+  // rep round a loop that resolves nothing instead of to an administrator.
+  const app = await openRefusedApp({
+    status: 403,
+    error: 'Your account does not have access to the sales assistant. Ask an administrator to grant it.',
+    code: 'forbidden',
+  });
+
+  await app.waitForFunction(
+    () => /administrator/i.test(document.querySelector('#chats-body').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  assert.equal(await app.locator('#chats-body .rail-retry').count(), 0, 'a reload cannot fix a 403');
+  await app.close();
+});
+
+test('a server error is not reported as a sign-in problem', async () => {
+  // The branches have to stay distinguishable, or the specific advice is
+  // worth less than the generic sentence it replaced.
+  const app = await openRefusedApp({ status: 500, error: 'Boom.', code: 'internal' });
+
+  await app.waitForFunction(
+    () => /could not load/i.test(document.querySelector('#chats-body').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  const body = await app.textContent('#chats-body');
+  assert.match(body, /500/, 'the status is what makes this reportable');
+  assert.doesNotMatch(body, /sign-in/i);
+  await app.close();
+});
+
+test('a request that never reaches a status still names the likely cause', async () => {
+  // The most likely shape of the real failure. An expired Access session
+  // answers with a redirect to the login host; that is cross-origin, so fetch
+  // rejects and there is no status to read. Handled as its own case, because
+  // a caught exception with no status used to fall through to the generic
+  // sentence.
+  const app = await openRefusedApp({ abort: true });
+
+  await app.waitForFunction(
+    () => /sign-in/i.test(document.querySelector('#chats-body').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  assert.equal(await app.locator('#chats-body .rail-retry').count(), 1);
+  await app.close();
+});
+
+test('the header names the signed-in account rather than asserting one', async () => {
+  // #who was static markup in index.html that no script referenced. It read
+  // "Internal · logged" on a page where every authenticated call was being
+  // refused, which is the one moment it needed to say otherwise.
+  const { app } = await openApp([]);
+
+  await app.waitForFunction(
+    () => /rep@vikat\.ai/.test(document.querySelector('#who').textContent),
+    null,
+    { timeout: 5000 },
+  );
+  assert.equal(await app.locator('#who[data-warn]').count(), 0, 'a confirmed identity is not a warning');
+  await app.close();
+});
+
+test('the header stops claiming a sign-in when the server refuses one', async () => {
+  const app = await openRefusedApp({ status: 401, error: 'Sign in again.', code: 'unauthenticated' });
+
+  await app.waitForFunction(
+    () => document.querySelector('#who').hasAttribute('data-warn'),
+    null,
+    { timeout: 5000 },
+  );
+  const who = await app.textContent('#who');
+  assert.match(who, /not confirmed/i);
+  assert.doesNotMatch(who, /@/, 'no account name, because none was established');
+  await app.close();
+});
+
 test('opening a past chat replays the server transcript, not local storage', async () => {
   // The whole point of the per-account list: a rep picks up on a machine that
   // has never seen this conversation, so the turns must come over the wire.

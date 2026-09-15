@@ -37,11 +37,69 @@
     return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
 
+  /**
+   * A refusal the caller can act on, rather than one bit of information.
+   *
+   * The Worker answers every refusal as JSON carrying a status and a `code`:
+   * 401 for a sign-in that needs redoing, 403 for an account nobody has
+   * granted, 404, 405 and so on. All of that was reduced to
+   * `new Error(String(r.status))` and then discarded by a `.catch()` that took
+   * no argument, so a rep whose Access session had expired read "Could not
+   * load your conversations" and had no way to learn that reloading the page
+   * would fix it.
+   *
+   * fetch REJECTING is its own case and the one most likely here: an expired
+   * Access session answers with a redirect to the login host, which is
+   * cross-origin, so the request never resolves to a status at all. It is
+   * reported as status 0 rather than folded in with a server error, because
+   * the two need opposite advice.
+   */
   function api(path, options) {
-    return fetch(path, Object.assign({ credentials: 'same-origin' }, options || {})).then(function (r) {
-      if (!r.ok) throw new Error(String(r.status));
-      return r.json();
-    });
+    return fetch(path, Object.assign({ credentials: 'same-origin' }, options || {})).then(
+      function (r) {
+        if (r.ok) return r.json();
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (body) {
+            var err = new Error(body.error || 'HTTP ' + r.status);
+            err.status = r.status;
+            err.code = body.code || '';
+            throw err;
+          });
+      },
+      function () {
+        var err = new Error('The assistant could not be reached.');
+        err.status = 0;
+        err.code = 'unreachable';
+        throw err;
+      },
+    );
+  }
+
+  /**
+   * What to tell the rep, and what they can do about it.
+   *
+   * Every branch names an action. "Could not load" names none, which is why
+   * it produced a support question rather than a reload.
+   */
+  function reason(err) {
+    var status = err && err.status;
+    if (status === 401 || status === 0) {
+      return {
+        text: 'Your sign-in could not be confirmed. Reload the page to sign in again.',
+        reload: true,
+      };
+    }
+    if (status === 403) {
+      return { text: err.message || 'Your account does not have access to the assistant.', reload: false };
+    }
+    return {
+      text: 'Could not load your conversations' + (status ? ' (' + status + ')' : '') + '. Try again shortly.',
+      reload: false,
+    };
   }
 
   // --- Collapsing ----------------------------------------------------------
@@ -119,9 +177,19 @@
       .then(function (r) {
         renderChats(r.chats || []);
       })
-      .catch(function () {
+      .catch(function (err) {
+        var why = reason(err);
         chatsBody.textContent = '';
-        chatsBody.appendChild(el('div', 'rail-empty', 'Could not load your conversations.'));
+        chatsBody.appendChild(el('div', 'rail-empty', why.text));
+
+        if (why.reload) {
+          var again = el('button', 'rail-retry', 'Reload');
+          again.type = 'button';
+          again.addEventListener('click', function () {
+            window.location.reload();
+          });
+          chatsBody.appendChild(again);
+        }
       });
   }
 
@@ -299,6 +367,31 @@
     renderAssets();
   }
 
+  /**
+   * The header's identity chip.
+   *
+   * The logging half is true regardless of who is signed in, so it is stated
+   * unconditionally. The identity half is only ever added once /whoami has
+   * actually said so, and a refusal replaces it with what to do rather than
+   * leaving the previous claim standing.
+   */
+  function paintWho(me) {
+    var who = $('#who');
+    if (!who) return;
+
+    if (me && me.email) {
+      who.textContent = me.email + ' · logged';
+      who.removeAttribute('data-warn');
+      return;
+    }
+
+    // Null means /whoami has not answered yet, which is not a failure.
+    if (!me) return;
+
+    who.textContent = me.status === 403 ? 'Access not granted' : 'Sign-in not confirmed';
+    who.setAttribute('data-warn', 'true');
+  }
+
   // --- Wiring --------------------------------------------------------------
 
   function boot() {
@@ -320,6 +413,15 @@
     });
 
     window.VikatChat.on('asset', addAssets);
+
+    // The header said "Internal · logged" and nothing ever wrote to it. It is
+    // static markup in index.html referenced by no script, so it asserted a
+    // confirmed sign-in on a page whose every authenticated call was being
+    // refused — which is precisely the state a rep needs it to distinguish.
+    //
+    // Subscribed AND read, because the call may already have answered.
+    window.VikatChat.on('identity', paintWho);
+    paintWho(window.VikatChat.identity());
 
     window.VikatChat.on('session', function (id) {
       currentId = id;
