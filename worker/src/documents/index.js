@@ -13,6 +13,7 @@
 import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS } from './spec.js';
 import { renderPptx } from './pptx.js';
 import { inspectPptx, inspectionSummary } from './inspect.js';
+import { checkGuidelines } from './guidelines.js';
 import { renderPdf } from './pdf.js';
 import { renderDocx } from './docx.js';
 import { deliverDocument } from '../documentStore.js';
@@ -55,7 +56,18 @@ export async function createDocument(input, ctx) {
   // Look at what was built before handing it over. Reporting, never
   // rewriting: a deck a shade under a threshold is still a deck, and refusing
   // it would leave the rep with nothing five minutes before a call.
-  const inspection = spec.format === 'pptx' ? inspectPptx(bytes, spec) : { problems: [], notes: [] };
+  const rendered = spec.format === 'pptx' ? inspectPptx(bytes, spec) : { problems: [], notes: [] };
+
+  // The brand guidelines, on every format rather than only the one that can be
+  // unzipped. A one-pager wearing two suite accents is as far outside them as a
+  // deck is, and inspectPptx cannot see a PDF at all.
+  const brand = checkGuidelines(spec);
+
+  const inspection = {
+    ...rendered,
+    problems: [...rendered.problems, ...brand.problems],
+    notes: [...rendered.notes, ...brand.notes],
+  };
 
   const fileName = fileNameFor(spec, isoDate);
   const contentType = CONTENT_TYPE[spec.format];

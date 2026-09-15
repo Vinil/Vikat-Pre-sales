@@ -299,3 +299,22 @@ test('the string form still reads as one prompt', async () => {
 
   assert.equal(one, blocks.map((b) => b.text).join('\n\n'));
 });
+
+test('the articulation block reaches the prompt, on every turn', async () => {
+  // Same principle as the guidelines check: a component nothing invokes is a
+  // file. Voice governs chat answers, emails, posts and slides alike, so it
+  // sits in the persona rather than in any one section — and the persona is
+  // the cached prefix, so it costs nothing to carry.
+  const text = await prompt();
+
+  assert.match(text, /## How it has to read/);
+  assert.match(text, /must not read as though a machine wrote it/);
+  assert.match(text, /pick the shorter, plainer option/);
+});
+
+test('the voice rules are in the CACHED half of the prompt', async () => {
+  // If they landed after the breakpoint they would be re-billed every turn for
+  // text that never changes.
+  const blocks = systemBlocks(cfg, await retrieve('x', {}), { user: REP });
+  assert.match(blocks[0].text, /## How it has to read/);
+});

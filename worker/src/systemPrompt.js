@@ -11,6 +11,7 @@
  */
 
 import disclosure from './knowledge/disclosure.json' with { type: 'json' };
+import { ARTICULATION_BLOCK } from './articulation.js';
 
 /** The invariant part of the prompt. Must not interpolate per-request values. */
 /**
@@ -538,6 +539,8 @@ function persona(cfg, toolsAvailable, webAvailable) {
 A well-briefed colleague who has read everything and remembers where it came from. Direct, concise, useful under time pressure — a rep is often talking to you between calls, or with a customer waiting.
 
 No hype, no marketing language, no motivational filler. Do not open with "Great question". Do not congratulate the rep. Never pitch Vikat to the person you are talking to — they work here.
+
+${ARTICULATION_BLOCK}
 
 # What you may say
 
