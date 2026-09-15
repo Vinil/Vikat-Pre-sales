@@ -68,6 +68,21 @@ export function normaliseSpec(input) {
     ? parseSections(input.content)
     : Array.isArray(input.sections) ? input.sections : [];
 
+  // Refused, not repaired. The data a malformed directive carries is the
+  // slide's whole argument, and there is no way to guess where the author
+  // meant the pipes to go — a best effort here is how the raw syntax reached
+  // a rendered slide in the first place.
+  const broken = rawSections.find((s) => s.badLayout);
+  if (broken) {
+    return {
+      ok: false,
+      error:
+        `"${broken.raw}" starts with the ${broken.badLayout} layout but its data will not parse, ` +
+        'so nothing would be drawn. Every segment after the layout name is separated by "|", ' +
+        'including the rows of a table. Rewrite that heading or make it ordinary prose.',
+    };
+  }
+
   const sections = rawSections
     .slice(0, LIMITS.sections)
     .map(normaliseSection)
@@ -190,12 +205,21 @@ function asText(drawn) {
     return { title: drawn.title || '', points: drawn.bars.map((b) => `${b.label}: ${b.value}`) };
   }
   if (drawn.layout === 'chain') {
-    // With a heading the steps become points, so both survive into a PDF.
-    // Without one the steps ARE the heading, which is how this has always
-    // read and how every existing deck still parses.
-    return drawn.title
-      ? { title: drawn.title, points: [drawn.steps.join(' → ')] }
-      : { title: drawn.steps.join(' → '), points: [] };
+    // The steps become a point, never the heading, and the separator is ">".
+    //
+    // Both halves of that were wrong, and both reached a rendered slide. A
+    // chain with no author heading put its own step list up as the headline,
+    // where the PPTX renderer then DREW the same steps as boxes underneath —
+    // so the slide said everything twice, and the headline was truncated with
+    // an ellipsis because a step list is not a sentence. Worse, the arrows
+    // were stripped on the way: EMOJI_RE covers U+2190 to U+21FF, which is
+    // where → lives, so "A → B → C" arrived as "A B C" and read as one
+    // run-on line with the words jammed together.
+    //
+    // Same fix as stat's colon, for the same reason recorded there: the
+    // renderer's own joins reach the slide exactly as the model's words do,
+    // so they have to obey the same house rules.
+    return { title: drawn.title || '', points: [drawn.steps.join(' > ')] };
   }
   if (drawn.layout === 'tiles') {
     return { title: drawn.title || '', points: drawn.tiles.map((t) => `${t.value}: ${t.caption}`) };
@@ -225,9 +249,8 @@ function asText(drawn) {
     return { title: drawn.title || '', points: [drawn.names.join(', ')] };
   }
   if (drawn.layout === 'flow') {
-    return drawn.title
-      ? { title: drawn.title, points: [drawn.steps.join(' > ')] }
-      : { title: drawn.steps.join(' > '), points: [] };
+    // See chain: a drawn slide never takes its own data as its headline.
+    return { title: drawn.title || '', points: [drawn.steps.join(' > ')] };
   }
   if (drawn.layout === 'timeline') {
     // A COPY. Sharing the array meant a bullet parsed after the heading was
@@ -242,6 +265,23 @@ function asText(drawn) {
     return { title: drawn.line, points: [] };
   }
   return { title: '', points: [] };
+}
+
+/**
+ * The layout a heading was reaching for, whether or not it parsed.
+ *
+ * parseLayout returns null both for "## Ordinary heading" and for a directive
+ * whose data is malformed, and those two need opposite handling. Without the
+ * distinction, a `table` whose rows were separated with slashes instead of
+ * pipes fell through to the prose branch and rendered a slide whose eyebrow
+ * read "TABLE ^ WHAT YOU WOULD MEASURE" over a headline that was the raw
+ * comma-separated data, truncated. The authoring syntax itself was set in
+ * mono capitals on a slide a rep would have sent to a customer.
+ */
+export function layoutKind(headingText) {
+  const first = String(headingText).split('|')[0];
+  const kind = first.split('^')[0].trim().toLowerCase();
+  return LAYOUTS.includes(kind) ? kind : null;
 }
 
 /**
@@ -483,6 +523,15 @@ export function parseSections(markdown) {
         // The drawing data AND the words that say the same thing, so a
         // renderer that cannot draw this layout still shows its content.
         current = { eyebrow: '', body: '', ...asText(drawn), ...drawn };
+        continue;
+      }
+
+      // A directive that named a layout and then failed to parse is a broken
+      // slide, not a paragraph. Carried through so normaliseSpec can refuse
+      // the whole document and say which heading to rewrite.
+      const attempted = layoutKind(text);
+      if (attempted) {
+        current = { badLayout: attempted, raw: text, eyebrow: '', title: '', body: '', points: [] };
         continue;
       }
 

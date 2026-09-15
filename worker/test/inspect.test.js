@@ -37,7 +37,12 @@ const DECK = {
     '',
     '## stat | 265 | attacks on manufacturing and industrials in 2025',
     '',
-    '## bars | MTTR 71 | Alert noise 90 | Triage 64',
+    // Titled, and that is not decoration. Untitled, this slide is a chart
+    // under an orphan rule with nothing else on it — it measured 25% and is
+    // the slide the sparseness check exists to catch. The fixture was dodging
+    // its own check, which only became visible once coverage() stopped
+    // measuring the footer.
+    '## bars | Where the time goes today | MTTR 71 | Alert noise 90 | Triage 64',
     '',
     '## chain | VSentinel > VInsight > VCommand > VShield',
     '',
@@ -238,4 +243,72 @@ test('problems outrank notes', () => {
     notes: ['Slide 4 is sparse.'],
   });
   assert.ok(!line.includes('sparse'), 'the serious one must not be buried under the cosmetic one');
+});
+
+test('a line the renderer had to cut is reported, with the cut text quoted', () => {
+  // Found by rendering a deck and reading slide 11: two of four chain boxes
+  // said "A two hour working…" and "A read only look at one…", and inspection
+  // came back completely clean. clean() truncates on a word boundary at 24
+  // characters for a chain step, which is right — the box is that wide — but
+  // the ellipsis is on the slide and nothing told the rep it was there.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content:
+      '## chain | Four steps you control | A two hour working session > ' +
+      'A read only look at one site > A findings memo > Your decision',
+  });
+  assert.ok(r.ok, r.error);
+
+  const { notes } = inspectPptx(
+    renderPptx(r.spec, { preparedBy: 'rep@vikat.ai', isoDate: '2026-09-15' }, loadFonts().metrics),
+    r.spec,
+  );
+
+  const note = notes.find((n) => /ellipsis/.test(n));
+  assert.ok(note, `no truncation note in:\n${notes.join('\n')}`);
+  assert.match(note, /A two hour working…/, 'the cut text is quoted, so it can be found and shortened');
+  assert.match(note, /A read only look at one…/);
+});
+
+test('a deck with nothing cut says nothing about ellipses', () => {
+  // The note has to stay rare enough to read. Every step here fits.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content: '## chain | Four steps you control | Working session > One site > A memo > Your call',
+  });
+  assert.ok(r.ok, r.error);
+
+  const { notes } = inspectPptx(
+    renderPptx(r.spec, { preparedBy: 'rep@vikat.ai', isoDate: '2026-09-15' }, loadFonts().metrics),
+    r.spec,
+  );
+  assert.equal(notes.filter((n) => /ellipsis/.test(n)).length, 0, notes.join('\n'));
+});
+
+test('the footer furniture does not count as content when measuring a slide', () => {
+  // The sparseness check was dead. coverage() takes a bounding box over every
+  // shape, and the renderer draws the disclosure label, the fine print, the
+  // suite tag and the page number on EVERY slide in the bottom inch. So the
+  // box always ran from the eyebrow to the page number, whatever was between
+  // them: a real thirteen-slide deck measured 69% to 82% against a threshold
+  // of 26%, and slides that were 55% empty came back clean.
+  //
+  // Built here rather than rendered, so the two cases differ in exactly one
+  // thing: the footer. Same body, same threshold.
+  const body = `<p:sp><p:spPr><a:xfrm>${shape(0.5, 1.4, 4, 1.2)}</a:xfrm></p:spPr>` +
+    '<p:txBody><a:p><a:r><a:t>A thin slide with a heading and nothing under it</a:t></a:r></a:p></p:txBody></p:sp>';
+  const footer = `<p:sp><p:spPr><a:xfrm>${shape(0.5, 6.9, 5, 0.2)}</a:xfrm></p:spPr>` +
+    '<p:txBody><a:p><a:r><a:t>Internal only</a:t></a:r></a:p></p:txBody></p:sp>';
+
+  const sparse = (xml) => inspectPptx(deckOf(`<p:sld><p:cSld><p:spTree>${xml}</p:spTree></p:cSld></p:sld>`))
+    .notes.filter((n) => /is sparse/.test(n));
+
+  assert.equal(sparse(body).length, 1, 'a thin slide on its own is reported');
+  assert.equal(
+    sparse(body + footer).length,
+    1,
+    'and adding the footer every slide already carries must not hide it',
+  );
 });

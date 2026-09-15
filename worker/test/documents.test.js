@@ -786,8 +786,23 @@ test('every layout still carries its content as text, for renderers that cannot 
 
   const [stat, , , chain, bars] = drawnSpec().sections;
   assert.match(stat.title, /265/, 'the number survives into text');
-  assert.match(chain.title, /VSentinel/);
   assert.ok(bars.points.some((p) => /71/.test(p)), 'the figures survive into text');
+
+  // In the POINTS, never the title. This line used to read
+  // `assert.match(chain.title, /VSentinel/)`, and it was pinning a defect:
+  // a chain with no author heading put its own step list up as the headline,
+  // which the PPTX renderer then drew again as boxes directly underneath. The
+  // headline was truncated with an ellipsis, because a step list is not a
+  // sentence, and its arrows had been stripped by EMOJI_RE on the way, so the
+  // slide read "A two hour working session with your SOC leads a read only
+  // look at one site a findings…" over a diagram saying the same thing.
+  //
+  // Nothing caught it because the assertion above only asked that the text
+  // exist SOMEWHERE, and the title is somewhere. Rendering the deck and
+  // looking at slide 11 is what caught it.
+  assert.equal(chain.title, '', 'a drawn slide never takes its own data as its headline');
+  assert.match(chain.points.join(' '), /VSentinel/, 'the steps survive as text for the pdf');
+  assert.doesNotMatch(chain.points.join(' '), /\u2192/, 'EMOJI_RE eats U+2192; the join must not emit one');
 });
 
 test('a pdf of drawn sections loses nothing', async () => {
@@ -831,14 +846,50 @@ test('every drawn slide still carries its disclosure label', () => {
   }
 });
 
-test('a malformed directive stays a plain heading rather than drawing nothing', () => {
-  // An empty chart is worse than the paragraph it replaced, so a layout that
-  // cannot be satisfied is not a layout.
+test('a malformed directive is refused, not quietly demoted to a heading', () => {
+  // This test used to assert the opposite, on the reasoning that an empty
+  // chart is worse than the paragraph it replaced. That reasoning still holds;
+  // the paragraph was the part that never arrived.
+  //
+  // A failed directive fell through to the prose branch, where the text before
+  // the first pipe becomes the EYEBROW. So a table whose rows were separated
+  // with slashes rendered a slide with "TABLE ^ WHAT YOU WOULD MEASURE" set in
+  // mono capitals above a headline that was the raw comma-separated data,
+  // truncated mid-row. The authoring syntax, on a slide a rep would have sent
+  // to a customer. The old test passed throughout: it checked that no drawing
+  // was produced and never looked at what was.
+  //
+  // Refused rather than repaired, for the reason normaliseSpec already gives
+  // about prose-only decks: the model is in a tool loop and rebuilds for free,
+  // and there is no way to guess where the author meant the pipes to go.
   for (const heading of ['## bars | nothing numeric here', '## chain | OnlyOneStep', '## stat |']) {
     const r = normaliseSpec({ format: 'pptx', title: 'T', content: `${heading}\nBody text.` });
-    assert.ok(r.ok, r.error);
-    assert.ok(!r.spec.sections[0].layout, `${heading} should not have produced a drawing`);
+    assert.equal(r.ok, false, `${heading} should have been refused`);
+    assert.match(r.error, /will not parse/);
   }
+});
+
+test('a refused directive says which heading and how to separate its data', () => {
+  // The cost of refusing is a wasted round trip, so the error has to be
+  // actionable enough that the next attempt is the last one.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content: '## table ^ What you would measure | Outcome, Measure / Continuity, Lines held',
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /table layout/, 'names the layout');
+  assert.match(r.error, /What you would measure/, 'quotes the heading, so it can be found');
+  assert.match(r.error, /"\|"/, 'says what the separator is');
+});
+
+test('a heading that merely starts with a layout word is still prose', () => {
+  // The cost of the refusal above: "Table | stakes for the board" is a
+  // sentence a rep might write, and it is indistinguishable from a broken
+  // table directive. An unknown word is NOT, so it keeps falling through —
+  // only a real layout name that then fails to parse is treated as broken.
+  const r = normaliseSpec({ format: 'pptx', title: 'T', content: '## sankey | a | b\nBody.' });
+  assert.ok(r.ok, 'an unrecognised directive is a heading, not an error');
 });
 
 test('an unknown directive is a title, not a silent drop', () => {

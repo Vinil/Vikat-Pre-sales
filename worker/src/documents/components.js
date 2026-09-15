@@ -210,15 +210,26 @@ export function metricPill(x, y, code, accent = SUITE.sec.light) {
  */
 export function outcomeBand(x, y, width, { tag, sentence }) {
   const h = 0.72;
+  // The tag column is 2in, not 1.6in, and the label is centred rather than
+  // top-set.
+  //
+  // spec.js allows a 24-character tag; 1.6in of mono at this size and tracking
+  // holds about 16, so anything longer wrapped to two lines that sat high in
+  // the band and left the sentence beside them looking unaligned. 2in holds
+  // the full 24, and centring means a tag that still wraps stays balanced
+  // against the sentence instead of riding the top edge.
+  const tagW = 2.0;
+  const gutter = 0.35;
   return [
     card({ x, y, w: width, h }, { fill: CREAM.tintBand, border: CREAM.tintBorder }),
-    label({ x: x + 0.24, y: y + 0.26, w: 1.6, h: 0.24 }, tag, {
+    label({ x: x + 0.24, y: y + 0.18, w: tagW, h: h - 0.36 }, tag, {
       size: FLOORS.label + 0.5,
       mono: true,
       tracking: 1.5,
       color: CREAM.greenInk,
+      anchor: 'ctr',
     }),
-    label({ x: x + 1.95, y: y + 0.22, w: width - 2.2, h: h - 0.36 }, sentence, {
+    label({ x: x + 0.24 + tagW + gutter, y: y + 0.22, w: width - (0.48 + tagW + gutter), h: h - 0.36 }, sentence, {
       size: 11,
       bold: true,
       color: CREAM.deep,

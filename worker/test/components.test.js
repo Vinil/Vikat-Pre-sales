@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
 
 import * as comp from '../src/documents/components.js';
-import { CREAM, DARK, SUITE, DENSITY } from '../src/documents/house.js';
+import { CREAM, DARK, SUITE, DENSITY, FLOORS } from '../src/documents/house.js';
 import { renderPptx } from '../src/documents/pptx.js';
 import { normaliseSpec, parseLayout, LAYOUTS } from '../src/documents/spec.js';
 import { loadFonts } from '../src/documents/fonts.js';
@@ -161,7 +161,11 @@ test('a deck of component slides passes the house checks', () => {
         '',
         '## table | What we commit to | Offering, Measure, Target | Threat management, Kill time, Before first use',
         '',
-        '## kpi | The measures | MTTD: 30 days from the baseline diagnostic',
+        // Three measures, not one. A single pill on a 13in slide filled 23%
+        // of it, which is the shape the sparseness check is for; the fixture
+        // passed only because the check could not see past the footer.
+        '## kpi | The measures | MTTD: 30 days from the baseline diagnostic | ' +
+          'MTTP: Baselined before any target is agreed | PSC: Read off the shift record',
         '',
         '## paradigm | Where it changes | Ranked by severity alone | Ranked by what a stopped line costs',
         '',
@@ -207,4 +211,34 @@ test('every component layout still carries its content as text', () => {
   assert.match(all, /Kill time/, 'a table cell must survive into text');
   assert.match(all, /MTTD: 30 days/, 'a KPI keeps its metric:target shape');
   assert.ok(!/[—–]/.test(all), 'and none of it introduces a dash');
+});
+
+test('the outcome band tag column holds the longest tag spec.js allows', () => {
+  // Found by rendering a deck and looking at slide 2, where an eighteen-word
+  // achievement tag came out as "EIGHTEEN MONTHS, / NO…": truncated by
+  // drawnFields to 24 characters, then wrapped by label() into two lines that
+  // sat high in a band whose sentence was set on one line beside them.
+  //
+  // drawnFields caps the tag at 24 characters, so that is the width the column
+  // has to hold. Measured with the real JetBrains Mono metrics rather than
+  // asserted against a magic number, so a change to the size or the tracking
+  // fails here instead of on a slide.
+  // The two tracking units do not match, which is its own trap: label() takes
+  // points (OOXML spc is hundredths of a point) and widthOf takes em. 1.5pt at
+  // 7.5pt is 0.2em, and passing 1.5 straight through measures a 5in tag.
+  const metrics = loadFonts().metrics.eyebrow;
+  const size = FLOORS.label + 0.5;
+  const longest = 'M'.repeat(24);
+  const inches = metrics.widthOf(longest, size, 1.5 / size) / 72;
+
+  const xml = comp.outcomeBand(0.5, 1, 12, { tag: longest, sentence: 'A sentence.' });
+  const boxes = [...xml.matchAll(/<a:off x="(\d+)" y="\d+"\/><a:ext cx="(\d+)"/g)]
+    .map(([, x, cx]) => ({ x: Number(x) / 914400, w: Number(cx) / 914400 }));
+
+  // card, tag, sentence.
+  const [, tag, sentence] = boxes;
+  assert.ok(tag.w >= inches, `a ${longest.length}-character tag needs ${inches.toFixed(2)}in, the column is ${tag.w}in`);
+  assert.ok(sentence.x >= tag.x + tag.w, 'the sentence starts after the tag column ends');
+  assert.ok(sentence.x + sentence.w <= 0.5 + 12, 'the sentence stays inside the band');
+  assert.match(xml, /anchor="ctr"/, 'a tag that still wraps must stay centred against the sentence');
 });

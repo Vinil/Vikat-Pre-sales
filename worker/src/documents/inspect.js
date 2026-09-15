@@ -74,6 +74,22 @@ function coverage(boxes, ignoreFullBleed = true) {
     // A full-bleed band or background rect would report 100% coverage for a
     // slide that is otherwise empty.
     if (ignoreFullBleed && b.w >= SLIDE.widthIn - 0.01) return false;
+    // The FURNITURE, for the same reason, and it is the bigger one.
+    //
+    // The disclosure label, the fine print, the suite tag and the page number
+    // are drawn on every slide by the renderer, in the bottom inch. They were
+    // inside this bounding box, so every slide measured from its eyebrow to
+    // its page number regardless of what was between them: across a thirteen
+    // slide deck the numbers ran 69% to 82%, against a threshold of 26%. The
+    // check could not fire, and reported clean on slides that were 55% empty.
+    //
+    // Excluding the bottom inch is the same filter verticalGaps already
+    // applies, and it turns the same deck into 30% to 72% — a range that
+    // discriminates. The 26% threshold is left where it was: it was tuned
+    // against measurements taken through this bug, and retuning it is a
+    // judgement about how airy a slide is allowed to be, which belongs to
+    // whoever owns the house style rather than to a bug fix.
+    if (b.y >= SLIDE.heightIn - 1.0) return false;
     return true;
   });
   if (!real.length) return 0;
@@ -217,6 +233,29 @@ export function inspectPptx(bytes, spec) {
   const copy = checkCopy(everything);
   problems.push(...copy.problems);
   notes.push(...copy.notes);
+
+  // An ellipsis the AUTHOR did not type. clean() truncates on a word boundary
+  // and adds one, which is the right behaviour — a deck five minutes before a
+  // call beats an error about a step being two characters too long — but the
+  // result is visible on the slide, and spec.js already says of the same
+  // mechanism that an ellipsis "reads as a bug, because it is one".
+  //
+  // Nothing told the rep. A chain slide rendered "A two hour working…" and
+  // "A read only look at one…" in two of its four boxes, and inspection came
+  // back completely clean. So the truncation is reported where every other
+  // "look at this before you send it" lives, with the text quoted, because
+  // "something was truncated" is not actionable and the cut phrase is.
+  const cut = [...new Set(
+    slideNames
+      .flatMap((name) => [...strFromU8(files[name]).matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]))
+      .filter((t) => /\u2026$/.test(t.trim())),
+  )];
+  if (cut.length) {
+    notes.push(
+      `${cut.length === 1 ? 'A line was' : `${cut.length} lines were`} cut to fit and end in an ellipsis: ` +
+        `${cut.map((t) => `"${t.trim()}"`).join(', ')}. Shorten the wording rather than sending the cut.`,
+    );
+  }
 
   // One ground, plus at most one deliberate contrast — a full-bleed navy
   // quote earns its place. A third means the layouts disagree with each
