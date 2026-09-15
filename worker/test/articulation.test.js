@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { checkArticulation, ARTICULATION_BLOCK } from '../src/articulation.js';
+import { checkArticulation, checkHeadline, ARTICULATION_BLOCK, STORY_ARC } from '../src/articulation.js';
 
 const notes = (t) => checkArticulation(t).notes.join(' | ');
 
@@ -81,4 +81,80 @@ test('the prompt block says what to do, not what to admire', () => {
   for (const w of ['leverage', 'seamless', 'Moreover']) {
     assert.match(ARTICULATION_BLOCK, new RegExp(w));
   }
+});
+
+// --- the story, the headlines, and not praising your own work --------------
+
+test('the arc starts where the reader already feels good', () => {
+  // Not a template. The current decks open on the problem, which reads as a
+  // stranger telling you what is wrong with your company. Someone rolling AI
+  // agents across 418 sites is proud of that, and rightly.
+  assert.deepEqual(
+    STORY_ARC.map((s) => s.beat),
+    ['Personalize', 'Their priorities', 'Why now', 'How we accelerate', 'Next steps'],
+  );
+  // Each beat says what it does AND how it fails: a beat with no failure mode
+  // is a heading, and a writer cannot tell whether they hit it.
+  for (const s of STORY_ARC) {
+    assert.ok(s.does && s.fails, `${s.beat} has no failure mode`);
+  }
+  assert.match(STORY_ARC[1].fails, /opportunity, not deficiency/i);
+});
+
+test('a headline built on a product name is a closed door', () => {
+  const n = checkHeadline('SecSemantic for McLane').notes.join(' ');
+  assert.match(n, /never heard of/);
+  assert.match(n, /once the idea has landed/);
+});
+
+test('inside words are fine in the body, wrong in the headline', () => {
+  // The rule is about the ONE line guaranteed to be read, not about the
+  // vocabulary as a whole.
+  assert.equal(checkHeadline('').notes.length, 0);
+  assert.ok(checkHeadline('The Security Context Plane').notes.length > 0);
+  assert.equal(
+    checkArticulation('SecSemantic builds a system of record for consequence.').notes.length,
+    0,
+    'the product name in prose is not a finding',
+  );
+});
+
+test('a headline that labels rather than says', () => {
+  for (const h of ['The commitment model', 'How the suite fits', 'Our approach', 'Overview']) {
+    assert.match(checkHeadline(h).notes.join(' '), /labels the slide/, h);
+  }
+});
+
+test('a headline that makes a point passes', () => {
+  for (const h of [
+    'Two surfaces now land on every healthcare CISO desk',
+    'Your agents reach patient data faster than your reviews do',
+  ]) {
+    assert.equal(checkHeadline(h).notes.length, 0, h);
+  }
+});
+
+test('the assistant does not call its own work ready', () => {
+  // On a deck stamped DRAFT, NEEDS APPROVAL BEFORE IT LEAVES VIKAT, "ready for
+  // customer use" is not just chatbot flavour. It is false.
+  for (const s of [
+    'The deck is ready for customer use.',
+    'This is a polished, client-ready one-pager.',
+    'Your presentation-ready deck is attached.',
+  ]) {
+    assert.match(notes(s), /rep decides that/, s);
+  }
+  assert.equal(notes('The deck is built. Check the 48 versus 60 country figure before it goes out.'), '');
+});
+
+test('the prompt carries the arc, the headline rule and the visual rule', () => {
+  // A checker catches it after the fact; the prompt is what stops it being
+  // written. Both, or the model writes it and the rep reads a complaint.
+  assert.match(ARTICULATION_BLOCK, /Every headline answers "why should I care"/);
+  assert.match(ARTICULATION_BLOCK, /SecSemantic for McLane/);
+  assert.match(ARTICULATION_BLOCK, /Personalize/);
+  assert.match(ARTICULATION_BLOCK, /Why now/);
+  assert.match(ARTICULATION_BLOCK, /One ask, small enough to say yes to/);
+  assert.match(ARTICULATION_BLOCK, /A deck is looked at, not read/);
+  assert.match(ARTICULATION_BLOCK, /Never call your own work ready/);
 });

@@ -18,6 +18,8 @@
  * documentation, which specifies a different typeface, palette and mark.
  */
 
+import { checkHeadline } from '../articulation.js';
+
 /** §04 · Color. One accent per suite, and they are never mixed. */
 export const SUITE_ACCENTS = {
   SecSemantic: { accent: '#009CB4', dark: '#00707E', plane: 'SCP', source: '§04' },
@@ -62,6 +64,33 @@ export const THE_LINE = 'The vendor-neutral semantic context layer for Sec and D
 /** §08 · The closing rule, and the one worth quoting at anybody who asks. */
 export const WHEN_IN_DOUBT =
   'When in doubt, choose the quieter option, and never reintroduce a second mark.';
+
+/**
+ * §02 · The mark is a source vector, and we do not have it.
+ *
+ * "It is built from a single source vector and is the only mark the brand
+ * uses." "The mark holds down to 24px on screen. Below that, use the same mark
+ * scaled for the favicon, never a redrawn version." TM3 puts it even more
+ * bluntly: "The logotype is a designed lockup, never retype it in body text."
+ *
+ * The renderer currently TYPESETS "vikat.AI" in Inter Black on the cover and
+ * the closing slide. That is retyping the lockup, which is the one thing both
+ * documents forbid by name, and no amount of care with the letterforms makes
+ * it the mark — it makes it a good imitation of one, which is worse, because
+ * it survives being forwarded.
+ *
+ * This cannot be fixed from inside the repo. There is no logo artwork here at
+ * all, only fonts. Drawing a geodesic sphere or a chip-in-orbit emblem from
+ * the description in a PDF would be inventing a trademark, and §06 lists
+ * exactly that under Protect the mark. The asset has to arrive.
+ */
+export const LOGO = {
+  status: 'missing',
+  needs: ['Vikat.AI primary lockup', 'Vikat.AI emblem', 'the suite mark'],
+  formats: 'SVG preferred, or PNG at 4x the largest use',
+  currently: 'The wordmark is set in Inter Black, which is a redrawn lockup.',
+  source: '§02, §03, §06; TM3 §07',
+};
 
 /** §08 · Trademark line, reproduced exactly. */
 export const TRADEMARK_LINE =
@@ -167,6 +196,21 @@ export function checkGuidelines(spec) {
     }
   }
 
+  // A deck is looked at, not read. The renderer has eight drawn layouts and a
+  // section that uses none of them is a paragraph with a heading on it — which
+  // is the shape half of a real generated deck turned out to be: "The Security
+  // Context Plane" over four lines of prose and five bullets.
+  //
+  // Counted rather than asserted, because "make it visual" is not actionable
+  // and "five of your nine content slides are prose" is.
+  const content = (spec.sections || []).filter((s) => (s.title || s.body || (s.points || []).length));
+  const drawn = content.filter((s) => s.layout);
+  if (content.length >= 4 && drawn.length * 2 < content.length) {
+    problems.push(
+      `${content.length - drawn.length} of ${content.length} sections are prose with a heading on them. A deck is looked at, not read: use the drawn layouts (stat, bars, tiles, table, kpi, outcome, paradigm, flow) for anything that is a number, a comparison, a sequence or a set.`,
+    );
+  }
+
   // §04, stated as a preference rather than a threshold: "Lowering accent
   // saturation is preferred to adding more of it." Nothing here can count
   // pixels, so this is the honest version — a reminder attached to the one
@@ -175,6 +219,13 @@ export function checkGuidelines(spec) {
     notes.push(
       `A deck this long is where accent creeps in. Most of any layout is ink and gray on white, with ${SUITE_ACCENTS[suites[0]].accent} reserved for the one thing that should lead the eye (§04).`,
     );
+  }
+
+  // Headlines are the articulation component's job, not this one's — but a
+  // slide headline is where the two meet, and a rep reading one report should
+  // not have to know which module noticed.
+  for (const s of spec.sections || []) {
+    for (const n of checkHeadline(s.title).notes) notes.push(n);
   }
 
   return { problems, notes };

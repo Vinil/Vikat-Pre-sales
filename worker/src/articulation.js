@@ -132,7 +132,168 @@ own name to someone who reads twenty of these a week. So:
   generated text, and a reader clocks it before they can say why.
 
 One idea per paragraph. If a sentence survives deletion without the meaning
-changing, delete it.`;
+changing, delete it.
+
+## Every headline answers "why should I care"
+
+The headline is the only line guaranteed to be read, so it has to say something
+rather than label something.
+
+- **In words they already use.** "SecSemantic for McLane" tells a McLane
+  executive nothing: they have never heard of SecSemantic, and you have spent
+  the one line they will read on a word they cannot parse. Name the product
+  once the idea has landed, in the body, never in the headline.
+- **Say the point, do not file it.** "The commitment model", "How the suite
+  fits", "Our approach" are drawer labels. What is this slide actually
+  claiming? That sentence is the headline. "Two surfaces now land on every
+  healthcare CISO's desk" is a headline. "The Security Context Plane" is not.
+- Plain English a busy executive reads at a glance, and no ALL-CAPS.
+
+## The order it goes in
+
+Open where the reader already feels good, not on what is wrong with their
+company. Someone rolling AI agents across four hundred sites is proud of that
+and should be. The opportunity is the NEXT level, not the hole.
+
+1. **Personalize.** Name the work they have actually done: the programme, the
+   launch, the thing the executive said in public. Specific, or leave it out. A
+   compliment that would fit any company is worse than none.
+2. **Their priorities.** What they are trying to do next and where it gets
+   hard. The thing keeping them up, in their words. Opportunity, never deficiency.
+3. **Why now.** What changed and what waiting costs. A date, a filing, a
+   regulation, a season, a competitor. If nothing changed, say so and argue on
+   merit rather than manufacturing urgency.
+4. **How we accelerate.** The differentiated answer, SHOWN through an example
+   on their stack rather than described. Not a feature list, and never a
+   product name standing in for a benefit.
+5. **Next steps.** One ask, small enough to say yes to in a reply.
+
+## Make it visual
+
+A deck is looked at, not read. Anything that is a number, a comparison, a
+sequence or a set gets a drawn layout: stat, bars, tiles, table, kpi, outcome,
+paradigm, flow. A section that is a heading over four lines of prose and five
+bullets is a document someone will skim and forget. If more than half the
+slides are prose, the deck is not finished.
+
+## Never call your own work ready
+
+Not "ready for customer use", not "polished", not "client-ready". A rep decides
+when something is ready, and on a deck stamped DRAFT it is not even true. Say
+what you built and what they should check before it leaves the building.`;
+
+
+/**
+ * The order a proposition goes in.
+ *
+ * Not a template to fill in. It is the sequence a person uses when they have
+ * earned the meeting and want to keep it, and the current decks do not follow
+ * it: they open on the problem, which reads as a stranger telling you what is
+ * wrong with your company.
+ *
+ * Start where the reader already feels good. Someone rolling AI agents across
+ * 418 sites is proud of that, and rightly. The opportunity is the NEXT level,
+ * not the hole.
+ */
+export const STORY_ARC = [
+  {
+    beat: 'Personalize',
+    does: 'Acknowledge the work they have actually done. The programme, the launch, the thing the executive said in public. Named and specific, or leave it out.',
+    fails: 'A compliment that would fit any company is worse than no compliment.',
+  },
+  {
+    beat: 'Their priorities',
+    does: 'Taking it to the next level: what they are trying to do next, and where that gets hard. The thing keeping them up, in their words.',
+    fails: 'Telling them their business is broken. The frame is opportunity, not deficiency.',
+  },
+  {
+    beat: 'Why now',
+    does: 'What changed, and what it costs to wait. A date, a filing, a regulation, a season, a competitor.',
+    fails: 'Manufactured urgency. If nothing changed, say so and make the case on merit.',
+  },
+  {
+    beat: 'How we accelerate',
+    does: 'The differentiated answer, shown through an example rather than described. What it does on their stack, for their problem.',
+    fails: 'A feature list, or a product name standing in for a benefit.',
+  },
+  {
+    beat: 'Next steps',
+    does: 'One ask, small enough to say yes to in a reply.',
+    fails: 'Three options, or a paragraph that ends without asking for anything.',
+  },
+];
+
+/**
+ * Vocabulary that means nothing outside this building.
+ *
+ * "SecSemantic for McLane" tells a McLane executive nothing: they have never
+ * heard of SecSemantic, and the headline has spent the one line they will
+ * definitely read on a word they cannot parse. Inside the body, after the idea
+ * has landed, these names are fine. In a HEADLINE they are a closed door.
+ */
+const INSIDE_WORDS = [
+  'SecSemantic', 'DevSemantic', 'ProSemantic',
+  'VSentinel', 'VInsight', 'VCommand', 'VShield',
+  'SCP', 'DCP', 'PCP',
+  'Security Context Plane', 'Development Context Plane', 'Process Context Plane',
+  'Context Plane', 'Semantic Suite', 'Atomic Pod', 'the suite',
+];
+
+/**
+ * Headlines that label a slide instead of saying something.
+ *
+ * "The commitment model" and "How the suite fits" are filing labels. They tell
+ * a reader which drawer the slide lives in, not why they should care, and a
+ * deck of them reads as a table of contents with pictures.
+ */
+const LABEL_HEADLINES =
+  /^(?:the\s+\w+\s+(?:model|framework|approach|architecture|platform|plane|layer)|how\s+(?:it|the|we)\b[^?]*|our\s+\w+|what\s+we\s+do|overview|introduction|summary|next\s+steps?|the\s+solution|key\s+benefits?)$/i;
+
+/**
+ * Claims about our own output that are not ours to make.
+ *
+ * "Ready for customer use" is the assistant congratulating itself, and on a
+ * deck stamped DRAFT, NEEDS APPROVAL BEFORE IT LEAVES VIKAT it is also false.
+ * A rep decides when something is ready. The assistant says what it built.
+ */
+const SELF_CONGRATULATION = [
+  /\bready (?:for|to) (?:customer|client|external|send|use|share|go)/i,
+  /\bcustomer[- ]ready\b|\bclient[- ]ready\b|\bpresentation[- ]ready\b/i,
+  /\bpolished (?:and|,)|\bprofessionally (?:designed|formatted|crafted)/i,
+  /\bthis (?:deck|document|one[- ]pager) is (?:complete|finished|good to go)/i,
+];
+
+/**
+ * Read a headline the way the person receiving it will.
+ *
+ * Separate from checkArticulation because a headline is not a short paragraph.
+ * It is the only line guaranteed to be read, it has to answer "why should I
+ * care" on its own, and the rules that make a good sentence are not the rules
+ * that make a good headline.
+ *
+ * @param {string} headline
+ * @returns {{ notes: string[] }}
+ */
+export function checkHeadline(headline) {
+  const h = String(headline || '').trim();
+  const notes = [];
+  if (!h) return { notes };
+
+  const inside = INSIDE_WORDS.filter((w) => new RegExp(`\\b${w}\\b`, 'i').test(h));
+  if (inside.length) {
+    notes.push(
+      `"${h}" opens on ${inside[0]}, which the reader has never heard of. A headline has to answer "why should I care" in words they already use; name the product once the idea has landed.`,
+    );
+  }
+
+  if (LABEL_HEADLINES.test(h)) {
+    notes.push(
+      `"${h}" labels the slide rather than saying something. What is the point of this slide, in one plain sentence? That is the headline.`,
+    );
+  }
+
+  return { notes };
+}
 
 /**
  * Read a piece of copy the way its recipient will.
@@ -171,6 +332,15 @@ export function checkArticulation(text) {
   }
 
   if (EMOJI.test(copy)) notes.push('No emoji in brand materials.');
+
+  for (const re of SELF_CONGRATULATION) {
+    if (re.test(copy)) {
+      notes.push(
+        'Do not call your own output ready, polished or customer-ready. A rep decides that, and on a deck stamped DRAFT it is not even true. Say what you built and what they should check.',
+      );
+      break;
+    }
+  }
 
   // Sentence length. Not a rule anybody wrote down, but "short sentences,
   // plain words" has a number behind it, and copy averaging thirty words a

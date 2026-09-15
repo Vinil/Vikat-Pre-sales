@@ -17,6 +17,7 @@ import {
   TYPE,
   PLANES,
   THE_LINE,
+  LOGO,
   CONFLICTS,
 } from '../src/documents/guidelines.js';
 
@@ -86,9 +87,33 @@ test('a shouted headline is a note, not a refusal', () => {
   assert.match(out.notes.join(' '), /sentence case/);
 });
 
-test('a short headline in caps is left alone', () => {
-  // SCP, DCP, an acronym in a title: not shouting.
-  assert.equal(notesOf(spec([sec({ title: 'SCP' })])), '');
+test('a short headline in caps is not treated as shouting', () => {
+  // The caps rule is about a SHOUTED sentence, not a short one. "HIPAA" is an
+  // acronym a CISO uses daily.
+  assert.doesNotMatch(notesOf(spec([sec({ title: 'HIPAA' })])), /sentence case/);
+});
+
+test('a headline made of a product name is a closed door', () => {
+  // "SecSemantic for McLane" tells a McLane executive nothing. They have never
+  // heard of SecSemantic, and the one line they were guaranteed to read has
+  // been spent on a word they cannot parse.
+  const n = notesOf(spec([sec({ title: 'SecSemantic for McLane' })]));
+  assert.match(n, /never heard of/);
+  assert.match(n, /why should I care/);
+});
+
+test('a headline that files the slide instead of saying something', () => {
+  // "The commitment model" is a drawer label. So is "How the suite fits".
+  assert.match(notesOf(spec([sec({ title: 'The commitment model' })])), /labels the slide/);
+  assert.match(notesOf(spec([sec({ title: 'Our approach' })])), /labels the slide/);
+});
+
+test('a headline that makes the point is left alone', () => {
+  // From a real deck, and the one headline in it that works.
+  assert.equal(
+    notesOf(spec([sec({ title: 'Two surfaces now land on every healthcare CISO desk' })])),
+    '',
+  );
 });
 
 test('suitesMentioned names them rather than counting', () => {
@@ -159,4 +184,53 @@ test('the check runs on a PDF, which inspectPptx cannot even open', async () => 
     sections: [{ title: 'SecSemantic', points: [] }, { title: 'ProSemantic', points: [] }],
   });
   assert.equal(out.problems.length, 1);
+});
+
+test('the real deck that prompted this is caught as too prose-heavy', async () => {
+  // Reconstructed from the generated RadNet deck: twelve slides, five of the
+  // nine content slides a heading over a paragraph and bullets. "Make it
+  // visual" is not actionable; "five of your nine sections are prose" is.
+  const radnet = spec([
+    sec({ title: 'Two surfaces now land on every healthcare CISO desk', body: 'RadNet operates 418 imaging centers.' }),
+    sec({ title: '', layout: 'stat', body: '1.4M' }),
+    sec({ title: 'What the stack sees today', layout: 'table' }),
+    sec({ title: 'The Security Context Plane', body: 'A continuously computed graph.', points: ['Business Domain', 'Attack Surface'] }),
+    sec({ title: 'How the suite fits', layout: 'suite' }),
+    sec({ title: 'No disruption to your existing stack', body: 'Telemetry flows in.', points: ['Splunk', 'Sentinel'] }),
+    sec({ title: 'The commitment model', body: 'One package.', points: ['Atomic Pod', '90-day KPI'] }),
+    sec({ title: 'The first 90 days', layout: 'flow' }),
+    sec({ title: 'The next 30 days', body: 'Start with a diagnostic.', points: ['baseline', 'gap analysis'] }),
+  ]);
+
+  const out = checkGuidelines(radnet);
+
+  assert.match(out.problems.join(' '), /5 of 9 sections are prose/);
+  assert.match(out.problems.join(' '), /A deck is looked at, not read/);
+
+  // And the headlines the user singled out, each named.
+  const n = out.notes.join(' ');
+  assert.match(n, /Security Context Plane/);
+  assert.match(n, /How the suite fits|commitment model/);
+});
+
+test('a deck that is mostly drawn passes', () => {
+  // The check must not fire on a good deck; a rule that flags everything is
+  // one a rep learns to scroll past.
+  const good = spec([
+    sec({ title: 'Your agents reach patient data faster than your reviews do', layout: 'stat' }),
+    sec({ title: 'Where the gap opens', layout: 'bars' }),
+    sec({ title: 'What changes in 90 days', layout: 'flow' }),
+    sec({ title: 'The ask', body: 'Twenty minutes next week.' }),
+  ]);
+  assert.equal(checkGuidelines(good).problems.length, 0);
+});
+
+test('the missing logo is recorded as missing, not approximated', () => {
+  // Both documents forbid a redrawn lockup by name, and the renderer typesets
+  // "vikat.AI" in Inter Black. Drawing a mark from a description in a PDF
+  // would be inventing a trademark, so the gap is stated and the asset is
+  // requested rather than guessed at.
+  assert.equal(LOGO.status, 'missing');
+  assert.match(LOGO.currently, /redrawn lockup/);
+  assert.ok(LOGO.needs.length >= 2);
 });
