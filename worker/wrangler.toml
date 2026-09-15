@@ -83,6 +83,23 @@ AUTH_MODE = "cf-access"
 # From Zero Trust > Settings > Custom Pages, or your team domain.
 CF_ACCESS_TEAM_DOMAIN = "sparkling-hat-8db3.cloudflareaccess.com"
 # Application Audience (AUD) tag from the Access application's Overview tab.
+#
+# THIS VALUE GOES STALE SILENTLY. It belongs to one Access application, and
+# deleting and recreating that application mints a new one — the Worker keeps
+# rejecting every sign-in, and nothing says so: the token verifies, /health
+# still answers ok:true, and the only symptom is that no human being can use
+# the assistant. That is exactly how it failed on 2026-09-15.
+#
+# Nothing can validate it from here. It is checkable only against a real token,
+# so the checks in auth.js can confirm it is SET and never that it is right. If
+# sign-in is refused with reason "audience_mismatch", this line is the cause:
+# re-copy the tag from Zero Trust > Access > Applications > (the app protecting
+# this Worker) > Overview.
+#
+# Take it from the DASHBOARD. `wrangler tail` logs the aud a rejected token
+# carried, which is a useful cross-check and a bad source of truth: copying it
+# in configures the Worker to trust whichever application issued the token
+# somebody happened to present.
 CF_ACCESS_AUD = "ac7c78ef971056857ecde19e25763644844741c36cb227ee7dbc85910777c759"
 ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].
