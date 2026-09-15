@@ -551,3 +551,25 @@ test('an empty audience list is misconfigured, NOT a free pass', async () => {
     assert.equal(r.reason, 'misconfigured');
   });
 });
+
+test('the shipped CF_ACCESS_AUD parses into well-formed tags', () => {
+  // A config test, on the value that actually deploys.
+  //
+  // Nothing can verify a tag is the RIGHT one without a live token — that is
+  // why this outage took a day — but the shape is checkable, and the shape is
+  // what a hand-edited comma-separated list gets wrong: a truncated paste, a
+  // semicolon, a stray quote, a line break swallowed by an editor. Each of
+  // those silently drops or corrupts an entry, and the only symptom is the
+  // same refused sign-in with nothing to distinguish it.
+  const toml = fs.readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  const line = /^CF_ACCESS_AUD\s*=\s*"([^"]*)"/m.exec(toml);
+  assert.ok(line, 'CF_ACCESS_AUD is not set in wrangler.toml');
+
+  const tags = loadConfig({ CF_ACCESS_AUD: line[1] }).CF_ACCESS_AUD;
+  assert.ok(tags.length >= 1, 'an empty list refuses every sign-in');
+
+  for (const tag of tags) {
+    assert.match(tag, /^[0-9a-f]{64}$/, `"${tag}" is not a 64-character hex AUD tag`);
+  }
+  assert.equal(new Set(tags).size, tags.length, 'a duplicated tag widens nothing and hides a typo');
+});

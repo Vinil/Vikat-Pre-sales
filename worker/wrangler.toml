@@ -110,7 +110,13 @@ CF_ACCESS_TEAM_DOMAIN = "sparkling-hat-8db3.cloudflareaccess.com"
 # value is whatever application issued the token somebody happened to present,
 # and pasting it in is how a Worker ends up trusting an application nobody
 # chose. Each entry widens what is accepted, so add them deliberately.
-CF_ACCESS_AUD = "ac7c78ef971056857ecde19e25763644844741c36cb227ee7dbc85910777c759"
+# 1. "vikat-sales-assistant - Cloudflare Workers" — the Worker policy, the
+#    application the Worker's Access tab shows as linked.
+# 2. "All Workers" — the account policy, "Preview and production URLs are
+#    private". THIS is the one minting tokens on the workers.dev URL, being
+#    the more specific match. Both admit @vikat.ai only, and the Worker
+#    re-checks ALLOWED_EMAIL_DOMAINS and the role after either.
+CF_ACCESS_AUD = "ac7c78ef971056857ecde19e25763644844741c36cb227ee7dbc85910777c759,8c2c8e8e366bc7c9b3e0fa9ad220ebcae2f630cb4f5420cf44845d38dc77bdd8"
 ALLOWED_EMAIL_DOMAINS = "vikat.ai"
 # Never set ALLOW_DEV_AUTH in this block. It exists only under [env.dev].
 
