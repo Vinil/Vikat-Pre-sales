@@ -447,3 +447,26 @@ test('a cookie is held to exactly the same checks as an injected header', () => 
     'one verification path, so a cookie cannot take a softer one',
   );
 });
+
+test('the rejection line identifies the fault before a log table truncates it', () => {
+  // These lines are read in the Cloudflare dashboard's Observability table,
+  // which cuts them off around 70 characters. The first version ended with the
+  // expected AUD and the token source, so the table showed the reason twice
+  // and neither of the two values that identify the fault:
+  //
+  //   [auth] rejected: audience_mismatch audience mismatch: token carries
+  //   [8c2c8e8e366bc7c9b3e0fa9ad22…
+  //
+  // A log line whose useful half is past the fold is a log line nobody reads.
+  const VISIBLE = 70;
+  const line = `[auth] rejected: audience_mismatch via cookie: token aud [${'a'.repeat(64)}] expected [${'b'.repeat(64)}]`;
+  const head = line.slice(0, VISIBLE);
+
+  assert.match(head, /audience_mismatch/, 'the reason must survive');
+  assert.match(head, /via cookie/, 'and the source, which is the discriminator');
+  assert.doesNotMatch(
+    line,
+    /audience_mismatch.*audience mismatch/,
+    'the reason is not repeated in prose after being named',
+  );
+});

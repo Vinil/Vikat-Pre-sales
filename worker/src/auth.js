@@ -121,16 +121,13 @@ async function verifyRs256(token, { jwksUrl, issuer, audience }) {
   // wrangler.toml — but an unauthenticated caller has no business being handed
   // a deployment's configuration by its own error messages.
   if (issuer && payload.iss !== issuer) {
-    throw fail('issuer_mismatch', `issuer mismatch: token says "${payload.iss}", expected "${issuer}"`);
+    throw fail('issuer_mismatch', `token iss "${payload.iss}" expected "${issuer}"`);
   }
 
   if (audience) {
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (!aud.includes(audience)) {
-      throw fail(
-        'audience_mismatch',
-        `audience mismatch: token carries [${aud.join(', ')}], expected "${audience}"`,
-      );
+      throw fail('audience_mismatch', `token aud [${aud.join(', ')}] expected [${audience}]`);
     }
   }
 
@@ -219,10 +216,9 @@ export async function authenticate(request, env, cfg) {
             audience: cfg.CF_ACCESS_AUD,
           });
         } catch (err) {
-          // Re-thrown with the source attached, so the one log line carries
-          // both halves of the question: what the token claimed, and whether
-          // Access put it there.
-          err.message = `${err.message} [via ${tokenSource}]`;
+          // Carried on the error rather than appended to its message, so the
+          // log line can LEAD with it. See the console.warn below.
+          err.via = tokenSource;
           throw err;
         }
 
@@ -290,7 +286,18 @@ export async function authenticate(request, env, cfg) {
     //
     // invalid_token remains the fallback for anything unforeseen, so a new
     // throw fails closed rather than being reported as something it is not.
-    console.warn('[auth] rejected:', err?.reason || 'invalid_token', err?.message || err);
+    // Ordered by what a reader needs first, because this line is read in the
+    // Cloudflare dashboard's log table, which truncates it mid-sentence.
+    //
+    // It used to end with the two things that identify the fault, so the table
+    // showed "[auth] rejected: audience_mismatch audience mismatch: token
+    // carries [8c2c8e8e366bc7c9b3e0fa9ad22…" and cut off both the expected
+    // value and the token source, having said the reason twice. Reason, then
+    // source, then the values.
+    console.warn(
+      `[auth] rejected: ${err?.reason || 'invalid_token'}${err?.via ? ` via ${err.via}` : ''}:`,
+      err?.message || err,
+    );
     return { ok: false, reason: err?.reason || 'invalid_token' };
   }
 }
