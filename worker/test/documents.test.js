@@ -86,15 +86,41 @@ test('a spec with no usable section is refused', () => {
   assert.ok(!normaliseSpec({ format: 'pdf', title: 'Just a title', sections: [{ eyebrow: 'x' }] }).ok);
 });
 
-test('over-long content is truncated, not rejected', () => {
-  // A rep mid-call wants the deck, not an error about a bullet being four
-  // characters too long.
-  const s = spec({
+test('over-long content is REFUSED, so nothing is cut mid-sentence', () => {
+  // This test asserted the opposite, on the reasoning that "a rep mid-call
+  // wants the deck, not an error about a bullet being four characters too
+  // long". The concern was right and the premise was wrong: the refusal does
+  // not reach the rep. normaliseSpec answers create_document, so it lands in a
+  // TOOL RESULT, the model shortens the sentence and calls again, and the rep
+  // sees a slightly longer wait rather than an error.
+  //
+  // What the old behaviour cost: a brief went to a CISO reading "touching
+  // documents that…", with three more like it, on a build that already had a
+  // checker for exactly this — because that checker reports and reporting
+  // happens after the PDF exists. The model is the only party that can shorten
+  // a sentence without changing what it says, and it is still in the loop when
+  // this runs.
+  const r = normaliseSpec({
+    format: 'pdf',
     title: 'A'.repeat(400),
-    sections: [{ title: 'ok', points: ['B'.repeat(400), 'C'] }],
+    content: `## ok\n- ${'B'.repeat(400)}\n- C`,
   });
-  assert.ok(s.title.length <= LIMITS.titleChars + 1, 'title truncated');
-  assert.ok(s.sections[0].points[0].length <= LIMITS.pointChars + 1);
+
+  assert.equal(r.ok, false);
+  assert.match(r.error, /too long for the layout/);
+  assert.match(r.error, /Shorten them/);
+  assert.match(r.error, new RegExp(`limit is ${LIMITS.titleChars}`), 'the error names the limit to aim at');
+});
+
+test('content inside the limits is untouched', () => {
+  // The other half: refusing must not become refusing everything.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'A brief that fits',
+    content: '## A section that fits\nA paragraph well inside the limit.\n- A point that fits',
+  });
+  assert.ok(r.ok, r.error);
+  assert.doesNotMatch(JSON.stringify(r.spec), /\u2026/, 'no ellipsis may reach a document');
 });
 
 test('the section and point counts are capped', () => {
@@ -1272,4 +1298,28 @@ test('a drawn figure replaces its points rather than repeating them', async () =
     flow.calls.rect.length >= 6,
     `the figure itself was not drawn: only ${flow.calls.rect.length} shapes`,
   );
+});
+
+test('every field that can overflow is refused, not just the ones in sections', () => {
+  // The hole this closes: the overflow accumulator was created halfway down
+  // normaliseSpec, so title, subtitle and audience were cleaned before it
+  // existed and kept truncating silently. Then, once they were wired up, they
+  // were still cleaned INSIDE the returned object — after the refusal check —
+  // so they recorded too late to refuse and stopped truncating at the same
+  // time, which would have let an over-long subtitle run off the layout with
+  // no ellipsis and no error. Worse than what it replaced.
+  const long = (n) => 'W'.repeat(n);
+
+  for (const [field, input] of [
+    ['title', { title: long(400) }],
+    ['subtitle', { title: 'ok', subtitle: long(400) }],
+    ['audience', { title: 'ok', audience: long(400) }],
+    ['section body', { title: 'ok', content: `## S\n${long(900)}` }],
+    ['point', { title: 'ok', content: `## S\n- ${long(400)}` }],
+    ['eyebrow', { title: 'ok', content: `## ${long(90)} | S\nBody.` }],
+  ]) {
+    const r = normaliseSpec({ format: 'pdf', content: '## S\nBody.', ...input });
+    assert.equal(r.ok, false, `an over-long ${field} was accepted`);
+    assert.match(r.error, /too long for the layout/, field);
+  }
 });

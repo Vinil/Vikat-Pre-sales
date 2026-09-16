@@ -57,7 +57,22 @@ export function normaliseSpec(input) {
     return { ok: false, error: `format must be one of: ${FORMATS.join(', ')}.` };
   }
 
-  const title = clean(input.title, LIMITS.titleChars, true);
+  // Declared before the first clean() call, because the title was the field
+  // that slipped through the first time this was written: the accumulator was
+  // created further down, so title, subtitle and audience were still being cut
+  // silently while every other field refused. A rule applied to most of a
+  // document is a rule with a hole in it.
+  const overflow = [];
+
+  const title = clean(input.title, LIMITS.titleChars, true, overflow);
+
+  // Cleaned HERE, not inside the returned object. They used to be, and the
+  // overflow check runs before that return — so with an accumulator attached
+  // they recorded their overflow too late to be refused AND stopped being
+  // truncated, which would have let an over-long subtitle run off the layout
+  // silently. Strictly worse than the ellipsis this change is removing.
+  const subtitle = clean(input.subtitle, LIMITS.subtitleChars, false, overflow);
+  const audience = clean(input.audience, LIMITS.subtitleChars, false, overflow);
   if (!title) return { ok: false, error: 'title is required.' };
 
   // Two accepted shapes. The tool sends `content` as markdown, because a flat
@@ -85,7 +100,7 @@ export function normaliseSpec(input) {
 
   const sections = rawSections
     .slice(0, LIMITS.sections)
-    .map(normaliseSection)
+    .map((raw) => normaliseSection(raw, overflow))
     .filter((s) => s.layout || s.title || s.body || s.points.length);
 
   if (sections.length === 0) {
@@ -113,15 +128,43 @@ export function normaliseSpec(input) {
     };
   }
 
+  // Nothing leaves here with an ellipsis in it.
+  //
+  // This used to truncate on a word boundary and add one, which is a
+  // reasonable thing to do to a label and the wrong thing to do to a sentence:
+  // a brief went to a CISO reading "touching documents that…", and three more
+  // like it. inspectPptx and checkExecOutreach both catch it afterwards, and
+  // afterwards is after the PDF exists.
+  //
+  // Refused rather than cut, on the same reasoning normaliseSpec already gives
+  // for a prose-only deck: the model is the only party that can shorten a
+  // sentence without changing what it says, it is still in the loop right now,
+  // and a rewrite costs it one turn. A rep five minutes before a call is
+  // better served by a document that reads properly than by one that arrives
+  // slightly sooner with its argument cut in half.
+  if (overflow.length) {
+    const worst = overflow.sort((a, b) => b.length - b.max - (a.length - a.max)).slice(0, 3);
+    return {
+      ok: false,
+      error:
+        `${overflow.length} passage(s) are too long for the layout and would be cut mid-sentence. ` +
+        'Shorten them; do not let them be truncated. ' +
+        worst
+          .map((o) => `"${o.text.slice(0, 60)}…" is ${o.length} characters and the limit is ${o.max}`)
+          .join('; ') +
+        '.',
+    };
+  }
+
   return {
     ok: true,
     spec: {
       format,
       title,
-      subtitle: clean(input.subtitle, LIMITS.subtitleChars, false),
+      subtitle,
       // Free text naming who this is for. Printed on the cover, so a deck
       // never circulates without saying who it was built for.
-      audience: clean(input.audience, LIMITS.subtitleChars, false),
+      audience,
       sections,
       // Carried onto the cover and every footer. See DISCLOSURE_LABELS.
       disclosure: DISCLOSURE_LABELS[input.disclosure] ? input.disclosure : 'internal_only',
@@ -569,7 +612,7 @@ export function parseSections(markdown) {
 }
 
 /** The fields each layout carries, so nothing else rides along. */
-function drawnFields(s) {
+function drawnFields(s, overflow) {
   if (s.layout === 'stat') {
     // 90 characters cut a real caption mid-parenthesis and left an ellipsis
     // on the slide — "…in a single 2025 breach (HHS filing,…" — which reads
@@ -646,28 +689,44 @@ function drawnFields(s) {
   return {};
 }
 
-function normaliseSection(raw) {
+function normaliseSection(raw, overflow) {
   const s = raw && typeof raw === 'object' ? raw : {};
   return {
     // Layout data survives normalisation untouched: it was validated when it
     // was parsed, and clean() is for prose.
-    ...(s.layout ? { layout: s.layout, ...drawnFields(s) } : {}),
-    eyebrow: clean(s.eyebrow, LIMITS.eyebrowChars, false),
-    title: clean(s.title, LIMITS.sectionTitleChars, true),
-    body: clean(s.body, LIMITS.sectionBodyChars, false),
+    ...(s.layout ? { layout: s.layout, ...drawnFields(s, overflow) } : {}),
+    eyebrow: clean(s.eyebrow, LIMITS.eyebrowChars, false, overflow),
+    title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+    body: clean(s.body, LIMITS.sectionBodyChars, false, overflow),
     points: (Array.isArray(s.points) ? s.points : [])
       .slice(0, LIMITS.points)
-      .map((p) => clean(p, LIMITS.pointChars, false))
+      .map((p) => clean(p, LIMITS.pointChars, false, overflow))
       .filter(Boolean),
   };
 }
 
 /** Brand-clean, optionally sentence-case, and truncate on a word boundary. */
-function clean(value, max, asHeading) {
+function clean(value, max, asHeading, overflow) {
   let text = brandSafe(value);
   if (!text) return '';
   if (asHeading) text = sentenceCase(text);
   if (text.length <= max) return text;
+
+  // Recorded rather than cut, when the caller is collecting.
+  //
+  // Truncating here is what put "touching documents that…" and three more cut
+  // sentences into a brief that went to a CISO — on a build that already had a
+  // checker for exactly this, because the checker REPORTS and the rep either
+  // did not see it or shipped anyway. A rule that fires after the PDF exists
+  // is a rule about a PDF that exists.
+  //
+  // The fix belongs one step earlier: the model is the only party that can
+  // shorten a sentence without changing what it says, it is still in the loop
+  // when normaliseSpec runs, and rewriting costs it one turn.
+  if (overflow) {
+    overflow.push({ max, length: text.length, text });
+    return text;
+  }
 
   const cut = text.slice(0, max);
   const lastSpace = cut.lastIndexOf(' ');

@@ -138,6 +138,18 @@ const ANCHOR_FIGURE =
 const YEAR = /^(?:19|20)\d{2}$/;
 
 /**
+ * A number that is part of a standard's NAME, not a statistic.
+ *
+ * "ISO 27001" and "ISO 9001" were both demanded a source, in a document whose
+ * only fault there was naming two certifications. Worse than noise: ISO 27001
+ * is one of the TRUST_ANCHORS this same module asks outreach to include, so
+ * the checker was requiring a thing and then objecting to it.
+ *
+ * Matched on what precedes the number, because that is what makes it a name.
+ */
+const STANDARD_BEFORE = /\b(ISO|IEC|IEEE|NIST|SP|SOC|PCI|DSS|FIPS|CMMC|HIPAA|GDPR|RFC|CVE|CWE|SSAE)\s*$/i;
+
+/**
  * What counts as a source sitting WITH the figure.
  *
  * Attribution has to be inline, in the same breath, because the reader's
@@ -345,6 +357,7 @@ export function unsourcedFigures(text) {
     for (const m of line.matchAll(ANCHOR_FIGURE)) {
       const figure = m[0].trim();
       if (seen.has(figure) || YEAR.test(figure)) continue;
+      if (STANDARD_BEFORE.test(line.slice(0, m.index))) continue;
       seen.add(figure);
       out.push(figure);
     }

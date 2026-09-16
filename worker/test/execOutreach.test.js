@@ -294,3 +294,24 @@ test('the McLane PDF would not pass', () => {
 
   assert.ok(problems.length >= 5, `only ${problems.length} problems: ${problems.join(' | ')}`);
 });
+
+test('a standard is named, not cited', () => {
+  // "ISO 27001" and "ISO 9001" were both demanded a source, in a brief whose
+  // only fault there was naming two certifications. Worse than noise: ISO
+  // 27001 is one of the trust anchors this module asks outreach to include,
+  // so the checker required a thing and then objected to it.
+  for (const line of [
+    'Vikat holds ISO 27001 and ISO 9001.',
+    'Audited to SOC 2 Type 2 and aligned to NIST 800-53.',
+    'Tracked as CVE 2024 and CWE 79.',
+  ]) {
+    assert.deepEqual(unsourcedFigures(line), [], line);
+  }
+
+  // And the rule stays narrow: a real statistic beside a standard is still
+  // caught, or "ISO 27001" becomes a way to launder a number.
+  assert.deepEqual(
+    unsourcedFigures('ISO 27001 certified, and 40000 incidents handled last year.'),
+    ['40000'],
+  );
+});
