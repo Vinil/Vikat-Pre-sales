@@ -353,7 +353,8 @@ function cover(spec, meta) {
     para(run('vikat.AI', { font: FONT.heading, size: SIZE.sectionTitle, color: COLOR.navy }), { after: 300 }) +
     (spec.audience
       ? para(
-          run(eyebrowCase(`Prepared for ${spec.audience}`), {
+          // The name and the date, not "Prepared for" them — see pdf.js.
+          run(eyebrowCase(`${spec.audience} · ${meta.isoDate.slice(0, 10)}`), {
             font: FONT.eyebrow,
             size: SIZE.eyebrow,
             color: COLOR.circuitTeal,

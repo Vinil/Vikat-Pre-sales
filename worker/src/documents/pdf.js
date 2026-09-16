@@ -226,7 +226,12 @@ function drawFooters(flow) {
   });
 }
 
-function drawCover(flow) {
+/**
+ * Exported for tests, for the same reason drawSection is: the type is
+ * subsetted into the file, so the words on the cover cannot be found by
+ * reading the rendered bytes. A test has to watch the draw calls.
+ */
+export function drawCover(flow) {
   const { spec, fonts, meta } = flow;
   const page = flow.newPage();
 
@@ -266,7 +271,13 @@ function drawCover(flow) {
 
   flow.y = PAGE.height - M.top - 76;
 
-  flow.write(eyebrowCase(spec.audience ? `Prepared for ${spec.audience}` : meta.date), {
+  // The audience and the date, and NOT "Prepared for <them>".
+  //
+  // A customer reading their own name after the words "prepared for" is being
+  // told they are a recipient of something produced about them, which is the
+  // register of an internal memo that escaped. The name and the date on their
+  // own read as a masthead: this document, for you, on this date.
+  flow.write(eyebrowCase(spec.audience ? `${spec.audience} · ${meta.date}` : meta.date), {
     font: fonts.eyebrow,
     metrics: fonts.metrics.eyebrow,
     size: SIZE.eyebrow,
@@ -429,7 +440,8 @@ export function drawSection(flow, section) {
   flow.gap(20);
 }
 
-function drawClose(flow) {
+/** Exported for tests — see drawCover. */
+export function drawClose(flow) {
   const { fonts, meta } = flow;
 
   const block = 118;
@@ -454,7 +466,10 @@ function drawClose(flow) {
     characterSpacing: -0.03 * SIZE.tagline,
   });
 
-  flow.page.drawText(`Prepared by ${meta.preparedBy} · ${meta.date}`, {
+  // A sign-off, not a colophon. Same reasoning as the cover eyebrow: the name
+  // is what a reader needs — somebody to reply to — and "Prepared by" in front
+  // of it is process language the reader has no use for.
+  flow.page.drawText(`${meta.preparedBy} · ${meta.date}`, {
     x: M.left + 26,
     y: top - 70,
     size: SIZE.body,

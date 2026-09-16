@@ -15,7 +15,7 @@ import { wrap as wrapText } from '../src/documents/measure.js';
 
 import { normaliseSpec, parseSections, parseLayout, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
-import { renderPdf } from '../src/documents/pdf.js';
+import { renderPdf, drawCover, drawClose } from '../src/documents/pdf.js';
 import { renderDocx } from '../src/documents/docx.js';
 import { createDocument } from '../src/documents/index.js';
 import { loadFonts } from '../src/documents/fonts.js';
@@ -1475,4 +1475,61 @@ test('the mark is embedded once, however many pages', async () => {
   // The artwork is 466x232; a second copy would show as a second image object.
   const images = bytes.toString('latin1').match(/\/Subtype\s*\/Image/g) || [];
   assert.ok(images.length <= 2, `${images.length} image objects: the lockup and its soft mask, no more`);
+});
+
+// --- Furniture --------------------------------------------------------------
+
+test('no renderer labels the reader a recipient or the sender a preparer', () => {
+  // "Prepared for and prepared by are still there" — the fourth of six notes
+  // on a brief that went to a CISO, and the reason this test exists at all:
+  // NOTHING asserted on that furniture, so it survived every pass over these
+  // renderers. A customer reading their own name after "prepared for" is being
+  // shown an internal memo header; "prepared by" in front of the sender is
+  // process language a reader has no use for.
+  //
+  // Both halves matter. The name and the date still have to appear — the
+  // audience so the document is addressed, the sender so a stranger has
+  // somebody to reply to — so deleting the block outright is not the fix and
+  // is not what passes here.
+  const s = spec({ format: 'pdf', audience: 'Northfield Foods' });
+  const memo = /prepared (for|by)/i;
+
+  // PDF. Watching the draw calls rather than the bytes: the type is subsetted
+  // into the file, so the cover's own words are not greppable in the output.
+  const calls = { text: [], rect: [] };
+  const page = {
+    drawText: (t, o) => calls.text.push({ t, ...o }),
+    drawRectangle: (o) => calls.rect.push(o),
+  };
+  const flow = {
+    spec: s,
+    fonts: { ...FONTS, display: 'display', heading: 'heading', body: 'body', eyebrow: 'eyebrow' },
+    meta: { preparedBy: 'Test Rep', date: '25 August 2026', year: 2026 },
+    page,
+    y: 700,
+    remaining: 600,
+    mark: null,
+    newPage() { this.y = 700; return page; },
+    gap(n) { this.y -= n; },
+    write(text, opts) { calls.text.push({ t: text, ...opts }); this.y -= 12; return 12; },
+  };
+
+  drawCover(flow);
+  drawClose(flow);
+  const drawn = calls.text.map((c) => c.t).join(' | ');
+
+  assert.doesNotMatch(drawn, memo, drawn);
+  assert.match(drawn, /NORTHFIELD FOODS/i, 'the reader still has to be named');
+  assert.match(drawn, /Test Rep/, 'and the sender still has to be reachable');
+
+  // Word.
+  const word = docxParts(renderDocx(spec({ format: 'docx', audience: 'Northfield Foods' }), META))['word/document.xml'];
+  assert.doesNotMatch(word, memo);
+  assert.match(word, /N.?O.?R.?T.?H.?F.?I.?E.?L.?D/i, 'the reader still has to be named');
+
+  // Deck.
+  const deck = Object.entries(unzipSync(renderPptx(spec({ audience: 'Northfield Foods' }), META, FONTS.metrics)))
+    .map(([, v]) => strFromU8(v))
+    .join('\n');
+  assert.doesNotMatch(deck, memo);
 });

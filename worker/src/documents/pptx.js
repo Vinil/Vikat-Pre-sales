@@ -378,7 +378,8 @@ function coverSlide(spec, meta, fonts) {
 
     text({ x: M.left, y: 1.62, w: CONTENT_WIDTH, h: 0.3 }, [
       {
-        text: eyebrowCase(spec.audience ? `Prepared for ${spec.audience}` : meta.date),
+        // The name and the date, not "Prepared for" them — see pdf.js.
+        text: eyebrowCase(spec.audience ? `${spec.audience} · ${meta.date}` : meta.date),
         role: 'eyebrow',
         size: SIZE.eyebrow,
         tracking: 0.12,
@@ -1252,7 +1253,7 @@ export function renderPptx(spec, meta, fonts) {
 
   const date = meta.isoDate.slice(0, 10);
   const year = Number(date.slice(0, 4));
-  const context = { date, year, preparedBy: `Prepared by ${meta.preparedBy}` };
+  const context = { date, year, preparedBy: meta.preparedBy };
 
   // §3.4 makes the credentials close a required slide, unless the deck
   // already has one of its own — two "who we are" slides is worse than none.
