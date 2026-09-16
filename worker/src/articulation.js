@@ -147,7 +147,22 @@ rather than label something.
   fits", "Our approach" are drawer labels. What is this slide actually
   claiming? That sentence is the headline. "Two surfaces now land on every
   healthcare CISO's desk" is a headline. "The Security Context Plane" is not.
+- **A headline is a sentence, not a noun phrase.** "Beyond detection", "The
+  commitment model", "The quiet shift" are evocative and say nothing: the
+  reader has to reach the body to find out what was meant, which is the
+  opposite of what a headline is for. Put a verb in it and make a claim.
 - Plain English a busy executive reads at a glance, and no ALL-CAPS.
+
+## Say who we are before you use our words
+
+Anything going outside the building introduces Vikat, early, in a sentence:
+what we do and what we stand for, in the reader's language rather than ours.
+A CISO who has never met us is reading advice from a stranger until you do.
+
+And nothing is named before that introduction lands. SecSemantic, VShield, the
+Security Context Plane, the suite: to a reader who has not been told who we
+are, each one is a proper noun belonging to nobody, arriving while they are
+still deciding whether to keep reading. Introduce, then name, then explain.
 
 ## The order it goes in
 
@@ -250,6 +265,53 @@ const LABEL_HEADLINES =
   /^(?:the\s+\w+\s+(?:model|framework|approach|architecture|platform|plane|layer)|how\s+(?:it|the|we)\b[^?]*|our\s+\w+|what\s+we\s+do|overview|introduction|summary|next\s+steps?|the\s+solution|key\s+benefits?)$/i;
 
 /**
+ * A headline that is a noun phrase rather than a claim.
+ *
+ * "The articulation including headlines that are cryptic" — the first of six
+ * notes on a brief, and the hardest of them to make mechanical, because
+ * cryptic is not a word list. LABEL_HEADLINES catches the filing labels
+ * ("Our approach", "Overview"); it does not catch "Beyond detection" or "The
+ * quiet shift", which are not labels. They are gestures.
+ *
+ * What the two have in common is grammatical and checkable: no verb. A
+ * headline with no verb makes no claim, so the reader has to reach the body to
+ * find out what was meant — which is the opposite of what a headline is for.
+ *
+ * Three conditions together, because any one alone over-fires:
+ *
+ *   - it opens on a determiner or a preposition, so it is a phrase and not a
+ *     fragment of something longer;
+ *   - it is short, six words or fewer — past that a headline is usually
+ *     carrying a clause whether or not this list knows the verb in it;
+ *   - and it contains none of the verbs below.
+ *
+ * A closed list, not a part-of-speech guess. "Three surfaces" and "The costs
+ * model" both end in -s and neither is a verb, so any suffix rule flags them;
+ * a list of the fifty commonest finite verbs and auxiliaries under-fires
+ * instead, which for an advisory note is the right direction to be wrong in.
+ */
+const PHRASE_OPENER = /^(?:the|a|an|our|its|their|this|these|those|beyond|inside|within|after|before|behind|under|toward|towards)\b/i;
+
+const FINITE_VERB = new RegExp(
+  `\\b(?:${[
+    'is', 'are', 'was', 'were', 'be', 'been', 'am', 'has', 'have', 'had',
+    'do', 'does', 'did', 'can', 'could', 'will', 'would', 'shall', 'should',
+    'must', 'may', 'might', 'need', 'needs', 'means', 'mean', 'costs', 'cost',
+    'sets', 'set', 'moves', 'moved', 'move', 'lands', 'land', 'takes', 'take',
+    'took', 'makes', 'make', 'made', 'gets', 'get', 'got', 'goes', 'go', 'went',
+    'says', 'say', 'said', 'stops', 'stop', 'starts', 'start', 'buys', 'buy',
+    'ranks', 'rank', 'sees', 'see', 'knows', 'know', 'wants', 'want',
+    'happens', 'happen', 'changed', 'changes', 'change', 'arrives', 'arrive',
+  ].join('|')})\\b`,
+  'i',
+);
+
+function saysNothing(h) {
+  const count = h.trim().split(/\s+/).filter(Boolean).length;
+  return count <= 6 && count >= 2 && PHRASE_OPENER.test(h) && !FINITE_VERB.test(h);
+}
+
+/**
  * Claims about our own output that are not ours to make.
  *
  * "Ready for customer use" is the assistant congratulating itself, and on a
@@ -262,6 +324,112 @@ const SELF_CONGRATULATION = [
   /\bpolished (?:and|,)|\bprofessionally (?:designed|formatted|crafted)/i,
   /\bthis (?:deck|document|one[- ]pager) is (?:complete|finished|good to go)/i,
 ];
+
+/**
+ * What counts as naming us.
+ *
+ * "Vikat.AI" and "Vikat" both, and the trailing boundary keeps it off
+ * "Vikatai.sharepoint.com" and anything else that merely contains the letters.
+ */
+const NAMES_US = /\bVikat(?:\.AI)?\b/i;
+
+/** Disclosures that mean a customer will read this. */
+const CUSTOMER_BOUND = new Set(['external_ok', 'needs_approval']);
+
+/**
+ * Words that mean nothing to a reader who has never met us, in reading order.
+ *
+ * Every passage a reader passes through, flattened. Reading order matters and
+ * a joined blob loses it: the whole question here is whether the product name
+ * arrives BEFORE or AFTER the sentence that says who we are.
+ */
+function passages(spec) {
+  const out = [String(spec.title || ''), String(spec.subtitle || '')];
+  for (const s of spec.sections || []) {
+    out.push(String(s.eyebrow || ''), String(s.title || ''), String(s.body || ''));
+    for (const p of s.points || []) out.push(String(p));
+  }
+  return out.filter((p) => p.trim());
+}
+
+const words = (text) => text.trim().split(/\s+/).filter(Boolean).length;
+
+/**
+ * Does a stranger know who we are before we start using our own vocabulary?
+ *
+ * Two of the six notes on AAA_CISO_Brief_1.pdf, and they are one fault:
+ *
+ *   "All of a sudden there's a reference of SecSemantic"
+ *   "No introduction of Vikat and what we stand for and do"
+ *
+ * checkHeadline already refused an inside word in a HEADLINE, and that rule
+ * was working — the brief kept its product names out of its headings and put
+ * SecSemantic in the body instead, where nothing was looking. The rule was
+ * never about headlines. It is about a reader meeting a word they cannot
+ * parse, and that happens wherever the word first appears.
+ *
+ * So: the first passage that names a product is compared against the first
+ * passage that introduces us. A CISO who has never heard of Vikat reads a
+ * brief about their own fulfillment calendar, and three paragraphs in a
+ * proper noun appears that belongs to a company they have not been told the
+ * name of.
+ *
+ * Scoped to what leaves the building. An internal deal review may open on
+ * SecSemantic, because everybody reading it has heard of SecSemantic.
+ *
+ * A draft awaiting approval counts as leaving the building: approval is the
+ * last gate before it does, which is exactly when the missing introduction has
+ * to be caught.
+ *
+ * @param {object} spec  A spec through normaliseSpec().
+ * @returns {{ problems: string[] }}
+ */
+export function checkIntroduction(spec) {
+  const problems = [];
+  // An ALLOWLIST, and the cautious default matches normaliseSpec's own: an
+  // unrecognised or missing disclosure is treated as internal. `!== internal_only`
+  // was the other way round, and it made every spec built by hand — a test
+  // fixture, a caller that forgot the field — a customer document with a
+  // missing introduction.
+  if (!CUSTOMER_BOUND.has(spec.disclosure)) return { problems };
+
+  const text = passages(spec);
+
+  // An introduction is a SENTENCE about us, not our name in a footer. Six
+  // words is the floor: "Vikat.AI" on its own, or "Vikat CyberSec LLC", is a
+  // signature, and a signature introduces nobody.
+  const introduced = text.findIndex((p) => NAMES_US.test(p) && words(p) >= 6);
+
+  let named = -1;
+  let product = '';
+  text.forEach((p, i) => {
+    if (named !== -1) return;
+    const hit = INSIDE_WORDS.find((w) => new RegExp(`\\b${w}\\b`, 'i').test(p));
+    if (hit) {
+      named = i;
+      product = hit;
+    }
+  });
+
+  if (named !== -1 && (introduced === -1 || introduced > named)) {
+    problems.push(
+      `${product} is named before this document says who Vikat is. To a reader who has never ` +
+        'heard of us that is a proper noun belonging to nobody, and it arrives while they are ' +
+        'still deciding whether to keep reading. Introduce Vikat and what it does first, in a ' +
+        'sentence, then name the product.',
+    );
+  }
+
+  if (introduced === -1) {
+    problems.push(
+      'Nothing here says who Vikat is or what it does. This goes to someone outside the ' +
+        'building: one or two sentences, early, in their language rather than ours — what we do ' +
+        'and what we stand for — or the whole document is advice from a stranger.',
+    );
+  }
+
+  return { problems };
+}
 
 /**
  * Read a headline the way the person receiving it will.
@@ -289,6 +457,13 @@ export function checkHeadline(headline) {
   if (LABEL_HEADLINES.test(h)) {
     notes.push(
       `"${h}" labels the slide rather than saying something. What is the point of this slide, in one plain sentence? That is the headline.`,
+    );
+  } else if (saysNothing(h)) {
+    // else, because a filing label is also a noun phrase and one note about
+    // one headline is enough. The label message is the more specific of the
+    // two and says the same thing about what to do next.
+    notes.push(
+      `"${h}" is a phrase, not a claim: there is no verb in it, so a reader has to reach the body to find out what was meant. A headline makes the point on its own.`,
     );
   }
 

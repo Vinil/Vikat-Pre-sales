@@ -10,7 +10,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { checkArticulation, checkHeadline, ARTICULATION_BLOCK, STORY_ARC } from '../src/articulation.js';
+import {
+  checkArticulation,
+  checkHeadline,
+  checkIntroduction,
+  ARTICULATION_BLOCK,
+  STORY_ARC,
+} from '../src/articulation.js';
 
 const notes = (t) => checkArticulation(t).notes.join(' | ');
 
@@ -157,6 +163,12 @@ test('the prompt carries the arc, the headline rule and the visual rule', () => 
   assert.match(ARTICULATION_BLOCK, /One ask, small enough to say yes to/);
   assert.match(ARTICULATION_BLOCK, /A deck is looked at, not read/);
   assert.match(ARTICULATION_BLOCK, /Never call your own work ready/);
+
+  // A checker that reports a missing introduction after the PDF exists costs
+  // the rep a round trip. The prompt is what stops it being written that way.
+  assert.match(ARTICULATION_BLOCK, /Say who we are before you use our words/);
+  assert.match(ARTICULATION_BLOCK, /Introduce, then name, then explain/);
+  assert.match(ARTICULATION_BLOCK, /A headline is a sentence, not a noun phrase/);
 });
 
 test('the dash rule is checked here, not only where copy is rendered', () => {
@@ -169,4 +181,146 @@ test('the dash rule is checked here, not only where copy is rendered', () => {
   assert.match(notes('A dash here — like this.'), /comma, a full stop or a new sentence/);
   // A hyphen inside a word is not a dash.
   assert.equal(notes('Vendor-neutral, self-hosted, board-ready.'), '');
+});
+
+// --- Who we are -------------------------------------------------------------
+
+/** A customer-bound spec, so each test varies one thing. */
+const brief = (over = {}) => ({
+  disclosure: 'external_ok',
+  title: 'Your fulfillment window is your attackers’ calendar.',
+  subtitle: 'What a severity score cannot see.',
+  sections: [
+    { title: 'The calendar sets the price.', body: 'Severity scoring cannot see the calendar.', points: [] },
+  ],
+  ...over,
+});
+
+const intro = (spec) => checkIntroduction(spec).problems.join(' | ');
+
+test('a product named before Vikat is introduced is a problem', () => {
+  // "All of a sudden there's a reference of SecSemantic." checkHeadline
+  // already refused an inside word in a HEADLINE, and that rule was working:
+  // the brief kept its product names out of its headings and put SecSemantic
+  // in the body, where nothing was looking. The rule was never about
+  // headlines. It is about a reader meeting a word they cannot parse.
+  const spec = brief();
+  spec.sections[0].points = ['SecSemantic reads the alert stream alongside Splunk.'];
+
+  const p = intro(spec);
+  assert.match(p, /SecSemantic is named before/);
+  assert.match(p, /Introduce Vikat and what it does first/);
+});
+
+test('order is the whole point: the same two sentences, the other way round', () => {
+  // Not "does the document contain both". A reader meets them in order, and
+  // the fault is meeting the product first. Swapping nothing but the sequence
+  // has to change the verdict, or this is measuring presence, not position.
+  const before = brief({
+    sections: [
+      { title: 'A', body: 'SecSemantic reads the alert stream.', points: [] },
+      { title: 'B', body: 'Vikat builds the semantic context layer for security operations.', points: [] },
+    ],
+  });
+  const after = brief({
+    sections: [
+      { title: 'A', body: 'Vikat builds the semantic context layer for security operations.', points: [] },
+      { title: 'B', body: 'SecSemantic reads the alert stream.', points: [] },
+    ],
+  });
+
+  assert.match(intro(before), /named before/);
+  assert.equal(intro(after), '');
+});
+
+test('a document with no introduction at all is a problem', () => {
+  // "No introduction of Vikat and what we stand for and do." A brief that
+  // never says whose advice this is, to somebody who has not met us.
+  assert.match(intro(brief()), /Nothing here says who Vikat is/);
+});
+
+test('a signature is not an introduction', () => {
+  // The copyright line and the sender block both name us on every page, so a
+  // check that only looked for the word would come back clean on the exact
+  // document that prompted this.
+  const signature = brief({
+    sections: [{ title: 'A', body: 'Severity scoring cannot see the calendar.', points: ['Vikat.AI'] }],
+  });
+  assert.match(intro(signature), /Nothing here says who Vikat is/);
+
+  const sentence = brief({
+    sections: [
+      { title: 'A', body: 'Vikat builds the semantic context layer for security operations.', points: [] },
+    ],
+  });
+  assert.equal(intro(sentence), '');
+});
+
+test('an internal document may open on its own vocabulary', () => {
+  // A deal review may say SecSemantic in its first line, because everybody
+  // reading it has heard of SecSemantic. The rule is about strangers.
+  const internal = brief({ disclosure: 'internal_only' });
+  internal.sections[0].points = ['SecSemantic reads the alert stream.'];
+  assert.equal(intro(internal), '');
+
+  // But a draft awaiting approval is checked: approval is the last gate before
+  // it leaves, which is exactly when a missing introduction has to be caught.
+  const draft = brief({ disclosure: 'needs_approval' });
+  draft.sections[0].points = ['SecSemantic reads the alert stream.'];
+  assert.match(intro(draft), /named before/);
+});
+
+test('a spec with no disclosure is treated as internal, not as a customer document', () => {
+  // normaliseSpec's own default for an unknown value is the cautious one, and
+  // this has to match it. The other way round, every hand-built spec became a
+  // customer document with a missing introduction.
+  assert.equal(intro(brief({ disclosure: undefined })), '');
+  assert.equal(intro(brief({ disclosure: 'obviously_fine' })), '');
+});
+
+// --- Cryptic headlines ------------------------------------------------------
+
+const headline = (h) => checkHeadline(h).notes.join(' | ');
+
+test('a headline with no verb is a gesture, not a claim', () => {
+  // "The articulation including headlines that are cryptic." LABEL_HEADLINES
+  // already caught the filing labels — "Our approach", "Overview" — and it
+  // does not catch these, because these are not labels. They are gestures:
+  // evocative, and the reader has to reach the body to find out what was
+  // meant, which is the opposite of what a headline is for.
+  for (const h of ['Beyond detection', 'The quiet shift', 'Under pressure', 'The calendar problem']) {
+    assert.match(headline(h), /no verb in it/, h);
+  }
+});
+
+test('a headline that makes a claim passes, however short', () => {
+  // The direction this has to be wrong in. An advisory note that fires on good
+  // headlines gets the whole report skipped, and then so does the real one.
+  for (const h of [
+    'The question has moved',
+    'The fulfillment window is the asset',
+    'Where the budget already is',
+    'What we would need from you',
+    'The calendar sets the price of an intrusion.',
+    'Three surfaces now land on every healthcare CISO’s desk',
+    'Your fulfillment window is your attackers’ calendar.',
+  ]) {
+    assert.equal(headline(h), '', h);
+  }
+});
+
+test('a filing label gets the label note and not both', () => {
+  // A drawer label is also a noun phrase, so it satisfies both rules. One
+  // headline, one note: the label message is the more specific of the two and
+  // already says what to do next.
+  const n = checkHeadline('Our approach').notes;
+  assert.equal(n.length, 1, n.join(' | '));
+  assert.match(n[0], /labels the slide/);
+});
+
+test('a one-word headline is not judged on its grammar', () => {
+  // "Overview" is caught as a label. A single word that is not one of those is
+  // a section marker and has no room for a verb; flagging it says nothing a
+  // writer can act on.
+  assert.equal(headline('Timing'), '');
 });

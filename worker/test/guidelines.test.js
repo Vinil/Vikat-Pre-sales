@@ -234,3 +234,32 @@ test('the logo is the real artwork, and its ceiling is recorded', () => {
   assert.equal(LOGO.files.length, 3);
   assert.match(LOGO.ceiling, /vector original/);
 });
+
+// --- What the one report has to cover ---------------------------------------
+
+test('the report reads the document title, not only the section headings', () => {
+  // This loop was written for slides, and a document's own title is not a
+  // slide — so the biggest headline in the file, the only one on the cover,
+  // was the one nothing read.
+  assert.match(
+    notesOf(spec([sec({ title: 'The calendar sets the price of an intrusion.' })], { title: 'SecSemantic for McLane' })),
+    /SecSemantic/,
+  );
+});
+
+test('the report carries the missing introduction, not just the checker', () => {
+  // checkIntroduction can be right on its own and still change nothing: the
+  // rep reads one report, and a rule that no report runs is a rule that does
+  // not exist. Both halves, so neither the call nor the check can be removed
+  // without a failure.
+  const stranger = spec(
+    [sec({ title: 'The calendar sets the price.', points: ['SecSemantic reads the alert stream.'] })],
+    { title: 'Your fulfillment window', disclosure: 'external_ok' },
+  );
+  const p = problems(stranger);
+  assert.match(p, /SecSemantic is named before/);
+  assert.match(p, /Nothing here says who Vikat is/);
+
+  // And an internal deck is left alone.
+  assert.doesNotMatch(problems({ ...stranger, disclosure: 'internal_only' }), /who Vikat is/);
+});

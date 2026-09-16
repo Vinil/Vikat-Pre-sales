@@ -18,7 +18,7 @@
  * documentation, which specifies a different typeface, palette and mark.
  */
 
-import { checkHeadline } from '../articulation.js';
+import { checkHeadline, checkIntroduction } from '../articulation.js';
 
 /** §04 · Color. One accent per suite, and they are never mixed. */
 export const SUITE_ACCENTS = {
@@ -230,9 +230,20 @@ export function checkGuidelines(spec) {
   // Headlines are the articulation component's job, not this one's — but a
   // slide headline is where the two meet, and a rep reading one report should
   // not have to know which module noticed.
+  //
+  // spec.title as well as the sections'. It is the biggest headline in the
+  // document and the only one on the cover, and it was the one nothing read:
+  // this loop was written for slides and a document's own title is not a
+  // slide.
+  for (const n of checkHeadline(spec.title).notes) notes.push(n);
   for (const s of spec.sections || []) {
     for (const n of checkHeadline(s.title).notes) notes.push(n);
   }
+
+  // Whether a stranger has been told who we are before we start using our own
+  // vocabulary. A problem rather than a note: "no introduction of Vikat and
+  // what we stand for and do" is not a matter of taste.
+  for (const p of checkIntroduction(spec).problems) problems.push(p);
 
   return { problems, notes };
 }
