@@ -92,6 +92,43 @@ export function isContainerRefusal(err) {
 }
 
 /**
+ * A server tool refused where the Messages API itself was not.
+ *
+ * The shape that prompted this, off a rep's screen:
+ *
+ *   403 {"error":{"type":"forbidden","message":"Request not allowed"}}
+ *
+ * Two things identify it. The status is 403, and the body is NOT the API's own
+ * envelope — Anthropic always answers `{"type":"error",…}`, so a refusal
+ * wearing any other shape was written by something else. A server tool runs
+ * OUTSIDE the Messages API: the request is validated and accepted, and the
+ * search executes somewhere with its own entitlements and its own error
+ * format. That is how /admin/upstream could return 200 on all eight rungs,
+ * including one carrying every tool at 364KB, while every real request failed:
+ * the ladder proves the tool is ACCEPTED, and never invokes it.
+ *
+ * Deliberately narrow. It fires only when web tools are actually attached, so
+ * a 403 from anything else is not mistaken for this and shed pointlessly, and
+ * the caller retries once — an unrecognised 403 must stay an error rather than
+ * become a loop.
+ */
+export function isServerToolRefusal(err, webToolsAttached) {
+  if (!webToolsAttached || err?.status !== 403) return false;
+
+  const message = String(err?.message || '');
+  const at = message.indexOf('{');
+  if (at === -1) return true;
+
+  try {
+    // Anthropic's own 403 is a permission error and means the KEY is not
+    // allowed, which shedding a tool cannot fix.
+    return JSON.parse(message.slice(at))?.type !== 'error';
+  } catch {
+    return true;
+  }
+}
+
+/**
  * The sources a turn actually read, for the assets rail.
  *
  * Pulled off the result blocks rather than out of the answer text: the model

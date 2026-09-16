@@ -31,7 +31,7 @@ import { systemBlocks } from './systemPrompt.js';
 import { refusedTools, noteRefusal, schemaCost } from './toolHealth.js';
 
 import { TOOL_DEFINITIONS, runTool } from './tools.js';
-import { webTools, sourcesFrom, isContainerRefusal } from './webTools.js';
+import { webTools, sourcesFrom, isContainerRefusal, isServerToolRefusal } from './webTools.js';
 import { authenticate } from './auth.js';
 import { resolveRole, canUseAssistant, canAdminister } from './roles.js';
 import { handleAdmin, handleAdminSummary } from './admin.js';
@@ -487,6 +487,22 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
           );
           return true;
         }
+        // A server tool refused at EXECUTION, which the request-level ladder
+        // above cannot see: it sheds schemas the API rejected, and this one
+        // was accepted. Same remedy as a container refusal, and the same
+        // reasoning — losing web research is a real loss and a far smaller one
+        // than the rep getting "Something went wrong".
+        //
+        // Guarded by restartWithoutWeb so it happens once. An unrecognised 403
+        // has to stay an error; a retry loop is the one outcome worse than a
+        // clear failure.
+        if (!restartWithoutWeb && isServerToolRefusal(err, webTools(cfg).some((t) => !dropped.has(t.name)))) {
+          for (const tool of webTools(cfg)) dropped.add(tool.name);
+          restartWithoutWeb = true;
+          console.error('[chat] a server tool was refused at execution; retrying without web research:', err?.message || err);
+          return true;
+        }
+
         if (isContainerRefusal(err)) {
           // The web tool and the custom tools cannot be continued together in
           // this request surface. Shedding the web tool is a real loss, and it

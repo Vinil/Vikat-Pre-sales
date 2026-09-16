@@ -16,6 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import worker from '../src/index.js';
 import { loadConfig } from '../src/config.js';
@@ -628,4 +629,58 @@ test('with WEB_RESEARCH off, no web tool reaches the request', async () => {
   const names = (stub.bodies[0].tools || []).map((t) => t.name);
   assert.ok(!names.includes('web_search'), names.join(', '));
   assert.ok(names.includes('find_collateral'), 'the internal tools are untouched');
+});
+
+// --- A server tool refused at execution -------------------------------------
+
+test('a 403 in a foreign shape, with web tools attached, sheds them', async () => {
+  // Off a rep's screen: 403 {"error":{"type":"forbidden","message":"Request
+  // not allowed"}}. /admin/upstream returned 200 on all eight rungs, including
+  // one carrying every tool at 364KB — because the ladder proves a tool is
+  // ACCEPTED and never invokes it. A server tool executes outside the Messages
+  // API, with its own entitlements and its own error format.
+  const { isServerToolRefusal } = await import('../src/webTools.js');
+  const err = {
+    status: 403,
+    message: '403 {"error":{"type":"forbidden","message":"Request not allowed"}}',
+  };
+
+  assert.equal(isServerToolRefusal(err, true), true);
+  assert.equal(isServerToolRefusal(err, false), false, 'nothing to shed means this is not the cause');
+});
+
+test("Anthropic's own 403 is not blamed on a tool", async () => {
+  // A permission error means the KEY is not allowed, and shedding a tool
+  // cannot fix that. Retrying without web research would lose the capability
+  // and still fail, which is strictly worse than reporting it.
+  const { isServerToolRefusal } = await import('../src/webTools.js');
+  assert.equal(
+    isServerToolRefusal(
+      { status: 403, message: '403 {"type":"error","error":{"type":"permission_error","message":"no"}}' },
+      true,
+    ),
+    false,
+  );
+});
+
+test('only a 403 counts, and a bodyless one still does', async () => {
+  const { isServerToolRefusal } = await import('../src/webTools.js');
+  assert.equal(isServerToolRefusal({ status: 429, message: 'slow down' }, true), false);
+  assert.equal(isServerToolRefusal({ status: 500, message: 'boom' }, true), false);
+  // A block page with no JSON at all is still not the API's envelope.
+  assert.equal(isServerToolRefusal({ status: 403, message: 'Forbidden' }, true), true);
+});
+
+test('the chat sheds web tools once, not in a loop', () => {
+  // The one outcome worse than a clear failure. If the 403 turns out not to be
+  // the web tool, the second attempt fails identically, and without the guard
+  // the ladder would keep finding tools to shed.
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const branch = src.slice(src.indexOf('isServerToolRefusal(err'));
+  assert.match(
+    src.slice(0, src.indexOf('isServerToolRefusal(err')).slice(-200),
+    /!restartWithoutWeb/,
+    'the shed must be guarded by the once-only flag',
+  );
+  assert.match(branch.slice(0, 400), /restartWithoutWeb = true/, 'and must set it');
 });
