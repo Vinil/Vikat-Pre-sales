@@ -220,6 +220,25 @@ function isContextOverflow(err) {
   return /prompt is too long|context.{0,20}(window|length)|too many tokens|maximum.{0,20}tokens/i.test(message);
 }
 
+/**
+ * Is this the API refusing the request because the ACCOUNT is out of credit?
+ *
+ * A rep asked for a two-pager and got "Something went wrong. Retry, and if it
+ * persists flag it in #sales-help." Neither half of that is true. Retrying
+ * sends the same request to the same empty account, and the channel it names
+ * cannot add credit — so the rep retries, waits, asks a colleague, and the
+ * assistant looks broken for everyone until somebody happens to read a log.
+ *
+ * Same shape as the context-overflow branch above and there for the same
+ * reason: a flat 400 that a retry cannot fix needs its own sentence, naming
+ * the one action that ends it.
+ */
+function isOutOfCredit(err) {
+  if (err?.status !== 400) return false;
+  const message = String(err?.message || '');
+  return /credit balance is too low|plans ?(&|and) ?billing|insufficient (credit|balance|funds)|purchase credits/i.test(message);
+}
+
 function isUnsupportedParameter(err, name) {
   if (err?.status !== 400) return false;
   const message = String(err?.message || '');
@@ -866,15 +885,23 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
         const isOverloaded = err?.status === 429 || err?.status === 529;
         const isTooLong = isContextOverflow(err);
+        const isBroke = isOutOfCredit(err);
         send('error', {
-          message: isTooLong
-            ? 'This conversation has grown past what the assistant can hold at once. ' +
-              'Start a new chat and paste just the part you need answered — nothing you have been told is lost, ' +
-              'the earlier conversation stays in your list.'
-            : isOverloaded
-              ? 'The assistant is busy right now. Try again in a moment.'
-              : `Something went wrong. Retry, and if it persists flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
-          code: isTooLong ? 'context_full' : isOverloaded ? 'upstream_busy' : 'upstream_error',
+          message: isBroke
+            ? 'The assistant\'s Anthropic account is out of credit, so nothing can run for anybody until it ' +
+              'is topped up. Retrying will not help. Whoever owns the billing needs to add credit in the ' +
+              `Anthropic Console under Plans & Billing — tell them in ${cfg.INTERNAL_HELP_CHANNEL} rather than ` +
+              'waiting it out.'
+            : isTooLong
+              ? 'This conversation has grown past what the assistant can hold at once. ' +
+                'Start a new chat and paste just the part you need answered — nothing you have been told is lost, ' +
+                'the earlier conversation stays in your list.'
+              : isOverloaded
+                ? 'The assistant is busy right now. Try again in a moment.'
+                : `Something went wrong. Retry, and if it persists flag it in ${cfg.INTERNAL_HELP_CHANNEL}.`,
+          code: isBroke
+            ? 'no_credit'
+            : isTooLong ? 'context_full' : isOverloaded ? 'upstream_busy' : 'upstream_error',
           // Admins get the upstream reason. Everyone here is a colleague, and
           // the alternative is what actually happened the first time this
           // broke: someone reading Worker logs to recover one line of text.

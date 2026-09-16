@@ -102,11 +102,33 @@ test('a conversation that outgrows the context says what to do about it', async 
   assert.ok(!/Retry, and if it persists/.test(text), 'advice that cannot work is worse than none');
 });
 
+test('an account out of credit says so, and does not say "retry"', async () => {
+  // What a rep actually got: "Something went wrong. Retry, and if it persists
+  // flag it in #sales-help." Both halves wrong. The retry sends the same
+  // request to the same empty account, and that channel cannot add credit — so
+  // the rep retries, waits, asks a colleague, and the assistant is down for
+  // everyone until somebody happens to read a Worker log.
+  const { status, text } = await chat(
+    apiRejecting(
+      'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+    ),
+    'write me a two-pager',
+  );
+
+  assert.equal(status, 200);
+  assert.match(text, /no_credit/);
+  assert.match(text, /out of credit/i);
+  assert.match(text, /Plans & Billing/, 'the one place that fixes it has to be named');
+  assert.ok(!/Retry, and if it persists/.test(text), 'advice that cannot work is worse than none');
+  assert.match(text, /nothing can run for anybody/i, 'and it is not just this rep');
+});
+
 test('an ordinary upstream failure still reads as one', async () => {
-  // The overflow branch must not swallow every other 400 — that would turn a
-  // real bug into misdirection.
+  // The overflow and billing branches must not swallow every other 400 — that
+  // would turn a real bug into misdirection.
   const { text } = await chat(apiRejecting('something else entirely went wrong'), 'hi');
   assert.match(text, /upstream_error/);
+  assert.doesNotMatch(text, /no_credit|context_full/);
 });
 
 // --- the research play -----------------------------------------------------
