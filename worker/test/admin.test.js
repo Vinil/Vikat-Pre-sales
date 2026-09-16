@@ -467,13 +467,35 @@ test('each rung actually carries the thing it is named for', () => {
   // and the probe reports "everything is accepted" about a request it never
   // made. A ladder that measures nothing is worse than no ladder, because it
   // is believed.
-  return probe(() => ok()).then(({ sent }) => {
-    assert.equal(sent.length, 6, 'the tools rung is run twice on purpose');
-    assert.ok(!sent[0].system && !sent[0].tools && !sent[0].thinking, 'plain must be plain');
-    assert.ok(sent[1].system && sent[1].system.length > 100, 'the system rung sends no prompt');
-    assert.ok(Array.isArray(sent[2].tools) && sent[2].tools.length > 1, 'the tools rung sends no tools');
-    assert.equal(sent[3].tools[0].name, 'web_search', 'the web rung sends no web tool');
-    assert.deepEqual(sent[4].thinking, { type: 'adaptive' }, 'the thinking rung sends no thinking');
+  return probe(() => ok()).then(({ sent, out }) => {
+    // By name rather than by index, so adding a rung does not renumber every
+    // assertion below it. The count is asserted as a floor for the same
+    // reason: the old `=== 6` was the thing that had to be edited, and an
+    // assertion nobody can add to is one people delete.
+    const by = Object.fromEntries(out.tried.map((t, i) => [t.step, sent[i]]));
+    assert.ok(sent.length >= 6, `only ${sent.length} rungs`);
+
+    assert.ok(!by.plain.system && !by.plain.tools && !by.plain.thinking, 'plain must be plain');
+    assert.ok(by.system.system && by.system.system.length > 100, 'the system rung sends no prompt');
+    assert.ok(Array.isArray(by.tools.tools) && by.tools.tools.length > 1, 'the tools rung sends no tools');
+    assert.equal(by['web tool'].tools[0].name, 'web_search', 'the web rung sends no web tool');
+    assert.deepEqual(by.thinking.thinking, { type: 'adaptive' }, 'the thinking rung sends no thinking');
+
+    // The rung the ladder was missing. `system` builds its prompt with an
+    // EMPTY knowledge block, so it was testing a prompt a fraction the size of
+    // the one a rep sends — and reporting that everything was fine while every
+    // real request was refused.
+    assert.ok(
+      by['system + knowledge'].system.length > by.system.system.length,
+      'the knowledge rung carries no more than the empty one, so it tests nothing new',
+    );
+
+    // And all of it at once: each part passing alone says nothing about the
+    // combination, because a size limit is reached by the total.
+    const all = by.everything;
+    assert.ok(all.system && all.tools && all.thinking, 'the everything rung is missing a part');
+    assert.ok(all.tools.some((t) => t.name === 'web_search'), 'and the web tool');
+
     // A rounding error, deliberately.
     assert.ok(sent.every((b) => b.max_tokens === 1));
   });
@@ -596,18 +618,21 @@ test('a slow tools rung is reported, and told apart from a warm-up', async () =>
     n += 1;
     return new Promise((r) => setTimeout(() => r(ok()), n === 3 ? 30 : 0));
   });
-  // The timing is faked by the clock, so assert on the SHAPE: six rungs, and
-  // the pair present for the comparison to be possible at all.
-  assert.deepEqual(
-    slowFirst.out.tried.map((t) => t.step),
-    ['plain', 'system', 'tools', 'web tool', 'thinking', 'tools again'],
-  );
+  // The timing is faked by the clock, so assert on the SHAPE: the pair has to
+  // be present for the comparison to be possible at all, and 'tools again'
+  // has to come last so it measures a warmed isolate rather than a cold one.
+  const steps = slowFirst.out.tried.map((t) => t.step);
+  assert.ok(steps.includes('tools'), steps.join(', '));
+  assert.equal(steps[steps.length - 1], 'tools again', 'the repeat must be last, or it measures nothing');
+  assert.ok(steps.indexOf('tools') < steps.indexOf('tools again'));
 });
 
 test('the tools rung is measured twice with the same payload', async () => {
   // Both must carry the real schemas, or the comparison is between two
   // different requests and means nothing.
-  const { sent } = await probe(() => ok());
-  assert.deepEqual(sent[2].tools, sent[5].tools);
-  assert.ok(sent[5].tools.length > 1);
+  const { sent, out } = await probe(() => ok());
+  const at = (name) => sent[out.tried.findIndex((t) => t.step === name)];
+
+  assert.deepEqual(at('tools').tools, at('tools again').tools);
+  assert.ok(at('tools again').tools.length > 1);
 });

@@ -17,7 +17,7 @@ import { ROLES, resolveRole, wouldLeaveNoAdmin } from './roles.js';
 import { documentStoreStatus, listLibraries, uploadDocument } from './documentStore.js';
 import { ingest, SUPPORTED_EXTENSIONS } from './ingest.js';
 import { POSITIONING_KEY, POSITIONING_MAX_CHARS } from './positioning.js';
-import { retrievalStatus } from './retrieve.js';
+import { retrievalStatus, retrieve } from './retrieve.js';
 import { collateralCount } from './collateral.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TOOL_DEFINITIONS } from './tools.js';
@@ -735,6 +735,31 @@ async function handleUpstream(request, ctx) {
     { name: 'tools', of: () => ({ tools: TOOL_DEFINITIONS }) },
     { name: 'web tool', of: () => ({ tools: webTools(cfg) }) },
     { name: 'thinking', of: () => ({ thinking: { type: 'adaptive' } }) },
+    // The rung the ladder was missing, and the reason it reported "every part
+    // of a real request is accepted" while every real request was refused.
+    //
+    // The `system` rung above builds the prompt with an EMPTY knowledge block.
+    // A real request carries the retrieved material, which is currently 67,000
+    // tokens — so the ladder was testing a prompt roughly a twentieth the size
+    // of the one that fails, pronouncing it fine, and sending whoever ran it
+    // to look at the conversation instead.
+    //
+    // An instrument that omits the largest part of what it is measuring is
+    // worse than no instrument: it produces a confident wrong answer.
+    { name: 'system + knowledge', of: async (c) => ({ system: buildSystemPrompt(cfg, await knowledgeFor(c), {}) }) },
+
+    // And all of it at once, which is the only shape a rep ever sends. Each
+    // part being accepted alone does not mean the combination is: a size or
+    // content limit is reached by the total, not by any one contributor.
+    {
+      name: 'everything',
+      of: async (c) => ({
+        system: buildSystemPrompt(cfg, await knowledgeFor(c), {}),
+        tools: [...TOOL_DEFINITIONS, ...webTools(cfg)],
+        thinking: { type: 'adaptive' },
+      }),
+    },
+
     // The same rung twice, deliberately.
     //
     // A tools request once measured 33 SECONDS against ~1s for every other
@@ -751,7 +776,7 @@ async function handleUpstream(request, ctx) {
 
   const tried = [];
   for (const step of steps) {
-    const r = await attempt(env.ANTHROPIC_API_KEY, cfg, step);
+    const r = await attempt(env.ANTHROPIC_API_KEY, cfg, step, ctx);
     tried.push(r);
     // Stop at the first refusal: everything after it would be measuring a
     // request that already contains a known-bad part.
@@ -773,11 +798,35 @@ async function handleUpstream(request, ctx) {
   );
 }
 
+/**
+ * The knowledge block a real request carries.
+ *
+ * Retrieved once and reused across rungs: two rungs need it, and retrieving
+ * twice would make the ladder measure retrieval as well as the API.
+ *
+ * A neutral query rather than an empty one. retrieve() selects material, so
+ * asking for nothing returns a block unlike anything a rep's request carries,
+ * which is the mistake one level down from the one this rung exists to fix.
+ */
+let knowledgeCache = null;
+async function knowledgeFor(ctx) {
+  if (knowledgeCache === null) {
+    knowledgeCache = await retrieve('What does SecSemantic do and how is it deployed?', {
+      sessionId: 'admin-upstream-probe',
+      user: { email: 'probe@vikat.ai', name: 'probe' },
+      storage: ctx.storage,
+      turnCount: 1,
+    });
+  }
+  return knowledgeCache;
+}
+
 /** One request carrying exactly one extra thing. */
-async function attempt(apiKey, cfg, step) {
+async function attempt(apiKey, cfg, step, ctx) {
   let extra;
   try {
-    extra = step.of();
+    // `await`, because the rungs that carry knowledge have to retrieve it.
+    extra = await step.of(ctx);
   } catch (err) {
     // A step that cannot even be BUILT is its own answer: the system prompt
     // throwing is a fault in this app, not a refusal from the API.
@@ -787,6 +836,10 @@ async function attempt(apiKey, cfg, step) {
   const started = Date.now();
   let res;
   let body;
+  // Carried out with the result: a refusal that depends on size is unreadable
+  // without it, and every rung claiming success tells you nothing about which
+  // one was big.
+  let payload = '';
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -795,7 +848,7 @@ async function attempt(apiKey, cfg, step) {
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
+      body: (payload = JSON.stringify({
         model: cfg.MODEL,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
@@ -803,7 +856,7 @@ async function attempt(apiKey, cfg, step) {
         // default if one ever needs to; without this every rung sends the same
         // bare request and the ladder measures nothing five times.
         ...extra,
-      }),
+      })),
     });
     body = await res.text();
   } catch (err) {
@@ -831,6 +884,7 @@ async function attempt(apiKey, cfg, step) {
     reached: true,
     status: res.status,
     ms: Date.now() - started,
+    requestKb: Math.round(payload.length / 102.4) / 10,
     fromApi: Boolean(parsed && (parsed.type === 'error' || parsed.type === 'message')),
     // Capped: a block page can be a whole HTML document, and a successful
     // body is of no interest beyond the fact that it arrived.
