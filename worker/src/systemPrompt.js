@@ -12,6 +12,7 @@
 
 import disclosure from './knowledge/disclosure.json' with { type: 'json' };
 import { ARTICULATION_BLOCK } from './articulation.js';
+import { EXEC_OUTREACH_BLOCK } from './execOutreach.js';
 
 /** The invariant part of the prompt. Must not interpolate per-request values. */
 /**
@@ -541,6 +542,8 @@ A well-briefed colleague who has read everything and remembers where it came fro
 No hype, no marketing language, no motivational filler. Do not open with "Great question". Do not congratulate the rep. Never pitch Vikat to the person you are talking to — they work here.
 
 ${ARTICULATION_BLOCK}
+
+${EXEC_OUTREACH_BLOCK}
 
 # What you may say
 

@@ -833,16 +833,33 @@ test('drawn slides obey the palette and the two typefaces', () => {
   }
 });
 
-test('every drawn slide still carries its disclosure label', () => {
+test('a warning stamp is on every slide, and a cleared deck carries none', () => {
   // Drawn by the renderer, not the model, so there is no layout that can omit
   // it — including the full-bleed quote slide, which has the least room.
-  const parts = pptxParts(renderPptx(drawnSpec(), META, FONTS.metrics));
-  // Eyebrow-cased, as the renderer draws it.
-  const label = eyebrowCase(DISCLOSURE_LABELS.external_ok);
+  //
+  // The second half is the correction. This test used to assert that an
+  // external_ok deck stamped "CLEARED FOR CUSTOMERS" on every slide, and it
+  // passed while a PDF went to a CISO with that line in mono capitals on all
+  // three pages. The stamp exists to warn a REP holding something they must
+  // not send; a cleared document has nothing to warn anyone about, so on the
+  // one document that actually reaches a customer the label is pure leakage,
+  // announcing an internal review process to the person it was cleared for.
+  const slidesOf = (spec) =>
+    Object.entries(pptxParts(renderPptx(spec, META, FONTS.metrics)))
+      .filter(([name]) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
 
-  for (const [name, xml] of Object.entries(parts)) {
-    if (!/^ppt\/slides\/slide\d+\.xml$/.test(name)) continue;
-    assert.ok(xml.includes(label), `${name} has no disclosure label`);
+  for (const [name, xml] of slidesOf(drawnSpec({ disclosure: 'internal_only' }))) {
+    assert.ok(
+      xml.includes(eyebrowCase(DISCLOSURE_LABELS.internal_only)),
+      `${name} has no warning stamp, and it is the one that needs one`,
+    );
+  }
+
+  for (const [name, xml] of slidesOf(drawnSpec({ disclosure: 'external_ok' }))) {
+    assert.ok(
+      !/CLEARED FOR CUSTOMERS/i.test(xml),
+      `${name} stamps internal clearance language on a deck going to a customer`,
+    );
   }
 });
 
@@ -942,7 +959,7 @@ test('a pdf is never refused for being prose', () => {
 
 // --- DOCX -----------------------------------------------------------------
 
-const docxSpec = (content) => {
+const docxSpec = (content, overrides = {}) => {
   const r = normaliseSpec({
     format: 'docx',
     title: 'SecSemantic for agriculture',
@@ -967,6 +984,10 @@ const docxSpec = (content) => {
         '',
         '## quote | A harvest does not wait for your patch window.',
       ].join('\n'),
+    // Second argument, so every existing positional call is untouched. The
+    // disclosure is the one field a test needs to vary now that it decides
+    // whether anything is stamped at all.
+    ...overrides,
   });
   assert.ok(r.ok, r.error);
   return r.spec;
@@ -1024,9 +1045,15 @@ test('the disclosure label is in the footer, so it repeats on every page', () =>
   // Drawn by the renderer into a footer part rather than written by the model
   // at the end of the text: Word repeats a footer on every page by itself,
   // which is the same guarantee the deck gets by drawing it on each slide.
-  const parts = docxParts(renderDocx(docxSpec(), META));
-  assert.ok(parts['word/footer1.xml'].includes(eyebrowCase(DISCLOSURE_LABELS.external_ok)));
+  const parts = docxParts(renderDocx(docxSpec(null, { disclosure: 'needs_approval' }), META));
+  assert.ok(parts['word/footer1.xml'].includes(eyebrowCase(DISCLOSURE_LABELS.needs_approval)));
   assert.match(parts['word/document.xml'], /<w:footerReference w:type="default"/, 'and the body must reference it');
+
+  // And a cleared document does NOT fall back to stamping "Internal only",
+  // which is what `DISCLOSURE_LABELS[d] || DISCLOSURE_LABELS.internal_only`
+  // did the moment external_ok stopped returning a string.
+  const cleared = docxParts(renderDocx(docxSpec(null, { disclosure: 'external_ok' }), META));
+  assert.doesNotMatch(cleared['word/footer1.xml'], /INTERNAL ONLY|CLEARED FOR CUSTOMERS/i);
 });
 
 test('a docx of pure prose is allowed', () => {

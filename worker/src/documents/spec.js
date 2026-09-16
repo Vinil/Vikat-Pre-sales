@@ -675,6 +675,27 @@ export const DISCLOSURE_LABELS = {
   needs_approval: 'Draft: needs approval before it leaves Vikat',
 };
 
+/**
+ * What a document PRINTS on every page, which is not the same as what its
+ * disclosure is called.
+ *
+ * A cleared document prints nothing. The stamp exists to warn a rep holding
+ * something they must not send; a cleared document has nothing to warn anybody
+ * about, so the label only announces an internal review process to the very
+ * customer it was cleared for. "CLEARED FOR CUSTOMERS" was set in mono capitals
+ * on all three pages of a PDF that went to a CISO.
+ *
+ * Kept as its own function rather than by emptying DISCLOSURE_LABELS, because
+ * an empty string there is falsy and this codebase reads that map with `?` and
+ * `||` in five places: normaliseSpec would have silently downgraded every
+ * cleared document to internal_only, and docx.js would have stamped "Internal
+ * only" on it. The label still names the clearance in the REPORT the rep
+ * reads, which is internal and is where it belongs.
+ */
+export function pageStamp(disclosure) {
+  return disclosure === 'external_ok' ? '' : DISCLOSURE_LABELS[disclosure] || DISCLOSURE_LABELS.internal_only;
+}
+
 /** A short filename that sorts by date and says what it is. */
 export function fileNameFor(spec, isoDate) {
   const slug =

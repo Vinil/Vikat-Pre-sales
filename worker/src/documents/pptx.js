@@ -20,7 +20,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { markMedia } from './marks.js';
 
 import { COLOR, INK, ON_NAVY, FONT, GRADIENT, WORDMARK, TAGLINE, copyrightLine, eyebrowCase } from '../brand.js';
-import { DISCLOSURE_LABELS } from './spec.js';
+import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
 import { wrap } from './measure.js';
 import * as part from './ooxml.js';
 import {
@@ -235,7 +235,7 @@ function wordmark(x, y, onDark, w = 1.9) {
  * footer is how a reader knows who is claiming what they are reading.
  */
 function footer(spec, onDark, pageLabel, tag = WORDMARK_TAG) {
-  const label = DISCLOSURE_LABELS[spec.disclosure];
+  const label = pageStamp(spec.disclosure);
   const color = onDark ? ON_NAVY.muted : INK.muted;
   const faint = onDark ? ON_NAVY.muted : INK.muted;
 

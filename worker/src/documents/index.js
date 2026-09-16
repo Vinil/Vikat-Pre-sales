@@ -14,6 +14,7 @@ import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS } from './spec.js';
 import { renderPptx } from './pptx.js';
 import { inspectPptx, inspectionSummary } from './inspect.js';
 import { checkGuidelines } from './guidelines.js';
+import { checkExecOutreach, recapShare, outreachText } from '../execOutreach.js';
 import { renderPdf } from './pdf.js';
 import { renderDocx } from './docx.js';
 import { deliverDocument } from '../documentStore.js';
@@ -56,6 +57,10 @@ export async function createDocument(input, ctx) {
   // Look at what was built before handing it over. Reporting, never
   // rewriting: a deck a shade under a threshold is still a deck, and refusing
   // it would leave the rep with nothing five minutes before a call.
+  //
+  // GEOMETRY only. inspectPptx unzips a file and measures shapes, which it can
+  // do for one format; everything that reads TEXT has to run for all three,
+  // and that distinction is the whole reason the checks below moved.
   const rendered = spec.format === 'pptx' ? inspectPptx(bytes, spec) : { problems: [], notes: [] };
 
   // The brand guidelines, on every format rather than only the one that can be
@@ -63,10 +68,46 @@ export async function createDocument(input, ctx) {
   // deck is, and inspectPptx cannot see a PDF at all.
   const brand = checkGuidelines(spec);
 
+  // The standing rules for exec outreach, on EVERY format.
+  //
+  // This is the hole the McLane PDF went through. The truncation check added
+  // after a deck shipped with cut text lived inside inspectPptx, so a pdf got
+  // `{ problems: [], notes: [] }` and nothing else — and the next document to
+  // reach a customer was a pdf with four sentences cut mid-word, a retired
+  // phrase, an unsourced 7.5x, and an internal clearance stamp on all three
+  // pages. The rep's report came back clean, because for a pdf there was
+  // nothing to come back.
+  //
+  // A text rule has no business knowing which renderer ran.
+  const outreach = checkExecOutreach({ ...spec, preparedBy });
+
+  // Recap, measured on the OPENING rather than the whole document.
+  //
+  // The review's sharpest point was about where recap sits, not how much of it
+  // there is: "page 1 is half recap", and "he knows McLane has 80 DCs". Later
+  // sections legitimately name the customer on every line — that is what
+  // "priced in their business" reads like. Averaged over the whole document
+  // the opening's 5-in-8 disappeared into 8-in-25 and the note never fired.
+  const opening = spec.sections[0];
+  const recap = opening
+    ? recapShare(
+        [opening.title, opening.body, ...(opening.points || [])].filter(Boolean).join('\n'),
+        spec.audience,
+      )
+    : null;
+
+  if (recap && recap.share > 0.5 && recap.sentences >= 4) {
+    outreach.notes.push(
+      `${recap.about} of the opening section's ${recap.sentences} sentences are about ${spec.audience}. ` +
+        'They already know their own business. Recap buys attention for one line and spends it after ' +
+        'that: pivot on the first, and spend the rest on what they do not already have.',
+    );
+  }
+
   const inspection = {
     ...rendered,
-    problems: [...rendered.problems, ...brand.problems],
-    notes: [...rendered.notes, ...brand.notes],
+    problems: [...rendered.problems, ...brand.problems, ...outreach.problems],
+    notes: [...rendered.notes, ...brand.notes, ...outreach.notes],
   };
 
   const fileName = fileNameFor(spec, isoDate);

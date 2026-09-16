@@ -26,7 +26,7 @@ import { zipSync, strToU8 } from 'fflate';
 
 import { COLOR, INK, ON_NAVY, FONT, eyebrowCase } from '../brand.js';
 import { xml } from './ooxml.js';
-import { DISCLOSURE_LABELS } from './spec.js';
+import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
 
 const DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 
@@ -375,7 +375,7 @@ function cover(spec, meta) {
  * each slide, and the reason the model cannot produce a document without one.
  */
 function footerXml(spec, meta) {
-  const label = eyebrowCase(DISCLOSURE_LABELS[spec.disclosure] || DISCLOSURE_LABELS.internal_only);
+  const label = eyebrowCase(pageStamp(spec.disclosure));
   return `${DECL}
 <w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
 ${para(

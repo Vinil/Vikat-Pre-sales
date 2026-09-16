@@ -14,7 +14,7 @@ import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
 import { COLOR, INK, ON_NAVY, GRADIENT, WORDMARK, TAGLINE, copyrightLine, eyebrowCase } from '../brand.js';
-import { DISCLOSURE_LABELS } from './spec.js';
+import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
 import { wrap } from './measure.js';
 
 /** A4 in points. */
@@ -165,7 +165,7 @@ class Flow {
 /** The standing footer, applied to every page once the flow is complete. */
 function drawFooters(flow) {
   const { spec, fonts, meta } = flow;
-  const label = eyebrowCase(DISCLOSURE_LABELS[spec.disclosure]);
+  const label = eyebrowCase(pageStamp(spec.disclosure));
   const total = flow.pages.length;
 
   flow.pages.forEach((page, i) => {
