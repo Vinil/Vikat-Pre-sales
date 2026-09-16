@@ -125,14 +125,17 @@ test('content inside the limits is untouched', () => {
 
 test('the section and point counts are capped', () => {
   const many = Array.from({ length: 40 }, (_, i) => ({ title: `Section ${i}`, points: Array(20).fill('point') }));
-  // One drawn section among them, because the prose-only rule now covers every
+  // Drawn sections among them, because the prose-only rule now covers every
   // format and would otherwise refuse this fixture before any cap was reached.
   // This test is about the caps; it should fail for a cap and nothing else.
-  // Index 1: inside the section cap, which slices to LIMITS.sections BEFORE
-  // the prose-only check, so a drawn section at index 39 is discarded and the
-  // fixture is refused as prose. And not index 0, because the assertions below
-  // read sections[0].points and a stat carries none.
-  many[1] = { layout: 'stat', value: '265', caption: 'attacks. Source: ISAC.', title: '', points: [] };
+  // Inside the section cap, which slices to LIMITS.sections BEFORE the
+  // prose-only check, so a drawn section at index 39 is discarded and the
+  // fixture is refused as prose. And never index 0, because the assertions
+  // below read sections[0].points and a stat carries none. One of them has to
+  // land in the first two, and there have to be ceil(12 / 3) of them.
+  for (const i of [1, 4, 7, 10]) {
+    many[i] = { layout: 'stat', value: '265', caption: 'attacks. Source: ISAC.', title: '', points: [] };
+  }
   const s = spec({ format: 'pdf', sections: many });
   assert.equal(s.sections.length, LIMITS.sections);
   assert.equal(s.sections[0].points.length, LIMITS.points);
@@ -317,9 +320,12 @@ test('a long PDF flows onto more pages rather than off the first one', async () 
     body: 'A paragraph of body copy that takes several lines on an A4 page once wrapped at the column width. '.repeat(3),
     points: ['one', 'two', 'three'],
   }));
-  // One drawn section, so the prose-only rule does not refuse this fixture
-  // before it can measure what it is actually about: flowing onto more pages.
-  long[0] = { layout: 'stat', value: '265', caption: 'attacks. Source: ISAC.', title: '', points: [] };
+  // Drawn sections, so the prose-only rule does not refuse this fixture before
+  // it can measure what it is actually about: flowing onto more pages. One in
+  // the opening two, and ceil(10 / 3) of them in total.
+  for (const i of [0, 3, 6, 9]) {
+    long[i] = { layout: 'stat', value: '265', caption: 'attacks. Source: ISAC.', title: '', points: [] };
+  }
 
   const one = await PDFDocument.load(await renderPdf(spec({ format: 'pdf' }), META, FONTS));
   const many = await PDFDocument.load(await renderPdf(spec({ format: 'pdf', sections: long }), META, FONTS));
@@ -971,20 +977,73 @@ test('a deck of nothing but prose is refused, not quietly built', () => {
   const r = normaliseSpec({ format: 'pptx', title: 'SecSemantic for agriculture', content: proseDeck(5) });
 
   assert.equal(r.ok, false);
-  assert.match(r.error, /not one drawn figure/);
+  assert.match(r.error, /drawn figure/);
   // The message has to be actionable, or the model cannot fix it.
   for (const layout of ['stat', 'bars', 'chain', 'timeline', 'split', 'quote']) {
     assert.match(r.error, new RegExp(layout), `the refusal must name ${layout}`);
   }
 });
 
-test('one drawn slide is enough to satisfy it', () => {
-  // The rule is against a deck that draws NOTHING, not a quota. A quota would
-  // push the model to decorate slides whose content has no shape.
-  const r = normaliseSpec({
+test('one drawn slide at the back is NOT enough', () => {
+  // This asserted the opposite: "the rule is against a deck that draws
+  // NOTHING, not a quota. A quota would push the model to decorate slides
+  // whose content has no shape."
+  //
+  // The second sentence is still true and is why the quota is a third rather
+  // than a half. The first was wrong in practice: a floor is what the model
+  // builds to. A brief came back with one tiles figure on page 2 and every
+  // other section prose, which satisfied "at least one" and was still the wall
+  // of text the rule exists to stop — and page one, the page that decides
+  // whether page two is read, was unbroken paragraphs.
+  const backOnly = normaliseSpec({
     format: 'pptx',
     title: 'T',
     content: `${proseDeck(5)}\n\n## quote | The one line to end on.`,
+  });
+  assert.equal(backOnly.ok, false);
+  assert.match(backOnly.error, /drawn figure/);
+
+  // And the same deck with the quota met, but every figure at the back, is
+  // still refused — for the position rather than the count. Four prose
+  // sections and two drawn ones is ceil(6 / 3), so the ratio has nothing to
+  // say about it and only the opening rule is left to catch it.
+  const allAtTheBack = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content: [
+      proseDeck(4),
+      '## paradigm | The question has moved | Ranked by severity | Ranked by consequence',
+      '## quote | The one line to end on.',
+    ].join('\n\n'),
+  });
+  assert.equal(allAtTheBack.ok, false);
+  assert.match(allAtTheBack.error, /opening is unbroken prose/);
+
+  // A third, with one of them up front, passes.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content: [
+      '## stat | 79% | of enterprises have zero agent visibility. Source: Gartner.',
+      proseDeck(3),
+      '## paradigm | The question has moved | Ranked by severity | Ranked by consequence',
+      '## quote | The one line to end on.',
+    ].join('\n\n'),
+  });
+  assert.ok(r.ok, r.error);
+});
+
+test('a figure early is not a quota on every section', () => {
+  // The other half: the rule must not push the model to decorate content that
+  // has no shape. Six sections need two figures, not six.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: [
+      '## stat | 79% | of enterprises have zero agent visibility. Source: Gartner.',
+      proseDeck(4),
+      '## quote | The one line to end on.',
+    ].join('\n\n'),
   });
   assert.ok(r.ok, r.error);
 });
@@ -1003,7 +1062,7 @@ test('a pdf of nothing but prose is refused too', () => {
   // nothing required the renderer to draw what it was newly able to draw.
   const r = normaliseSpec({ format: 'pdf', title: 'T', content: proseDeck(8) });
   assert.equal(r.ok, false);
-  assert.match(r.error, /not one drawn figure/);
+  assert.match(r.error, /drawn figure/);
   assert.match(r.error, /stat, bars, tiles/, 'the refusal names what to reach for');
 });
 
@@ -1130,7 +1189,12 @@ test('a docx of pure prose is refused on the same terms', () => {
   const drawn = normaliseSpec({
     format: 'docx',
     title: 'T',
-    content: `${proseDeck(7)}\n\n## stat | 580,000 | cases a year. Source: AAA.`,
+    content: [
+      '## stat | 580,000 | cases a year. Source: AAA.',
+      proseDeck(5),
+      '## paradigm | The question has moved | Ranked by severity | Ranked by consequence',
+      '## quote | The one line to end on.',
+    ].join('\n\n'),
   });
   assert.ok(drawn.ok, drawn.error);
   assert.ok(renderDocx(drawn.spec, META).length > 0, 'and it still renders');
@@ -1391,11 +1455,16 @@ test('the cover carries the lockup ARTWORK, not retyped letterforms', async () =
 test('the mark is embedded once, however many pages', async () => {
   // pdf-lib embeds by document, not by page. Embedding inside drawCover would
   // put the same artwork in the file twice.
-  const long = Array.from({ length: 8 }, (_, i) => `## Section ${i}\nA paragraph.`).join('\n\n');
+  const long = Array.from({ length: 6 }, (_, i) => `## Section ${i}\nA paragraph.`).join('\n\n');
   const r = normaliseSpec({
     format: 'pdf',
     title: 'T',
-    content: `${long}\n\n## stat | 580,000 | cases a year. Source: AAA.`,
+    content: [
+      '## stat | 580,000 | cases a year. Source: AAA.',
+      long,
+      '## paradigm | The question has moved | Ranked by severity | Ranked by consequence',
+      '## quote | The one line to end on.',
+    ].join('\n\n'),
   });
   assert.ok(r.ok, r.error);
 

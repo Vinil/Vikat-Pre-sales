@@ -131,11 +131,26 @@ export function normaliseSpec(input) {
   // A pdf gets the same threshold as a deck. A short document is legitimately
   // prose — a two-paragraph note is a note — and past four sections a document
   // with nothing drawn in it is a wall of text whatever its extension.
-  if (sections.length >= LIMITS.proseOnlyDeck && !sections.some((s) => s.layout)) {
+  // A RATIO, and the opening has to carry one.
+  //
+  // "At least one figure" was a floor, and a floor is what the model builds
+  // to: a brief came back with a single tiles figure on page 2 and every other
+  // section pure prose, which satisfied the rule and was still the wall of
+  // text the rule exists to stop. Page one — the page that decides whether
+  // page two is read — was unbroken paragraphs.
+  //
+  // A third, because half forces a figure onto content that is genuinely
+  // argument and teaches the model to draw things that are not shapes. A third
+  // of eight sections is three, which is a document somebody looks at.
+  const drawnCount = sections.filter((s) => s.layout).length;
+  const needed = Math.max(1, Math.ceil(sections.length / 3));
+
+  if (sections.length >= LIMITS.proseOnlyDeck && drawnCount < needed) {
     return {
       ok: false,
       error:
-        `${sections.length} sections and not one drawn figure. That is a wall of text, whether it ` +
+        `${sections.length} sections and only ${drawnCount} drawn figure(s); this needs at least ` +
+        `${needed}. That is a wall of text, whether it ` +
         'is a deck or a two-pager. Rebuild it using stat, bars, tiles, table, kpi, timeline, ' +
         'paradigm, flow, chain, split or quote for the content that already has that shape: a ' +
         'figure, a comparison, a set, a sequence, two states, or the one line to end on. Keep ' +
@@ -168,6 +183,18 @@ export function normaliseSpec(input) {
           .map((o) => `"${o.text.slice(0, 60)}…" is ${o.length} characters and the limit is ${o.max}`)
           .join('; ') +
         '.',
+    };
+  }
+
+  // The FIRST two sections, specifically. A document whose figures are all at
+  // the back is a document nobody reaches the back of.
+  if (sections.length >= LIMITS.proseOnlyDeck && !sections.slice(0, 2).some((s) => s.layout)) {
+    return {
+      ok: false,
+      error:
+        'The opening is unbroken prose. Page one decides whether page two is read, so one of the ' +
+        'first two sections has to be a drawn figure: the number that frames the problem, or the ' +
+        'from/to that states the change.',
     };
   }
 
