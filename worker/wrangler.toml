@@ -78,6 +78,21 @@ MAX_CHARS_PER_MESSAGE = "8000"
 RATE_LIMIT_REQUESTS = "120"
 RATE_LIMIT_WINDOW_SECONDS = "600"
 
+# --- Web research ---------------------------------------------------------
+# "on" | "off". Off removes the server-side search tool from every request and
+# tells the model it has none, so nothing tries to use it.
+#
+# Declared here rather than left to the default in src/config.js, because the
+# default made it INVISIBLE. /admin/upstream's own diagnosis text says "set
+# WEB_RESEARCH=off to run without it", and somebody following that instruction
+# went to the dashboard, found no such variable, and had nowhere to go. A
+# switch that only exists in code is not a switch an operator has.
+#
+# Changing it in the Cloudflare dashboard takes effect immediately and is
+# wiped by the next deploy, which replaces [vars] with this block. For
+# anything beyond a five-minute test, change it here.
+WEB_RESEARCH = "on"
+
 # --- Authentication -------------------------------------------------------
 AUTH_MODE = "cf-access"
 # From Zero Trust > Settings > Custom Pages, or your team domain.

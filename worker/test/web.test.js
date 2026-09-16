@@ -684,3 +684,14 @@ test('the chat sheds web tools once, not in a loop', () => {
   );
   assert.match(branch.slice(0, 400), /restartWithoutWeb = true/, 'and must set it');
 });
+
+test('WEB_RESEARCH is declared in wrangler.toml, not only in code', () => {
+  // The diagnosis in /admin/upstream tells an operator to "set
+  // WEB_RESEARCH=off". It was never declared in wrangler.toml, so it took the
+  // default from src/config.js and appeared nowhere in the Cloudflare
+  // dashboard — somebody followed that instruction, found no such variable,
+  // and was stuck. A switch that exists only in code is not a switch an
+  // operator has.
+  const toml = fs.readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.match(toml, /^WEB_RESEARCH\s*=\s*"(on|off)"/m, 'the switch must be visible where vars are set');
+});
