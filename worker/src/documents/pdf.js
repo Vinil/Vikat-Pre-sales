@@ -353,6 +353,8 @@ export function drawSection(flow, section) {
 
   // Keep a heading with at least the first lines of what follows: a section
   // title alone at the foot of a page is the classic flowed-layout failure.
+  // The 8 is the gap AFTER the eyebrow, which the drawing spends and this used
+  // to leave out.
   const headingHeight =
     (section.eyebrow ? SIZE.eyebrow * 1.4 + 8 : 0) +
     (section.title
@@ -373,10 +375,21 @@ export function drawSection(flow, section) {
   // renderer a new kind of content and not telling this line about it.
   const figureHeight = section.layout ? figureSpace(section, flow, { fonts, column: COLUMN }) : 0;
 
-  // The rule is part of the heading, so it is reserved with it: a gradient
-  // stranded at the foot of a page with its section overleaf is worse than no
-  // rule at all.
-  flow.reserve(headingHeight + RULE.height + RULE.gap + (figureHeight || SIZE.body * LEADING.body * 2));
+  // Reserve EXACTLY what is about to be spent.
+  //
+  // This counted one RULE.gap and the drawing below spends two, one either
+  // side of the rule, and it left out the 8 points after the eyebrow. Eighteen
+  // points of disagreement between the reservation and the drawing — and
+  // drawFigure carries its own page break for a figure that does not fit, so
+  // the two accountings landed on opposite sides of the page edge: the heading
+  // stayed, the figure moved, and "The agentic threat" sat alone at the foot
+  // of page one with 250 points of cream under it.
+  //
+  // Both numbers come from the same constants now. A block reserved by one
+  // arithmetic and drawn by another is a page break waiting for the paragraph
+  // that lands on the boundary.
+  const openerHeight = RULE.gap + RULE.height + RULE.gap;
+  flow.reserve(openerHeight + headingHeight + (figureHeight || SIZE.body * LEADING.body * 2));
 
   // A gradient rule opening every section.
   //
@@ -425,7 +438,9 @@ export function drawSection(flow, section) {
   // values underneath says everything twice, which is the defect the deck
   // renderer had — a chain slide whose headline was its own step list over a
   // diagram of the same steps.
-  const drew = section.layout ? drawFigure(flow, section, { rgb, fonts, column: COLUMN, left: M.left }) : false;
+  const drew = section.layout
+    ? drawFigure(flow, section, { rgb, fonts, column: COLUMN, left: M.left }, { reserved: true })
+    : false;
 
   if (section.body) {
     // Widow control is per-paragraph rather than per-line: if the whole

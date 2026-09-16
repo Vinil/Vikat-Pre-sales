@@ -315,3 +315,75 @@ test('a standard is named, not cited', () => {
     ['40000'],
   );
 });
+
+// --- What the checker can actually see --------------------------------------
+
+test('the text a drawn layout puts on the page is checked too', () => {
+  // Every rule in this module ran over title, body and points, and a drawn
+  // layout's own fields are none of those. So a brief to the CISO of the
+  // American Arbitration Association went out with four cut sentences in its
+  // tiles and its split, and truncatedTails came back clean.
+  //
+  // spec.js builds each layout's prose fallback BEFORE normalisation and
+  // cleans the layout fields separately, so the two diverge the moment a cap
+  // bites: the point said "Case context ingested - docket, parties, stage"
+  // while the page said "Case context ingested -". The checker was reading the
+  // copy nobody sees.
+  const spec = clean({
+    sections: [
+      {
+        layout: 'tiles',
+        title: '',
+        body: '',
+        points: ['80%: of tactical work was autonomous'],
+        tiles: [
+          { value: '80%', caption: 'of tactical work was autonomous. Anthropic GTG-1002,…' },
+          { value: '27%', caption: 'of enterprises have a strategy' },
+        ],
+      },
+    ],
+  });
+
+  const { problems } = checkExecOutreach(spec);
+  assert.ok(
+    problems.some((p) => /end mid-sentence/.test(p)),
+    problems.join('\n'),
+  );
+});
+
+test('a source the vendor list has never heard of still counts', () => {
+  // SOURCE_NEARBY is a list of vendors, and a list of vendors is never
+  // finished. It had Gartner and not Anthropic, Palo Alto or HBR — so on the
+  // same brief it passed "Gartner, 2025" and flagged the other three tiles as
+  // figures nobody had sourced. A checker that is wrong about a correctly
+  // sourced number gets the whole report skipped, and the genuinely unsourced
+  // one goes with it.
+  for (const line of [
+    '80%: of tactical work was autonomous. Anthropic GTG-1002, November 2025.',
+    '27%: of enterprises have an advanced AI security strategy. Palo Alto and HBR, 2026',
+    '31%: of filings were electronic. American Arbitration Association, 2025',
+  ]) {
+    assert.deepEqual(unsourcedFigures(line), [], line);
+  }
+
+  // And it stays narrow: a year in a sentence is not somebody vouching for a
+  // number, or "In August 2025" becomes a way to launder one.
+  assert.deepEqual(unsourcedFigures('In August 2025, McLane opened a hub and cut 40000 cases.'), ['40000']);
+  assert.deepEqual(unsourcedFigures('Between 1999 and 2026 the sector consolidated to 12000 firms.'), ['12000']);
+  assert.deepEqual(unsourcedFigures('7.5x: projected risk reduction from reordering the budget.'), ['7.5x']);
+});
+
+test('a number welded to a name by a hyphen is an identifier, not a statistic', () => {
+  // "1002 carries an argument and no source" — the checker reading GTG-1002 as
+  // a figure, on the one tile that named its source most precisely.
+  // Deliberately without a year anywhere on the line: with one, cited() skips
+  // the line and this passes whether or not the identifier rule exists.
+  assert.deepEqual(unsourcedFigures('Tracked as GTG-1002 under the agentic framework.'), []);
+  assert.deepEqual(unsourcedFigures('Tracked as CVE-2024-3400 and SP-800-53 in the register.'), []);
+
+  // And an identifier does not launder the figures beside it.
+  assert.deepEqual(
+    unsourcedFigures('CVE-2024-3400 exposed 40000 records across the estate.'),
+    ['40000'],
+  );
+});

@@ -57,13 +57,29 @@ const F = {
  * back to prose and loses formatting rather than content. That is what let
  * `table` ship here unfinished without any document losing its rows.
  */
-export function drawFigure(flow, section, deps) {
+export function drawFigure(flow, section, deps, { reserved = false } = {}) {
   const draw = FIGURES[section.layout];
   if (!draw) return false;
 
-  const height = FIGURE_HEIGHT[section.layout](section, flow, deps);
-  // A figure split across a page break is worse than a figure lower down.
-  if (height > flow.remaining) flow.newPage();
+  // A figure split across a page break is worse than a figure lower down —
+  // unless the CALLER has already made room, in which case this check is a
+  // second opinion on a decision that was already taken, and second opinions
+  // at a page boundary are how a heading and its figure end up on different
+  // pages.
+  //
+  // drawSection reserves openerHeight + headingHeight + figureSpace(), spends
+  // exactly that, and arrives here with precisely figureSpace() left. The two
+  // numbers are equal, so `>` decides on a floating-point remainder: 103.90
+  // against 103.90 broke the page, and "The agentic threat" sat alone at the
+  // foot of page one with its figure overleaf.
+  //
+  // One place decides a section's page breaks. What keeps that safe is the
+  // estimate being honest — every figure is asserted to claim at least the
+  // space it takes — and not a redundant check that disagrees at the edge.
+  if (!reserved) {
+    const height = FIGURE_HEIGHT[section.layout](section, flow, deps);
+    if (height > flow.remaining) flow.newPage();
+  }
 
   draw(flow, section, deps);
   return true;
@@ -634,7 +650,29 @@ const FIGURE_HEIGHT = {
     return Math.max(46, rows * F.cell * 1.4 + 26) + 14;
   },
   timeline: () => 62,
-  tiles: (s) => Math.ceil(Math.min(s.tiles.length, 6) / 2) * 76 + 6,
+  // Measured, not guessed at 76 a row.
+  //
+  // A row is 44 points of furniture plus as many lines as the caption wraps
+  // to, and the estimate ignored the caption entirely. On a four-tile figure
+  // with two-line captions it was 18 points short — enough for drawSection to
+  // reserve, draw the heading, and then have drawFigure disagree and break the
+  // page, leaving "The agentic threat" alone at the foot of page one with its
+  // figure on page two.
+  tiles: (s, flow, { fonts, column }) => {
+    const cellW = (column - 16) / 2;
+    const tiles = s.tiles.slice(0, 6);
+    let total = 0;
+
+    for (let i = 0; i < tiles.length; i += 2) {
+      const lines = Math.max(
+        ...tiles.slice(i, i + 2).map((t) =>
+          flow.wrapText(t.caption, { metrics: fonts.metrics.body, size: F.label + 1, width: cellW - 24 }).length),
+      );
+      total += lines * (F.label + 1) * 1.4 + 44 + 16;
+    }
+
+    return total + 6;
+  },
   bars: (s) => Math.min(s.bars.length, 6) * 30 + 8,
   quote: (s, flow, { fonts, column }) =>
     flow.wrapText(s.line, { metrics: fonts.metrics.display, size: F.value + 4, width: column - 76 }).length

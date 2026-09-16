@@ -13,12 +13,12 @@ import zlib from 'node:zlib';
 import { unzipSync, strFromU8 } from 'fflate';
 import { PDFDocument, PDFName } from 'pdf-lib';
 import { wrap as wrapText } from '../src/documents/measure.js';
-import { figureSpace } from '../src/documents/pdfFigures.js';
+import { figureSpace, drawFigure } from '../src/documents/pdfFigures.js';
 import { CREAM } from '../src/documents/house.js';
 
 import { normaliseSpec, parseSections, parseLayout, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
-import { renderPdf, drawCover, drawClose } from '../src/documents/pdf.js';
+import { renderPdf, drawCover, drawClose, drawSection } from '../src/documents/pdf.js';
 import { renderDocx } from '../src/documents/docx.js';
 import { createDocument } from '../src/documents/index.js';
 import { loadFonts } from '../src/documents/fonts.js';
@@ -1370,7 +1370,7 @@ test('a layout pdf.js cannot draw still reaches the page as words', async () => 
   const r = normaliseSpec({
     format: 'pdf',
     title: 'T',
-    content: '## kpi | The scoreboard | Lines held: 99.2% | Alerts closed: within 4 hours',
+    content: '## kpi | The scoreboard | Lines held: 99.2% | MTTD: within 4 hours',
   });
   assert.ok(r.ok, r.error);
   assert.equal(r.spec.sections[0].layout, 'kpi');
@@ -1775,4 +1775,209 @@ test('the sign-off sits at the foot of the page, wherever the content stopped', 
   const low = run(140);
   assert.equal(low.pages, 1, 'no room left, so a page');
   assert.ok(low.panel.y < 130 && low.panel.y > 60, `y ${low.panel.y}`);
+});
+
+// --- What the model wrote, and what reached the page ------------------------
+
+test('a figure and its caption in separate segments is one tile, not a dropped number', () => {
+  // AAA_CISO_Brief_2.pdf went to the CISO of the American Arbitration
+  // Association with four statistics whose numbers had been deleted and the
+  // word "of" set in 40pt display type where each number should have been.
+  // 80%, 0, 27% and 25% existed nowhere in the file.
+  //
+  // The parse split each segment on its first space and DISCARDED anything it
+  // could not split, and a bare "80%" has nothing to split on. The model had
+  // written the documented shape one pipe at a time — a reasonable reading of
+  // the syntax, and unambiguous.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content:
+      '## tiles | The agentic threat | 80% | of tactical work in the first documented attack was autonomous. Anthropic, November 2025. ' +
+      '| 0 | MITRE ATT&CK IDs exist for agentic orchestration. | 27% | of enterprises have a strategy. Palo Alto and HBR, 2026',
+  });
+  assert.ok(r.ok, r.error);
+
+  const tiles = r.spec.sections[0].tiles;
+  assert.deepEqual(tiles.map((t) => t.value), ['80%', '0', '27%']);
+  assert.match(tiles[0].caption, /^of tactical work/);
+  assert.match(tiles[1].caption, /^MITRE ATT&CK/, 'and the caption keeps its own first word');
+});
+
+test('the documented one-segment form still parses the same way', () => {
+  // "tiles | Heading | 418 centers | 1.4M records". The fix must not move
+  // these: a segment WITH a space still splits on it.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## tiles | Where it runs | 418 centers | 1.4M records | 22 regions',
+  });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(r.spec.sections[0].tiles, [
+    { value: '418', caption: 'centers' },
+    { value: '1.4M', caption: 'records' },
+    { value: '22', caption: 'regions' },
+  ]);
+});
+
+test('a figure with nothing to say what it counts is refused, not dropped', () => {
+  // The one case that cannot be repaired here. A number alone on a page says
+  // nothing, and silently deleting it is what this whole test file is about.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## tiles | The threat | 80% of tactical work was autonomous | 27%',
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /tiles layout/);
+});
+
+test('a drawn field too long for its layout is refused, not cut', () => {
+  // "Case context ingested -", "Generic: alerts scored the same regardless of
+  // case status,…", "…was autonomous. Anthropic GTG-1002,…" — three cut
+  // sentences in one brief to a CISO, on the build whose whole point was that
+  // nothing leaves here with an ellipsis in it.
+  //
+  // normaliseSection passes an overflow accumulator into drawnFields and
+  // drawnFields dropped it on every call inside, so every field of every drawn
+  // layout truncated silently while every prose field refused.
+  // Each length is chosen to be over its own layout's cap and UNDER the 180
+  // that a point is capped at, because spec.js also carries every layout as
+  // prose points — and a 200-character caption is refused by the point rather
+  // than by the caption, which is the refusal passing for the wrong reason.
+  // With the accumulator removed from drawnFields these fixtures build
+  // silently truncated and the test goes green, which is what happened the
+  // first time this was written.
+  const over = (n) => 'x'.repeat(n);
+  for (const [layout, content] of Object.entries({
+    tiles: `## tiles | Heading | 80% | ${over(160)} | 27% | of enterprises`,
+    split: `## split | ${over(150)} | Ranked by consequence`,
+    chain: `## chain | ${over(90)} > Context > Action`,
+  })) {
+    const r = normaliseSpec({ format: 'pdf', title: 'T', content });
+    assert.equal(r.ok, false, `${layout} was not refused`);
+    assert.match(r.error, /cut mid-sentence/, layout);
+    assert.match(r.error, /limit is (140|120|72)\b/, `${layout} was refused by the wrong cap: ${r.error}`);
+  }
+
+  // And nothing that fits is disturbed.
+  const fine = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content:
+      '## tiles | Heading | 80% | of tactical work in the first documented attack was autonomous. Anthropic, November 2025. ' +
+      '| 27% | of enterprises have an advanced AI security strategy. Palo Alto and HBR, 2026',
+  });
+  assert.ok(fine.ok, fine.error);
+  assert.doesNotMatch(JSON.stringify(fine.spec), /…/, 'no ellipsis may reach a document');
+});
+
+// --- Reserving and spending -------------------------------------------------
+
+/**
+ * A flow whose page has EXACTLY as much room as the last reserve() asked for.
+ *
+ * That is the invariant the page break depends on: drawSection reserves, then
+ * draws, and drawFigure carries its own break for a figure that will not fit.
+ * If the two arithmetics disagree by a single point, the heading stays on one
+ * page and its figure starts the next.
+ */
+function tightFlow(fonts) {
+  const calls = { text: [], rect: [] };
+  const page = {
+    drawText: (t, o) => calls.text.push({ t, ...o }),
+    drawRectangle: (o) => calls.rect.push(o),
+  };
+  return {
+    calls,
+    page,
+    pages: 0,
+    reserved: 0,
+    y: 700,
+    floor: 0,
+    fonts: { ...fonts, display: 'display', heading: 'heading', body: 'body', eyebrow: 'eyebrow' },
+    get remaining() { return this.y - this.floor; },
+    reserve(h) { this.reserved = h; this.floor = this.y - h; },
+    newPage() { this.pages += 1; this.y = 700; this.floor = 0; return page; },
+    gap(n) { this.y -= n; },
+    write(text, opts) {
+      const lines = this.wrapText(text, opts);
+      const step = opts.size * (opts.leading || 1.4);
+      calls.text.push({ t: text, ...opts });
+      this.y -= lines.length * step;
+      return lines.length * step;
+    },
+    measure(text, opts) {
+      return this.wrapText(text, opts).length * opts.size * (opts.leading || 1.4);
+    },
+    wrapText(text, { metrics, size, width = 483, indent = 0, tracking = 0 }) {
+      return wrapText(text, metrics, size, width - indent, tracking);
+    },
+  };
+}
+
+test('every figure claims the space it actually takes', () => {
+  // figureSpace decides the page break; the figure decides the page. An
+  // estimate that is short by eighteen points is enough to put a heading at
+  // the foot of one page and its chart at the top of the next, which is where
+  // "The agentic threat" ended up — alone, with 250 points of cream under it.
+  //
+  // tiles was the one that did it: the estimate was a flat 76 points a row and
+  // ignored the caption entirely.
+  const cases = {
+    stat: '## stat | 265 | ransomware attacks in 2025, a figure that wraps onto a second line. Source: ISAC.',
+    tiles:
+      '## tiles | The threat | 80% | of tactical work in the first documented attack was autonomous. Anthropic, November 2025. ' +
+      '| 0 | MITRE ATT&CK IDs exist for agentic orchestration today | 27% | of enterprises | 25% | of breaches by 2028. Gartner, 2025',
+    bars: '## bars | Where it goes | Detection 61 | Response 44 | Recovery 22',
+    timeline: '## timeline | Week 0 | Scoping call | Week 2 | First findings',
+    paradigm: '## paradigm | The question has moved | Ranked by severity today | Ranked by consequence this week',
+    quote: '## quote | A conflict wall enforced by policy is not a conflict wall, and never was.',
+    split: '## split | Generic: alerts scored the same regardless of case status | Case-aware: alerts ranked by case criticality',
+    chain: '## chain | Case context ingested > Case wall enforced > Human approval gate > Audit trail',
+    table: '## table | The scoreboard | Deliverable, When | Written findings you keep, Week 2 | A reordered backlog, Week 6',
+  };
+
+  for (const [layout, content] of Object.entries(cases)) {
+    const r = normaliseSpec({ format: 'pdf', title: 'T', content });
+    assert.ok(r.ok, `${layout}: ${r.error}`);
+
+    const flow = tightFlow(FONTS);
+    const deps = { rgb: (red, g, b) => ({ r: red, g, b }), fonts: flow.fonts, column: 483, left: 56 };
+
+    const claimed = figureSpace(r.spec.sections[0], flow, deps);
+    const before = flow.y;
+    drawFigure(flow, r.spec.sections[0], deps);
+    const took = before - flow.y;
+
+    assert.ok(
+      claimed >= took - 0.5,
+      `${layout} claims ${claimed.toFixed(1)} points and takes ${took.toFixed(1)}`,
+    );
+    // And not wildly over, or the page breaks early and leaves a hole.
+    assert.ok(claimed <= took + 30, `${layout} claims ${claimed.toFixed(1)} for ${took.toFixed(1)}`);
+  }
+});
+
+test('a section never reserves less than it spends', () => {
+  // The other half of the same break. drawSection counted one RULE.gap and
+  // spends two, one either side of the rule, and left out the 8 points after
+  // the eyebrow — eighteen points of disagreement between the reservation and
+  // the drawing, landing on opposite sides of the page edge.
+  //
+  // The flow below gives the page EXACTLY what was reserved, so any shortfall
+  // makes drawFigure break the page. A break here is the bug.
+  for (const content of [
+    '## the threat | The agentic threat\n- A point',
+    '## tiles | The threat | 80% | of tactical work was autonomous. Anthropic, 2025. | 27% | of enterprises have a strategy. HBR, 2026',
+    '## stat | 265 | attacks in 2025. Source: ISAC.',
+    '## quote | A conflict wall enforced by policy is not a conflict wall.',
+  ]) {
+    const r = normaliseSpec({ format: 'pdf', title: 'T', content });
+    assert.ok(r.ok, r.error);
+
+    const flow = tightFlow(FONTS);
+    drawSection(flow, r.spec.sections[0]);
+    assert.equal(flow.pages, 0, `the section broke its own page: ${content.slice(0, 40)}`);
+  }
 });

@@ -159,6 +159,54 @@ const STANDARD_BEFORE = /\b(ISO|IEC|IEEE|NIST|SP|SOC|PCI|DSS|FIPS|CMMC|HIPAA|GDP
 const SOURCE_NEARBY =
   /\b(source|per|according to|reported by|disclosed|filing|SEC|10-K|ISAC|McKinsey|Gartner|Forrester|IDC|IBM|Verizon|Ponemon|survey|study|report)\b/i;
 
+/**
+ * A named body and a date, which is what attribution looks like when the
+ * source is not on the list above.
+ *
+ * The list is a list of vendors, and a list of vendors is never finished. It
+ * had Gartner and not Anthropic, Palo Alto or HBR — so on a brief to the CISO
+ * of the American Arbitration Association it passed "Gartner, 2025" and
+ * flagged "Anthropic GTG-1002, November 2025" and "Palo Alto and HBR, 2026" as
+ * figures nobody had sourced. Three of the four tiles, all of them cited.
+ *
+ * A checker that is wrong about a correctly sourced number is worse than no
+ * checker: the report gets skipped, and the unsourced one in it goes with it.
+ *
+ * So: a capitalised name followed by a year, optionally through a month. That
+ * is general, it is what a citation IS, and it does not need maintaining.
+ */
+const MONTH = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?$/i;
+const NOT_A_NAME = /^(in|on|by|the|a|an|at|since|between|from|until|before|after|during|this|last|next)$/i;
+
+function cited(line) {
+  for (const m of String(line).matchAll(/((?:[A-Z][\w&.'-]*[\s,]*(?:and\s+|&\s+)?){1,5})(?:19|20)\d{2}\b/g)) {
+    const names = m[1]
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .filter((w) => /^[A-Z]/.test(w));
+
+    // At least one word that is a NAME rather than a date or a preposition.
+    // "In August 2025, McLane opened a hub" is a sentence about a month; it is
+    // not somebody vouching for a number.
+    //
+    // And not a word still holding its hyphen: in "CVE-2024-3400" the 2024 is
+    // half an identifier, and reading it as a citation would let the rest of
+    // that line's figures through unsourced.
+    if (names.some((w) => !MONTH.test(w) && !NOT_A_NAME.test(w) && !w.endsWith('-'))) return true;
+  }
+  return false;
+}
+
+/**
+ * A number welded to a word by a hyphen is part of a NAME.
+ *
+ * GTG-1002 is Anthropic's label for a campaign; ATT&CK, CVE-2024-3400 and
+ * SP-800-53 are the same shape. "1002 carries an argument and no source" is
+ * the checker reading an identifier as a statistic, and it fired on the one
+ * tile that named its source most precisely.
+ */
+const IDENTIFIER_BEFORE = /[\w&]-$/;
+
 // --- The trust anchors a stranger needs -------------------------------------
 
 /**
@@ -200,11 +248,45 @@ const SELLING_REGISTER = [
 
 // --- The checks -------------------------------------------------------------
 
+/**
+ * The text a drawn layout puts on the page.
+ *
+ * Which is not the same as the text its section carries as prose. spec.js
+ * builds the fallback points from the layout data BEFORE normalisation and
+ * then cleans the layout fields separately, so the two diverge the moment a
+ * cap bites — the point says "Case context ingested - docket, parties, stage"
+ * while the page says "Case context ingested -".
+ *
+ * That divergence is why truncatedTails came back clean on a brief with four
+ * cut sentences in it. The checker was reading the copy nobody sees.
+ */
+function drawnText(s) {
+  const out = [];
+  if (Array.isArray(s.tiles)) for (const t of s.tiles) out.push(`${t.value}: ${t.caption}`);
+  if (Array.isArray(s.bars)) for (const b of s.bars) out.push(`${b.label}: ${b.value}`);
+  if (Array.isArray(s.kpis)) for (const k of s.kpis) out.push(`${k.code}: ${k.target}`);
+  if (Array.isArray(s.cards)) for (const c of s.cards) out.push(`${c.metric}: ${c.body}`);
+  if (Array.isArray(s.steps)) out.push(...s.steps);
+  if (Array.isArray(s.stops)) out.push(...s.stops);
+  if (Array.isArray(s.names)) out.push(...s.names);
+  if (Array.isArray(s.columns)) out.push(s.columns.join(', '));
+  if (Array.isArray(s.rows)) for (const r of s.rows) out.push(r.join(', '));
+  for (const key of ['value', 'caption', 'from', 'to', 'left', 'right', 'line', 'sentence', 'tag']) {
+    if (typeof s[key] === 'string' && s[key]) out.push(s[key]);
+  }
+  return out;
+}
+
 /** Everything the document says, in reading order. */
 export function outreachText(spec) {
   const parts = [spec.title || '', spec.subtitle || ''];
   for (const s of spec.sections || []) {
-    parts.push(s.eyebrow || '', s.title || '', s.body || '', ...(s.points || []));
+    parts.push(s.eyebrow || '', s.title || '', s.body || '');
+    // The drawn fields, not only the prose fallback. A figure's caption is
+    // read by the customer exactly as a paragraph is, and until this line
+    // every rule in this module was blind to it.
+    parts.push(...(s.layout ? drawnText(s) : []));
+    parts.push(...(s.points || []));
   }
   return parts.filter(Boolean).join('\n');
 }
@@ -352,12 +434,13 @@ export function unsourcedFigures(text) {
   const seen = new Set();
 
   for (const line of String(text).split('\n')) {
-    if (SOURCE_NEARBY.test(line)) continue;
+    if (SOURCE_NEARBY.test(line) || cited(line)) continue;
 
     for (const m of line.matchAll(ANCHOR_FIGURE)) {
       const figure = m[0].trim();
       if (seen.has(figure) || YEAR.test(figure)) continue;
       if (STANDARD_BEFORE.test(line.slice(0, m.index))) continue;
+      if (IDENTIFIER_BEFORE.test(line.slice(0, m.index))) continue;
       seen.add(figure);
       out.push(figure);
     }

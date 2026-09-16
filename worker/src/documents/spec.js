@@ -100,7 +100,7 @@ export function normaliseSpec(input) {
 
   const sections = rawSections
     .slice(0, LIMITS.sections)
-    .map((raw) => normaliseSection(raw, overflow))
+    .map((raw) => normaliseSection(raw, overflow, capsFor(format)))
     .filter((s) => s.layout || s.title || s.body || s.points.length);
 
   if (sections.length === 0) {
@@ -464,15 +464,45 @@ function parseKind(kind, rest) {
     // number is the slide's heading.
     const isTile = (t) => /^[\d£$€]/.test(t.trim());
     const title = isTile(rest[0]) ? '' : rest[0];
-    const tiles = (title ? rest.slice(1) : rest)
-      .map((t) => {
-        const m = /^(\S+)\s+(.*)$/.exec(t.trim());
-        return m ? { value: m[1], caption: m[2] } : null;
-      })
-      .filter(Boolean)
-      .slice(0, DENSITY_CARDS);
+    const body = (title ? rest.slice(1) : rest).map((t) => t.trim()).filter(Boolean);
 
-    return tiles.length >= 2 ? { layout: 'tiles', tiles, ...(title ? { title } : {}) } : null;
+    // A segment with no space in it is a FIGURE, and its caption is the
+    // segment after it.
+    //
+    // This dropped them. `.map(m ? … : null).filter(Boolean)` discarded every
+    // segment the regex could not split, and a bare "80%" has nothing to
+    // split on — so a brief to the CISO of the American Arbitration
+    // Association went out with four statistics whose numbers had been
+    // deleted and the word "of" set in 40pt display type where each number
+    // should have been. 80%, 0, 27% and 25% existed nowhere in the file.
+    //
+    // The model had written the documented shape one pipe at a time:
+    // "tiles | Heading | 80% | of tactical work…" instead of
+    // "tiles | Heading | 80% of tactical work…". That is a reasonable reading
+    // of the syntax, it is unambiguous, and there is no version of this worth
+    // failing on — a figure with no space is a figure, and the words after it
+    // are what it counts.
+    //
+    // What is NOT survivable is silence. A figure with no caption to follow
+    // refuses the whole heading through badLayout, because a number alone on
+    // a page says nothing and the model is still in the loop to fix it.
+    const tiles = [];
+    for (let i = 0; i < body.length; i += 1) {
+      const m = /^(\S+)\s+([\s\S]*)$/.exec(body[i]);
+      if (m) {
+        tiles.push({ value: m[1], caption: m[2] });
+        continue;
+      }
+
+      const caption = body[i + 1];
+      if (!caption) return null;
+      tiles.push({ value: body[i], caption });
+      i += 1;
+    }
+
+    return tiles.length >= 2
+      ? { layout: 'tiles', tiles: tiles.slice(0, DENSITY_CARDS), ...(title ? { title } : {}) }
+      : null;
   }
 
   if (kind === 'table') {
@@ -661,89 +691,121 @@ export function parseSections(markdown) {
 }
 
 /** The fields each layout carries, so nothing else rides along. */
-function drawnFields(s, overflow) {
+/**
+ * Caps on the fields INSIDE a drawn layout, by where they will be drawn.
+ *
+ * A slide is wider than a page and gives a chain far less room: it sets four
+ * steps side by side in boxes, where an A4 page stacks them as rows the full
+ * width of the column. Same for a split cell and a tile caption. One number
+ * cannot be right for both, and the number that was there was the slide's.
+ *
+ * On a page it cut sentences in half:
+ *
+ *   "Case context ingested -"                                     (24)
+ *   "Generic: alerts scored the same regardless of case status,…"  (60)
+ *   "…was autonomous. Anthropic GTG-1002,…"                        (90)
+ *
+ * all three in one brief to a CISO, on a build whose whole point was that
+ * nothing leaves here with an ellipsis in it. timeline's stops went through
+ * this correction once already, 20 to 32, with the reasoning recorded beside
+ * them; nothing generalised it to the layouts next door.
+ */
+const CAPS = {
+  pptx: { step: 24, splitCell: 60, tileCaption: 90 },
+  page: { step: 72, splitCell: 120, tileCaption: 140 },
+};
+
+const capsFor = (format) => (format === 'pptx' ? CAPS.pptx : CAPS.page);
+
+function drawnFields(s, overflow, caps) {
   if (s.layout === 'stat') {
     // 90 characters cut a real caption mid-parenthesis and left an ellipsis
     // on the slide — "…in a single 2025 breach (HHS filing,…" — which reads
     // as a bug, because it is one. A caption is one sentence saying what the
     // number counts, and one sentence is routinely longer than 90 characters
     // once it carries its source.
-    return { value: clean(s.value, 12, false), caption: clean(s.caption, 200, false) };
+    return { value: clean(s.value, 12, false, overflow), caption: clean(s.caption, 200, false, overflow) };
   }
-  if (s.layout === 'bars') return { bars: s.bars, title: clean(s.title, LIMITS.sectionTitleChars, true) };
-  if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
+  if (s.layout === 'bars') return { bars: s.bars, title: clean(s.title, LIMITS.sectionTitleChars, true, overflow) };
+  if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, caps.step, false, overflow)), title: clean(s.title, LIMITS.sectionTitleChars, true, overflow) };
   // 32, not 20. Twenty characters is a slide tick, where six stops share
   // 13.3 inches and a presenter says the rest out loud. On a page the stop has
   // to stand alone, and 20 cut "Weeks 1 to 2: free diagnostic" to
   // "Weeks 1 to 2: free…" — a visible ellipsis in a customer-facing PDF, which
   // the outreach check now correctly refuses. The cap that produced it was the
   // real fault.
-  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 32, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
+  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 32, false, overflow)), title: clean(s.title, LIMITS.sectionTitleChars, true, overflow) };
   if (s.layout === 'tiles') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      tiles: s.tiles.map((t) => ({ value: clean(t.value, 12, false), caption: clean(t.caption, 90, false) })),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      tiles: s.tiles.map((t) => ({ value: clean(t.value, 12, false, overflow), caption: clean(t.caption, caps.tileCaption, false, overflow) })),
     };
   }
   if (s.layout === 'table') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      columns: s.columns.map((c) => clean(c, 24, false)),
-      rows: s.rows.map((r) => r.map((c) => clean(c, 70, false))),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      columns: s.columns.map((c) => clean(c, 24, false, overflow)),
+      rows: s.rows.map((r) => r.map((c) => clean(c, 70, false, overflow))),
     };
   }
   if (s.layout === 'kpi') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      kpis: s.kpis.map((k) => ({ code: clean(k.code, 12, false), target: clean(k.target, 70, false) })),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      kpis: s.kpis.map((k) => ({ code: clean(k.code, 12, false, overflow), target: clean(k.target, 70, false, overflow) })),
     };
   }
   if (s.layout === 'outcome') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      tag: clean(s.tag, 24, false),
-      sentence: clean(s.sentence, 180, false),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      tag: clean(s.tag, 24, false, overflow),
+      sentence: clean(s.sentence, 180, false, overflow),
     };
   }
   if (s.layout === 'paradigm') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      from: clean(s.from, 80, false),
-      to: clean(s.to, 80, false),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      from: clean(s.from, 80, false, overflow),
+      to: clean(s.to, 80, false, overflow),
     };
   }
   if (s.layout === 'flow') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      steps: s.steps.map((x) => clean(x, 24, false)),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      steps: s.steps.map((x) => clean(x, caps.step, false, overflow)),
       emphasis: Number.isInteger(s.emphasis) ? s.emphasis : -1,
     };
   }
   if (s.layout === 'suite') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
       // The suite name is a trademark and is not sentence-cased or trimmed.
       suite: s.suite,
-      cards: s.cards.map((c) => ({ metric: clean(c.metric, 28, false), body: clean(c.body, 130, false) })),
+      cards: s.cards.map((c) => ({ metric: clean(c.metric, 28, false, overflow), body: clean(c.body, 130, false, overflow) })),
     };
   }
   if (s.layout === 'logos') {
     return {
-      title: clean(s.title, LIMITS.sectionTitleChars, true),
-      names: s.names.map((n) => clean(n, 28, false)).filter(Boolean),
+      title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
+      names: s.names.map((n) => clean(n, 28, false, overflow)).filter(Boolean),
     };
   }
-  if (s.layout === 'split') return { left: clean(s.left, 60, false), right: clean(s.right, 60, false) };
-  if (s.layout === 'quote') return { line: clean(s.line, 120, false) };
+  if (s.layout === 'split') return { left: clean(s.left, caps.splitCell, false, overflow), right: clean(s.right, caps.splitCell, false, overflow) };
+  if (s.layout === 'quote') return { line: clean(s.line, 120, false, overflow) };
   return {};
 }
 
-function normaliseSection(raw, overflow) {
+function normaliseSection(raw, overflow, caps) {
   const s = raw && typeof raw === 'object' ? raw : {};
   return {
-    // Layout data survives normalisation untouched: it was validated when it
-    // was parsed, and clean() is for prose.
-    ...(s.layout ? { layout: s.layout, ...drawnFields(s, overflow) } : {}),
+    // Layout data is cleaned too, and with the same accumulator.
+    //
+    // It said "layout data survives normalisation untouched", and that has
+    // never been true — drawnFields has always run clean() over every field.
+    // What it did was truncate them, silently, because `overflow` was passed
+    // in and then dropped by every call inside. A comment describing what the
+    // code ought to do is how four cut sentences reached a customer on the
+    // build that added the rule against cutting sentences.
+    ...(s.layout ? { layout: s.layout, ...drawnFields(s, overflow, caps) } : {}),
     eyebrow: clean(s.eyebrow, LIMITS.eyebrowChars, false, overflow),
     title: clean(s.title, LIMITS.sectionTitleChars, true, overflow),
     body: clean(s.body, LIMITS.sectionBodyChars, false, overflow),

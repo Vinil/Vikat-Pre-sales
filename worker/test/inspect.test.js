@@ -245,18 +245,59 @@ test('problems outrank notes', () => {
   assert.ok(!line.includes('sparse'), 'the serious one must not be buried under the cosmetic one');
 });
 
-test('a line the renderer had to cut is reported, with the cut text quoted', () => {
-  // Found by rendering a deck and reading slide 11: two of four chain boxes
-  // said "A two hour working…" and "A read only look at one…", and inspection
-  // came back completely clean. clean() truncates on a word boundary at 24
-  // characters for a chain step, which is right — the box is that wide — but
-  // the ellipsis is on the slide and nothing told the rep it was there.
+test('a step too long for its box is refused before anything is rendered', () => {
+  // This asserted the other half of the same problem, and the half that was
+  // reachable at the time: two of four chain boxes said "A two hour working…"
+  // and "A read only look at one…", and inspection came back clean.
+  //
+  // inspectPptx reporting it was the right fix for a renderer that cut text.
+  // The renderer no longer cuts text — a field too long for its layout is
+  // refused while the model is still in the loop to shorten it, which is the
+  // rule the prose fields already lived under and the drawn fields did not.
+  // So the note moves one step earlier, where it costs a rewrite instead of a
+  // reprint.
   const r = normaliseSpec({
     format: 'pptx',
     title: 'T',
     content:
       '## chain | Four steps you control | A two hour working session > ' +
       'A read only look at one site > A findings memo > Your decision',
+  });
+
+  assert.equal(r.ok, false);
+  assert.match(r.error, /cut mid-sentence/);
+  assert.match(r.error, /A two hour working session/, 'the offending text is quoted, so it can be found');
+});
+
+test('the same steps fit a page, which is not a slide', () => {
+  // A slide sets four chain steps side by side in boxes; a page stacks them as
+  // rows the full width of the column. One cap cannot be right for both, and
+  // the one that was there was the slide's — which is how a brief to a CISO
+  // went out reading "Case context ingested -".
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content:
+      '## chain | Four steps you control | A two hour working session > ' +
+      'A read only look at one site > A findings memo > Your decision',
+  });
+
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(r.spec.sections[0].steps, [
+    'A two hour working session',
+    'A read only look at one site',
+    'A findings memo',
+    'Your decision',
+  ]);
+});
+
+test('an ellipsis the MODEL wrote is still reported', () => {
+  // The note keeps its job. clean() no longer puts one there, and a model that
+  // writes one itself still reaches a slide with it.
+  const r = normaliseSpec({
+    format: 'pptx',
+    title: 'T',
+    content: '## chain | Four steps | A two hour working… > A read only look… > Your decision',
   });
   assert.ok(r.ok, r.error);
 
@@ -268,7 +309,6 @@ test('a line the renderer had to cut is reported, with the cut text quoted', () 
   const note = notes.find((n) => /ellipsis/.test(n));
   assert.ok(note, `no truncation note in:\n${notes.join('\n')}`);
   assert.match(note, /A two hour working…/, 'the cut text is quoted, so it can be found and shortened');
-  assert.match(note, /A read only look at one…/);
 });
 
 test('a deck with nothing cut says nothing about ellipses', () => {
