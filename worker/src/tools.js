@@ -360,7 +360,7 @@ function compact(obj) {
  *
  * @param {{ name: string, input: object }} call
  * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object }} ctx
- * @returns {Promise<{ content: string, isError?: boolean, effect?: object }>}
+ * @returns {Promise<{ content: string, isError?: boolean, retryable?: boolean, effect?: object }>}
  */
 export async function runTool(call, ctx) {
   const { sessionId, user, storage, env, cfg } = ctx;
@@ -595,6 +595,22 @@ export async function runTool(call, ctx) {
           return {
             content: `The document could not be built: ${result.error} Tell the rep plainly and offer to try again with what is missing.`,
             isError: true,
+            // A REFUSAL, not a failure, and the turn's budget is told apart by
+            // this flag.
+            //
+            // normaliseSpec and the checkers refuse specs the model can fix in
+            // one rewrite: a passage four characters too long, a document with
+            // nothing drawn in it, a product named before Vikat is introduced.
+            // Nothing was searched, nothing was written, no file exists — the
+            // round cost an API call and produced a correction.
+            //
+            // It shared `isError` with the catch below, which is the opposite
+            // case: a step that half-ran, whose message says "Do not retry it".
+            // One flag for both meant a bounce spent a round of the turn's
+            // four exactly as a round of research did, and a two-pager for a
+            // CISO ended on "Trimming the three passages that were too long
+            // and rebuilding now" with no round left to rebuild in.
+            retryable: true,
           };
         }
 

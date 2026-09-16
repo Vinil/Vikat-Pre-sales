@@ -421,10 +421,23 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
       // Server tools run at Anthropic; the ones from tools.js run here. They
       // travel together in `tools` and are separated again in the loop.
-      const activeTools = () => [
-        ...TOOL_DEFINITIONS.filter((d) => !dropped.has(d.name)),
-        ...webTools(cfg).filter((d) => !dropped.has(d.name)),
-      ];
+      /**
+       * Set for the closing turn, once the tool budget is spent.
+       *
+       * Offering tools to a turn that has no rounds left to run them in is how
+       * the model comes back asking for one more, which is the dead end this
+       * whole path exists to avoid. Withheld rather than merely discouraged:
+       * a tool it cannot see is a tool it cannot ask for.
+       */
+      let toolsWithheld = false;
+
+      const activeTools = () =>
+        toolsWithheld
+          ? []
+          : [
+              ...TOOL_DEFINITIONS.filter((d) => !dropped.has(d.name)),
+              ...webTools(cfg).filter((d) => !dropped.has(d.name)),
+            ];
 
       const buildRequest = (convo) => ({
         model: cfg.MODEL,
@@ -606,7 +619,26 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
         let lastStop = null;
 
-        for (let iteration = 0; iteration < cfg.MAX_TOOL_ITERATIONS; iteration++) {
+        /**
+         * Rounds of tool work the turn has actually spent.
+         *
+         * Counted rather than indexed, because not every round through this
+         * loop is work. A round whose every tool came back a REFUSAL — a spec
+         * the model can fix and re-send — searched nothing, wrote nothing and
+         * produced no file; it produced a correction. Charging it against a
+         * budget of four is how a two-pager for a CISO ended as "Trimming the
+         * three passages that were too long and rebuilding now" and stopped:
+         * two rounds of retrieval, one build refused for length, and the
+         * rebuild had no round left to happen in.
+         *
+         * Bounded separately, because free is not unlimited: a model that
+         * cannot satisfy a checker would otherwise loop against it until the
+         * request timed out, which is worse than a short answer.
+         */
+        let spent = 0;
+        let bounces = 0;
+
+        while (spent < cfg.MAX_TOOL_ITERATIONS) {
           let final = await runTurn(convo);
 
           // The turn was refused for what it already contained. Start again
@@ -676,6 +708,10 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
           convo.push({ role: 'assistant', content: carried.concat(final.content) });
 
           const results = [];
+          // Whether ANY tool in this round did something. One real call makes
+          // the round work, however many refusals came with it.
+          let worked = false;
+
           for (const block of blocks) {
             // Tool inputs are parsed JSON from the SDK; never string-match them.
             toolCalls.push({ name: block.name, input: block.input });
@@ -692,6 +728,8 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
               content: result.content,
               ...(result.isError ? { is_error: true } : {}),
             });
+
+            if (!result.retryable) worked = true;
 
             // Anything the turn produced or surfaced, for the assets rail.
             //
@@ -718,10 +756,51 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
 
           convo.push({ role: 'user', content: results });
 
-          if (iteration === cfg.MAX_TOOL_ITERATIONS - 1) {
+          // `results.length`, because a round that ran NOTHING is not a
+          // refusal either. A stop_reason of tool_use with no tool_use block
+          // in it is a malformed turn, and treating it as a free bounce would
+          // spin this loop against it for another three rounds.
+          const bounced = results.length > 0 && !worked;
+
+          if (!bounced || bounces >= cfg.MAX_TOOL_BOUNCES) {
+            spent += 1;
+          } else {
+            bounces += 1;
+            console.warn(
+              `[chat] session ${sessionId} bounced a tool round (${bounces}/${cfg.MAX_TOOL_BOUNCES}); ` +
+                `${cfg.MAX_TOOL_ITERATIONS - spent} round(s) still unspent`,
+            );
+          }
+
+          if (spent >= cfg.MAX_TOOL_ITERATIONS) {
             console.warn(`[chat] session ${sessionId} hit MAX_TOOL_ITERATIONS`);
             send('done', { stopReason: 'max_tool_iterations' });
           }
+        }
+
+        // One last turn, with the tools taken away.
+        //
+        // The loop above used to end here with the model mid-sentence about
+        // what it was going to build next, and the rep got that sentence and
+        // nothing after it. The budget being spent is a reason to stop calling
+        // tools; it is not a reason to stop answering. So the turn is asked
+        // once more, without tools, and whatever it already has becomes an
+        // answer — a shorter one than the rep asked for, but one that arrives.
+        //
+        // Costs one API call, and only on a turn that currently produces a
+        // dead end.
+        if (lastStop === 'tool_use') {
+          toolsWithheld = true;
+          convo.push({
+            role: 'user',
+            content:
+              'No tool calls are left in this turn. Do not announce anything further and do not ' +
+              'promise to build it now: neither will happen. Answer with what you already have, ' +
+              'say plainly which part you could not finish, and say what to ask for next to get it.',
+          });
+
+          const closing = await runTurn(convo);
+          if (closing) lastStop = closing.stop_reason;
         }
 
         // A turn that ends with nothing to show is indistinguishable from a
@@ -753,12 +832,10 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             code: 'output_truncated',
           });
         } else if (lastStop === 'tool_use') {
-          // The loop exited with the model still asking for tools, which can
-          // only mean the iteration budget ran out: every other stop reason
-          // breaks out above. The rep sees the model announce what it is about
-          // to build and then nothing — "Building a 3-post sequence now" and
-          // silence — because the work it was announcing was the part that
-          // never got a turn to happen in.
+          // The closing turn above was asked for an answer without tools and
+          // asked for tools again anyway, or never ran. Either way the rep is
+          // back to the old outcome — the model announcing what it is about to
+          // build, and then nothing — so it still has to be said out loud.
           console.warn(`[chat] session ${sessionId} hit MAX_TOOL_ITERATIONS (${cfg.MAX_TOOL_ITERATIONS})`);
           send('error', {
             message:

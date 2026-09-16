@@ -189,6 +189,15 @@ export const DEFAULTS = {
 
   // --- Agent loop --------------------------------------------------------
   MAX_TOOL_ITERATIONS: 4,
+  /**
+   * Rounds a turn may spend being REFUSED without spending its budget.
+   *
+   * A refused spec is a correction, not work, so it does not count against
+   * MAX_TOOL_ITERATIONS. Three, because free is not unlimited: a model that
+   * cannot satisfy a checker would otherwise loop against it until the request
+   * timed out, and a short answer beats a hung one.
+   */
+  MAX_TOOL_BOUNCES: 3,
   // How many times a turn paused by the server-side tool loop is resumed.
   // A long research turn hits the API's own 10-iteration ceiling and comes
   // back as stop_reason 'pause_turn' with a HALF-WRITTEN answer; resuming is
@@ -238,6 +247,7 @@ const NUMERIC_KEYS = new Set([
   'MAX_DOCUMENT_BYTES',
   'PDF_READ_MAX_TOKENS',
   'MAX_TOOL_ITERATIONS',
+  'MAX_TOOL_BOUNCES',
   'MAX_TURN_CONTINUATIONS',
   'WEB_SEARCH_MAX_USES',
   'WEB_FETCH_MAX_USES',

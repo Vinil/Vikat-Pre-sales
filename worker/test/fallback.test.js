@@ -522,3 +522,205 @@ test('every request carries exactly one cache breakpoint, on the shared prefix',
     assert.doesNotMatch(marked[0].text, /<current_user>/, 'the rep is named inside the cached prefix');
   }
 });
+
+// --- The budget, and what it is spent on ------------------------------------
+
+/**
+ * A stub that replies from a script, one entry per request.
+ *
+ * stubApi answers every request the same way, which is enough for the degrade
+ * ladder and useless here: what the budget does depends on what each ROUND
+ * came back with, so the turns have to differ.
+ *
+ * A request carrying no tools gets the closing reply instead of the next
+ * script entry, because that is what a request with no tools means.
+ */
+function scriptedApi(script, { closing = 'Here is what I have so far.', closingAsksForTool = false } = {}) {
+  const requests = [];
+  let step = 0;
+
+  const sse = (blocks, stopReason) => {
+    const lines = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}',
+      '',
+    ];
+
+    blocks.forEach((block, i) => {
+      if (block.text !== undefined) {
+        lines.push(
+          'event: content_block_start',
+          `data: {"type":"content_block_start","index":${i},"content_block":{"type":"text","text":""}}`,
+          '',
+          'event: content_block_delta',
+          `data: {"type":"content_block_delta","index":${i},"delta":{"type":"text_delta","text":${JSON.stringify(block.text)}}}`,
+          '',
+        );
+      } else {
+        const json = JSON.stringify(block.input);
+        lines.push(
+          'event: content_block_start',
+          `data: {"type":"content_block_start","index":${i},"content_block":{"type":"tool_use","id":"tu_${step}_${i}","name":${JSON.stringify(block.tool)},"input":{}}}`,
+          '',
+          'event: content_block_delta',
+          `data: {"type":"content_block_delta","index":${i},"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(json)}}}`,
+          '',
+        );
+      }
+      lines.push('event: content_block_stop', `data: {"type":"content_block_stop","index":${i}}`, '');
+    });
+
+    lines.push(
+      'event: message_delta',
+      `data: {"type":"message_delta","delta":{"stop_reason":${JSON.stringify(stopReason)},"stop_sequence":null},"usage":{"output_tokens":4}}`,
+      '',
+      'event: message_stop',
+      'data: {"type":"message_stop"}',
+      '',
+      '',
+    );
+    return lines.join('\n');
+  };
+
+  const fetchStub = async (url, init) => {
+    const u = String(url);
+    if (!u.includes('api.anthropic.com')) return { ok: false, status: 404, text: async () => 'no' };
+
+    const body = JSON.parse(init.body);
+    requests.push(body);
+
+    const toolCount = Array.isArray(body.tools) ? body.tools.length : 0;
+    const closingTurn = closingAsksForTool
+      ? searchTurn
+      : { blocks: [{ text: closing }], stop: 'end_turn' };
+    const turn = toolCount === 0
+      ? closingTurn
+      : (script[Math.min(step, script.length - 1)] || { blocks: [{ text: closing }], stop: 'end_turn' });
+    step += 1;
+
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sse(turn.blocks, turn.stop)));
+          controller.close();
+        },
+      }),
+    };
+  };
+
+  fetchStub.requests = requests;
+  return fetchStub;
+}
+
+/** A spec normaliseSpec refuses: five sections and nothing drawn in any of them. */
+const PROSE_ONLY = {
+  format: 'pdf',
+  title: 'A brief',
+  content: [0, 1, 2, 3, 4].map((i) => `## Heading ${i}\nSome prose for section ${i}.`).join('\n\n'),
+};
+
+/** A spec it accepts. */
+const DRAWABLE = {
+  format: 'pdf',
+  title: 'A brief',
+  content: [
+    '## stat | 265 | attacks in 2025. Source: ISAC.',
+    '## Heading one\nSome prose.',
+    '## quote | The one line to end on.',
+  ].join('\n\n'),
+};
+
+const searchTurn = { blocks: [{ tool: 'find_collateral', input: { query: 'arbitration' } }], stop: 'tool_use' };
+const refusedBuild = { blocks: [{ tool: 'create_document', input: PROSE_ONLY }], stop: 'tool_use' };
+
+test('a refused document does not spend a round of the turn’s budget', async () => {
+  // The turn that prompted this: a two-pager for a CISO that searched twice,
+  // had its build refused for three over-long passages, said "trimming them
+  // and rebuilding now", and stopped — because the rebuild had no round left
+  // to happen in. Every refusal in it was one this codebase added, and a
+  // refusal searches nothing and writes nothing. It is a correction.
+  //
+  // Six rounds here against a budget of four. Under the old rule the answer
+  // never arrives.
+  const stub = scriptedApi([
+    searchTurn,
+    searchTurn,
+    refusedBuild,
+    refusedBuild,
+    { blocks: [{ tool: 'create_document', input: DRAWABLE }], stop: 'tool_use' },
+    { blocks: [{ text: 'Built it. Here is the link.' }], stop: 'end_turn' },
+  ]);
+
+  const { text } = await chat(stub);
+
+  assert.match(text, /Built it\./, text.slice(0, 400));
+  assert.doesNotMatch(text, /tool_budget_spent/, 'the budget was spent on corrections, not work');
+});
+
+test('a document that keeps being refused stops instead of looping', async () => {
+  // Free is not unlimited. A model that cannot satisfy a checker would
+  // otherwise bounce against it until the request timed out, and a short
+  // answer beats a hung one.
+  const stub = scriptedApi([refusedBuild]);
+  const { text } = await chat(stub);
+
+  // Four spent rounds, three bounces, one closing turn without tools.
+  const cfg = loadConfig(ENV);
+  assert.equal(
+    stub.requests.length,
+    cfg.MAX_TOOL_ITERATIONS + cfg.MAX_TOOL_BOUNCES + 1,
+    `${stub.requests.length} requests`,
+  );
+  assert.match(text, /Here is what I have so far\./);
+});
+
+test('the turn that has no rounds left is asked without tools', async () => {
+  // Offering tools to a turn with no rounds left to run them in is how the
+  // model comes back asking for one more, which is the dead end this exists to
+  // avoid. A tool it cannot see is a tool it cannot ask for.
+  const stub = scriptedApi([searchTurn]);
+  const { text } = await chat(stub);
+
+  const last = stub.requests[stub.requests.length - 1];
+  assert.ok(!last.tools || last.tools.length === 0, 'the closing turn still carried tools');
+
+  const instruction = JSON.stringify(last.messages[last.messages.length - 1]);
+  assert.match(instruction, /No tool calls are left/);
+  assert.match(instruction, /do not promise to build it now/i);
+
+  // And what it says reaches the rep, instead of the rep getting the
+  // announcement and silence.
+  assert.match(text, /Here is what I have so far\./);
+  assert.doesNotMatch(text, /tool_budget_spent/);
+});
+
+test('a malformed round is spent, not bounced', () => {
+  // stop_reason "tool_use" with no tool_use block in it: the model asked for a
+  // tool and named none. Nothing ran, so nothing was refused either — treating
+  // that as a free bounce spins this loop against the same malformed turn for
+  // another three rounds on the way to the same place.
+  const stub = scriptedApi([{ blocks: [], stop: 'tool_use' }]);
+
+  return chat(stub).then(() => {
+    const cfg = loadConfig(ENV);
+    assert.equal(
+      stub.requests.length,
+      cfg.MAX_TOOL_ITERATIONS + 1,
+      `${stub.requests.length} requests: the budget should have gone straight down`,
+    );
+  });
+});
+
+test('a turn that still asks for tools with none offered is reported', () => {
+  // The closing turn is a repair, not a guarantee. If it comes back asking for
+  // a tool anyway, the rep is back to the old outcome — the model announcing
+  // what it is about to build, and then nothing — so it still has to be said
+  // out loud.
+  return chat(scriptedApi([searchTurn], { closingAsksForTool: true })).then(({ text }) => {
+    assert.match(text, /tool_budget_spent/);
+    assert.match(text, /ask for the drafts in a second message/i);
+  });
+});
