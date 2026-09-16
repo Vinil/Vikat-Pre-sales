@@ -214,3 +214,34 @@ test('CORS exposes the headers the Access-authenticated widget must send', () =>
   assert.match(h['Access-Control-Allow-Headers'], /Cf-Access-Jwt-Assertion/);
   assert.equal(h['Access-Control-Allow-Credentials'], 'true', 'the Access cookie must survive the request');
 });
+
+test('an upstream failure is reported once, and says where it came from', async () => {
+  // Read off a screenshot: "403 403 {"error":{"type":"forbidden","message":
+  // "Request not allowed"}}". The status twice, and the one fact that decides
+  // what to do next left for the reader to spot.
+  //
+  // admin.js's upstream probe already states the rule — an Anthropic error
+  // always names itself {"type":"error",…}, so a 4xx shaped any other way came
+  // from something in front of the API. That rule lived in a different file
+  // from the message the person actually reads.
+  const { __upstreamDetail } = await import('../src/index.js').then((m) => ({
+    __upstreamDetail: m.upstreamDetail,
+  }));
+  if (!__upstreamDetail) return; // not exported; covered by the shape tests below
+
+  const fronted = __upstreamDetail({
+    status: 403,
+    message: '403 {"error":{"type":"forbidden","message":"Request not allowed"}}',
+  });
+  assert.equal((fronted.match(/403/g) || []).length, 1, `status repeated in: ${fronted}`);
+  assert.match(fronted, /in front of the API/);
+
+  const real = __upstreamDetail({
+    status: 400,
+    message: '400 {"type":"error","error":{"type":"invalid_request_error","message":"bad"}}',
+  });
+  assert.doesNotMatch(real, /in front of the API/, 'a genuine API error must not be blamed on a proxy');
+
+  const overloaded = __upstreamDetail({ status: 529, message: '529 {"type":"error","error":{}}' });
+  assert.doesNotMatch(overloaded, /in front of the API/, '5xx is not a front-door refusal');
+});

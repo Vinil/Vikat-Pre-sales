@@ -227,9 +227,45 @@ function isUnsupportedParameter(err, name) {
 }
 
 /** The upstream status and message, trimmed for display to an admin. */
-function upstreamDetail(err) {
-  const status = err?.status ? `${err.status} ` : '';
-  return `${status}${String(err?.message || err).slice(0, 300)}`;
+/**
+ * The upstream failure, as one line an admin can act on.
+ *
+ * Two things, both learned from reading "403 403 {"error":{"type":"forbidden",
+ * "message":"Request not allowed"}}" off a screenshot:
+ *
+ * The status was printed twice, because the SDK already puts it at the front
+ * of its message and this prepended it again.
+ *
+ * And the important half was left to the reader to notice. admin.js's upstream
+ * probe already states the rule: an Anthropic error always names itself
+ * `{"type":"error",…}`, so a 4xx body shaped any other way was written by
+ * something standing IN FRONT of the API — a gateway, a WAF, a proxy. That
+ * distinction decides everything about what to do next, and it was sitting in
+ * a different file while the person who needed it read raw JSON.
+ */
+export function upstreamDetail(err) {
+  const message = String(err?.message || err);
+  const status = err?.status;
+
+  // The SDK formats its message as "<status> <body>", so only add the status
+  // when the message does not already begin with it.
+  const prefix = status && !message.startsWith(String(status)) ? `${status} ` : '';
+  const line = `${prefix}${message}`.slice(0, 300);
+
+  return status >= 400 && status < 500 && !namesItselfAnApiError(message)
+    ? `${line} — this is not the API's own error shape, so it came from something in front of the API rather than from Anthropic. Check /admin/upstream.`
+    : line;
+}
+
+/** Anthropic's error envelope always carries a top-level `"type":"error"`. */
+function namesItselfAnApiError(message) {
+  const at = message.indexOf('{');
+  if (at === -1) return false;
+  try {
+    return JSON.parse(message.slice(at))?.type === 'error';
+  } catch {
+    return false;
+  }
 }
 
 async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
