@@ -197,9 +197,18 @@ function bar(text) {
  */
 function asText(drawn) {
   if (drawn.layout === 'stat') {
+    // A POINT, not the title. Same rule as chain, flow and timeline, and it
+    // arrived the same way: once pdf.js learned to draw a stat, the page
+    // carried "265: ransomware attacks hit food and agriculture in 2025, up
+    // from 167 in 2023. Source:…" as a truncated two-line heading AND the
+    // figure drawing 265 with the full caption beside it, directly beneath.
+    //
+    // A drawn slide never takes its own data as its headline. A renderer that
+    // cannot draw the figure still gets every word, as a point.
+    //
     // A colon, not an em dash: §2.3 bans them in customer-facing copy, and
-    // the renderer's own joins reach the slide exactly as the model's words do.
-    return { title: [drawn.value, drawn.caption].filter(Boolean).join(': '), points: [] };
+    // the renderer's own joins reach the page exactly as the model's words do.
+    return { title: '', points: [[drawn.value, drawn.caption].filter(Boolean).join(': ')] };
   }
   if (drawn.layout === 'bars') {
     return { title: drawn.title || '', points: drawn.bars.map((b) => `${b.label}: ${b.value}`) };
@@ -571,7 +580,13 @@ function drawnFields(s) {
   }
   if (s.layout === 'bars') return { bars: s.bars, title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'chain') return { steps: s.steps.map((x) => clean(x, 24, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
-  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 20, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
+  // 32, not 20. Twenty characters is a slide tick, where six stops share
+  // 13.3 inches and a presenter says the rest out loud. On a page the stop has
+  // to stand alone, and 20 cut "Weeks 1 to 2: free diagnostic" to
+  // "Weeks 1 to 2: free…" — a visible ellipsis in a customer-facing PDF, which
+  // the outreach check now correctly refuses. The cap that produced it was the
+  // real fault.
+  if (s.layout === 'timeline') return { stops: s.stops.map((x) => clean(x, 32, false)), title: clean(s.title, LIMITS.sectionTitleChars, true) };
   if (s.layout === 'tiles') {
     return {
       title: clean(s.title, LIMITS.sectionTitleChars, true),

@@ -36,6 +36,11 @@ export const EXEC_OUTREACH_BLOCK = `## Outreach to an executive
 These are standing rules, not preferences. A document breaking one is not
 ready, however good the rest of it is.
 
+- Research the recipient before writing. Use web search on their name, their
+  company and their recent announcements, and take their exact current title
+  and the vocabulary they use publicly. A wrong title on a first approach is
+  not recoverable. If search returns nothing usable, say so to the rep rather
+  than writing around the gap.
 - Lead with the thing only Vikat can say. Never open on facts the reader
   already owns: they know their own revenue, site count and org chart. One
   line of their situation as a pivot, then spend the space on what they do

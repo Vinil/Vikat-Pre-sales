@@ -15,6 +15,7 @@ import fontkit from '@pdf-lib/fontkit';
 
 import { COLOR, INK, ON_NAVY, GRADIENT, WORDMARK, TAGLINE, copyrightLine, eyebrowCase } from '../brand.js';
 import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
+import { drawFigure, figureSpace } from './pdfFigures.js';
 import { wrap } from './measure.js';
 
 /** A4 in points. */
@@ -152,6 +153,18 @@ class Flow {
     return lines.length * step;
   }
 
+  /**
+   * The lines `text` breaks into, for a figure laying out its own cells.
+   *
+   * Exposed rather than re-implemented in pdfFigures.js: a figure that wrapped
+   * text by its own rules would disagree with the paragraph beside it about
+   * where a word breaks, and the two would drift apart the first time the type
+   * scale moved.
+   */
+  wrapText(text, { metrics, size, width = COLUMN, tracking = 0 }) {
+    return wrap(text, metrics, size, width, tracking);
+  }
+
   /** How tall `text` would be, without drawing it. */
   measure(text, { metrics, size, leading, width = COLUMN, indent = 0, tracking = 0 }) {
     return wrap(text, metrics, size, width - indent, tracking).length * size * leading;
@@ -268,7 +281,15 @@ function drawCover(flow) {
   flow.gap(30);
 }
 
-function drawSection(flow, section) {
+/**
+ * Exported for tests.
+ *
+ * The suppression below — a drawn figure replacing its own points — is
+ * invisible from outside: both versions render a valid PDF of the same page
+ * count, which is why the first pass at these tests let the mutation through.
+ * A test needs to see the calls.
+ */
+export function drawSection(flow, section) {
   const { fonts } = flow;
 
   // Keep a heading with at least the first lines of what follows: a section
@@ -284,7 +305,16 @@ function drawSection(flow, section) {
         }) + 10
       : 0);
 
-  flow.reserve(headingHeight + SIZE.body * LEADING.body * 2);
+  // The figure counts as what follows the heading.
+  //
+  // Without it, reserve() kept the heading with "two lines of body" — and a
+  // section whose body IS a figure left its heading alone at the foot of the
+  // page while the chart started the next one. That is the exact flowed-layout
+  // failure the reserve above exists to prevent, reintroduced by teaching the
+  // renderer a new kind of content and not telling this line about it.
+  const figureHeight = section.layout ? figureSpace(section, flow, { fonts, column: COLUMN }) : 0;
+
+  flow.reserve(headingHeight + (figureHeight || SIZE.body * LEADING.body * 2));
 
   if (section.eyebrow) {
     flow.write(eyebrowCase(section.eyebrow), {
@@ -311,6 +341,16 @@ function drawSection(flow, section) {
     flow.gap(10);
   }
 
+  // A drawn layout, if this renderer knows it.
+  //
+  // Before the title's points, and INSTEAD of them: spec.js carries every
+  // layout's content as points as well, so that a renderer which cannot draw
+  // it still shows the words. Drawing the figure and then listing the same
+  // values underneath says everything twice, which is the defect the deck
+  // renderer had — a chain slide whose headline was its own step list over a
+  // diagram of the same steps.
+  const drew = section.layout ? drawFigure(flow, section, { rgb, fonts, column: COLUMN, left: M.left }) : false;
+
   if (section.body) {
     // Widow control is per-paragraph rather than per-line: if the whole
     // paragraph will not fit, start it on the next page instead of leaving
@@ -332,7 +372,7 @@ function drawSection(flow, section) {
     flow.gap(12);
   }
 
-  for (const point of section.points) {
+  for (const point of drew ? [] : section.points) {
     const height = flow.measure(point, {
       metrics: fonts.metrics.body,
       size: SIZE.point,

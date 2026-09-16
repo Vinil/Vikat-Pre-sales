@@ -11,6 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
 import { PDFDocument } from 'pdf-lib';
+import { wrap as wrapText } from '../src/documents/measure.js';
 
 import { normaliseSpec, parseSections, parseLayout, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
@@ -785,7 +786,14 @@ test('every layout still carries its content as text, for renderers that cannot 
   }
 
   const [stat, , , chain, bars] = drawnSpec().sections;
-  assert.match(stat.title, /265/, 'the number survives into text');
+
+  // In the POINTS, like chain and timeline, and for the same reason. Once
+  // pdf.js learned to draw a stat, a title holding the same words put
+  // "265: ransomware attacks hit food and agriculture in 2025, up from 167 in
+  // 2023. Source:…" on the page as a truncated two-line heading with the
+  // figure drawing 265 and the full caption directly underneath it.
+  assert.equal(stat.title, '', 'a drawn figure never takes its own data as its headline');
+  assert.match(stat.points.join(' '), /265/, 'the number survives into text');
   assert.ok(bars.points.some((p) => /71/.test(p)), 'the figures survive into text');
 
   // In the POINTS, never the title. This line used to read
@@ -1110,4 +1118,158 @@ test('a mid-sentence abbreviation is not treated as a new sentence', () => {
   // "U.S. the" would be wrong to capitalise; the rule needs whitespace after
   // the stop, which an abbreviation inside a word does not have.
   assert.match(sentenceCase('Across the U.S. and Canada'), /U\.S\. and Canada/);
+});
+
+// --- Drawn figures ----------------------------------------------------------
+
+/**
+ * A page that records what was drawn on it.
+ *
+ * Asserting on draw calls rather than on the rendered PDF, because the first
+ * version of these tests checked page counts and module exports — and BOTH
+ * mutations escaped: deleting the drawFigure call entirely, and drawing the
+ * figure AND repeating its points underneath, each left every test green.
+ * A test that cannot tell whether anything was drawn is not testing drawing.
+ */
+function recordingFlow() {
+  const calls = { text: [], rect: [] };
+  const page = {
+    drawText: (t, o) => calls.text.push({ t, ...o }),
+    drawRectangle: (o) => calls.rect.push(o),
+  };
+  return {
+    calls,
+    page,
+    y: 700,
+    remaining: 600,
+    newPage() { this.y = 700; },
+    gap(n) { this.y -= n; },
+    wrapText(text, { metrics, size, width }) {
+      return wrapText(text, metrics, size, width);
+    },
+  };
+}
+
+const figureDeps = () => ({
+  rgb: (r, g, b) => ({ r, g, b }),
+  fonts: { ...FONTS, display: 'display', heading: 'heading', body: 'body' },
+  column: 483,
+  left: 56,
+});
+
+test('a stat is DRAWN at figure size, not set as a heading', async () => {
+  // The finding that started this: "7.5x: projected risk reduction from
+  // reordering the same security budget by business risk…" arrived as a
+  // truncated two-line bold sentence, because asText() flattened every layout
+  // and pdf.js had never been taught any of them.
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+  const r = normaliseSpec({ format: 'pdf', title: 'T', content: '## stat | 7.5x | risk reduction, per McKinsey.' });
+  assert.ok(r.ok, r.error);
+
+  // The words survive as a point for a renderer that cannot draw, and the
+  // title stays empty so the page does not say it twice.
+  assert.equal(r.spec.sections[0].title, '');
+  assert.match(r.spec.sections[0].points.join(' '), /7\.5x/);
+
+  const flow = recordingFlow();
+  assert.equal(drawFigure(flow, r.spec.sections[0], figureDeps()), true);
+
+  const value = flow.calls.text.find((c) => c.t === '7.5x');
+  assert.ok(value, JSON.stringify(flow.calls.text));
+  assert.ok(value.size >= 30, `the figure was drawn at ${value.size}pt, which is heading size`);
+  assert.ok(flow.calls.rect.length >= 1, 'the accent rule is part of the figure');
+});
+
+test('bars draw a track and a fill each, and the largest takes the accent', async () => {
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+  const r = normaliseSpec({ format: 'pdf', title: 'T', content: '## bars | Where it goes | Alpha 61 | Beta 44 | Gamma 22' });
+  assert.ok(r.ok, r.error);
+
+  const flow = recordingFlow();
+  assert.equal(drawFigure(flow, r.spec.sections[0], figureDeps()), true);
+
+  assert.equal(flow.calls.rect.length, 6, 'three bars, each a track and a fill');
+
+  // Scaled to the largest value, not to 100: 61, 44 and 22 against 100 draw
+  // three stubs and throw away the comparison the chart exists for.
+  const fills = flow.calls.rect.filter((_, i) => i % 2 === 1).map((rect) => rect.width);
+  assert.ok(fills[0] > fills[1] && fills[1] > fills[2], JSON.stringify(fills));
+  assert.ok(fills[0] > fills[2] * 2, 'the longest bar should dominate, as 61 does 22');
+
+  // The largest is the point of the chart, so it is the one coloured apart.
+  const colours = flow.calls.rect.filter((_, i) => i % 2 === 1).map((rect) => JSON.stringify(rect.color));
+  assert.notEqual(colours[0], colours[1], 'the largest bar must be distinguishable');
+  assert.equal(colours[1], colours[2], 'and the rest must recede together');
+});
+
+test('a paradigm draws two cells and an arrow between them', async () => {
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## paradigm | The question has moved | Ranked by CVSS | Ranked by what stops shipping',
+  });
+  assert.ok(r.ok, r.error);
+
+  const flow = recordingFlow();
+  assert.equal(drawFigure(flow, r.spec.sections[0], figureDeps()), true);
+
+  // Two cells, a shaft, and the five slices of the arrowhead.
+  assert.ok(flow.calls.rect.length >= 8, `only ${flow.calls.rect.length} shapes`);
+  const said = flow.calls.text.map((c) => c.t).join(' ');
+  assert.match(said, /CVSS/);
+  assert.match(said, /stops shipping/);
+});
+
+test('a layout pdf.js cannot draw still reaches the page as words', async () => {
+  // drawFigure returns false rather than throwing, so `table` being unfinished
+  // costs formatting and never content.
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## table | The scoreboard | Outcome, Measure | Continuity, Lines held | Effort, Alerts closed',
+  });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.spec.sections[0].layout, 'table');
+  assert.match(r.spec.sections[0].points.join(' '), /Lines held/, 'the rows survive as text');
+
+  const flow = recordingFlow();
+  assert.equal(drawFigure(flow, r.spec.sections[0], figureDeps()), false);
+  assert.equal(flow.calls.rect.length, 0, 'nothing half-drawn');
+});
+
+test('a drawn figure replaces its points rather than repeating them', async () => {
+  // The defect this prevents is the one the deck renderer had: a chain slide
+  // whose headline was its own step list, over a diagram of the same steps.
+  //
+  // Invisible from outside — both versions render a valid two-page PDF — which
+  // is exactly why the first pass at these tests let it through.
+  const { drawSection } = await import('../src/documents/pdf.js');
+  const r = normaliseSpec({ format: 'pdf', title: 'T', content: '## bars | Where it goes | Alpha 61 | Beta 44 | Gamma 22' });
+  assert.ok(r.ok, r.error);
+
+  const flow = recordingFlow();
+  flow.fonts = { ...FONTS, display: 'display', heading: 'heading', body: 'body', eyebrow: 'eyebrow' };
+  flow.write = (text, opts) => {
+    flow.calls.text.push({ t: text, ...opts });
+    flow.y -= 12;
+    return 12;
+  };
+  flow.measure = () => 12;
+  flow.reserve = () => {};
+
+  drawSection(flow, r.spec.sections[0]);
+
+  const written = flow.calls.text.map((c) => c.t).join(' | ');
+  const alphas = (written.match(/Alpha/g) || []).length;
+  assert.equal(alphas, 1, `"Alpha" appears ${alphas} times in ${written}`);
+
+  // BOTH halves, or the test passes when the figure is never drawn at all:
+  // with drawFigure removed the points are written instead, "Alpha" still
+  // appears exactly once, and the assertion above is satisfied by the bug.
+  assert.ok(
+    flow.calls.rect.length >= 6,
+    `the figure itself was not drawn: only ${flow.calls.rect.length} shapes`,
+  );
 });

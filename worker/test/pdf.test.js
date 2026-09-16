@@ -345,3 +345,4 @@ test('markdown before the first heading is not dropped', () => {
   assert.equal(sections[0].title, 'Brief.pdf');
   assert.match(sections[0].content, /opening line/);
 });
+
