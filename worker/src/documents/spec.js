@@ -319,9 +319,12 @@ function asText(drawn) {
     return { title: drawn.title || '', points: drawn.tiles.map((t) => `${t.value}: ${t.caption}`) };
   }
   if (drawn.layout === 'table') {
+    // The column headings are data, so they are a point and never the title.
+    // A table with no author heading took "Outcome, Measure" as its headline
+    // and then drew that same row as the header band underneath it.
     return {
-      title: drawn.title || drawn.columns.join(', '),
-      points: drawn.rows.map((r) => r.join(', ')),
+      title: drawn.title || '',
+      points: [drawn.columns.join(', '), ...drawn.rows.map((r) => r.join(', '))],
     };
   }
   if (drawn.layout === 'kpi') {
@@ -356,7 +359,11 @@ function asText(drawn) {
     return { title: '', points: [drawn.left, drawn.right] };
   }
   if (drawn.layout === 'quote') {
-    return { title: drawn.line, points: [] };
+    // A POINT, not the title — the same rule as stat, chain, flow, timeline
+    // and split, and it arrived here the same way they did. Once the page
+    // learned to draw a quote, the closing line was set as a navy heading with
+    // the identical sentence reversed out of a navy panel directly underneath.
+    return { title: '', points: [drawn.line] };
   }
   return { title: '', points: [] };
 }

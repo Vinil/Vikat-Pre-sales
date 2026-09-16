@@ -15,6 +15,7 @@ import fontkit from '@pdf-lib/fontkit';
 
 import { COLOR, INK, ON_NAVY, GRADIENT, WORDMARK, TAGLINE, copyrightLine, eyebrowCase } from '../brand.js';
 import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
+import { CREAM } from './house.js';
 import { drawFigure, figureSpace } from './pdfFigures.js';
 import { lockupBytes, LOCKUP_ASPECT } from './marks.js';
 import { wrap } from './measure.js';
@@ -46,6 +47,12 @@ const SIZE = {
 
 const LEADING = { title: 1.1, section: 1.2, body: 1.55, point: 1.5 };
 
+/** The gradient rule that opens a section. */
+const RULE = { width: 58, height: 2.5, gap: 10 };
+
+/** The card a point sits on: inner padding, and where its text starts. */
+const CARD = { pad: 8, text: 14 };
+
 /** pdf-lib takes colours as 0..1 triples. */
 function color(hex) {
   const h = String(hex).replace('#', '');
@@ -74,8 +81,8 @@ function mix(a, b, t) {
  * Covers and dividers only, per the brand rule — which is why this is a
  * private helper rather than something a caller can place anywhere.
  */
-function gradientBand(page, y, height) {
-  const strips = Math.ceil(PAGE.width);
+function gradientBand(page, y, height, { x = 0, width = PAGE.width } = {}) {
+  const strips = Math.ceil(width);
   const stops = GRADIENT.stops;
 
   for (let i = 0; i < strips; i += 1) {
@@ -84,10 +91,10 @@ function gradientBand(page, y, height) {
     const index = Math.min(Math.floor(scaled), stops.length - 2);
 
     page.drawRectangle({
-      x: i,
+      x: x + i,
       y,
       // Overlap by a hair so no seam shows at any zoom level.
-      width: PAGE.width / strips + 0.6,
+      width: width / strips + 0.6,
       height,
       color: mix(stops[index], stops[index + 1], scaled - index),
     });
@@ -115,6 +122,23 @@ class Flow {
 
   newPage() {
     this.page = this.doc.addPage([PAGE.width, PAGE.height]);
+
+    // The house ground, not white.
+    //
+    // "There's no color highlights in the document — the entire document feels
+    // monotonous." A cream sheet is the single change that does most of the
+    // work, and it is not decoration: §3.3 makes cream the default ground for
+    // every content slide, and this renderer had simply never been told. It is
+    // also what makes the rest of the palette legible as structure — a white
+    // card only reads as a card when the page behind it is not also white.
+    this.page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: PAGE.width,
+      height: PAGE.height,
+      color: color(COLOR.cream),
+    });
+
     this.pages.push(this.page);
     this.y = PAGE.height - M.top;
     return this.page;
@@ -310,10 +334,10 @@ export function drawCover(flow) {
     });
   }
 
-  // The green rule that opens the body of the document.
-  flow.gap(26);
-  page.drawRectangle({ x: M.left, y: flow.y, width: 44, height: 2, color: color(COLOR.signalGreen) });
-  flow.gap(30);
+  // No rule here any more. Every section now opens with a gradient one of its
+  // own, and the first of those lands about forty points below this — two
+  // short rules stacked, which reads as a mistake rather than as a device.
+  flow.gap(34);
 }
 
 /**
@@ -349,7 +373,24 @@ export function drawSection(flow, section) {
   // renderer a new kind of content and not telling this line about it.
   const figureHeight = section.layout ? figureSpace(section, flow, { fonts, column: COLUMN }) : 0;
 
-  flow.reserve(headingHeight + (figureHeight || SIZE.body * LEADING.body * 2));
+  // The rule is part of the heading, so it is reserved with it: a gradient
+  // stranded at the foot of a page with its section overleaf is worse than no
+  // rule at all.
+  flow.reserve(headingHeight + RULE.height + RULE.gap + (figureHeight || SIZE.body * LEADING.body * 2));
+
+  // A gradient rule opening every section.
+  //
+  // The brand puts the gradient on "covers and dividers only", which is why
+  // gradientBand is a private helper here — and a section opener is a divider.
+  // It was being used once, on the cover, and the rest of the document was
+  // navy type on white with a teal eyebrow: three colours, one of them at 8pt.
+  //
+  // Short rather than full bleed. Green through teal to navy across 58pt reads
+  // as a mark; across 595pt, eight times in a document, it reads as a header
+  // bar and stops meaning anything.
+  flow.y -= RULE.gap;
+  gradientBand(flow.page, flow.y, RULE.height, { x: M.left, width: RULE.width });
+  flow.y -= RULE.height + RULE.gap;
 
   if (section.eyebrow) {
     flow.write(eyebrowCase(section.eyebrow), {
@@ -407,34 +448,61 @@ export function drawSection(flow, section) {
     flow.gap(12);
   }
 
+  // Every point on its own card.
+  //
+  // A bullet list is the shape a wall of text takes when somebody has been
+  // told to make it visual, and it was most of AAA_CISO_Brief_1.pdf. A card is
+  // the deck's own vocabulary for a discrete item (§1.5, one idea to a card),
+  // and against the cream ground a white panel with a teal edge is a field of
+  // colour rather than a dash in the margin.
+  //
+  // Per point rather than one panel around the block: a point is independent,
+  // so the list can break across a page without a card being cut in half, and
+  // nothing has to know the total height in advance.
   for (const point of drew ? [] : section.points) {
     const height = flow.measure(point, {
       metrics: fonts.metrics.body,
       size: SIZE.point,
       leading: LEADING.point,
-      indent: 16,
+      indent: CARD.text,
+      width: COLUMN - CARD.pad,
     });
-    if (height > flow.remaining) flow.newPage();
+    if (height + CARD.pad * 2 > flow.remaining) flow.newPage();
 
-    // The marker sits on the first line's baseline, so it is drawn against
-    // the cursor before write() moves it.
+    // Drawn against the cursor before write() moves it, and from the top down,
+    // because drawRectangle takes y as the bottom edge.
     flow.page.drawRectangle({
-      x: M.left + 2,
-      y: flow.y - SIZE.point * LEADING.point + SIZE.point * 0.55,
-      width: 3.5,
-      height: 3.5,
+      x: M.left,
+      y: flow.y - height - CARD.pad * 1.4,
+      width: COLUMN,
+      height: height + CARD.pad * 2,
+      color: color('#FFFFFF'),
+      borderColor: color(CREAM.tintBorder),
+      borderWidth: 0.6,
+    });
+
+    // The edge that carries the colour. A full-height bar rather than a square
+    // marker: the square was 3.5pt of teal per bullet, which is a rounding
+    // error against a page.
+    flow.page.drawRectangle({
+      x: M.left,
+      y: flow.y - height - CARD.pad * 1.4,
+      width: 2.5,
+      height: height + CARD.pad * 2,
       color: color(COLOR.circuitTeal),
     });
 
+    flow.y -= CARD.pad * 0.6;
     flow.write(point, {
       font: fonts.body,
       metrics: fonts.metrics.body,
       size: SIZE.point,
       leading: LEADING.point,
       fill: color(INK.strong),
-      indent: 16,
+      indent: CARD.text,
+      width: COLUMN - CARD.pad,
     });
-    flow.gap(5);
+    flow.gap(CARD.pad * 1.4 + 6);
   }
 
   flow.gap(20);

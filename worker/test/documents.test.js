@@ -9,9 +9,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import zlib from 'node:zlib';
 import { unzipSync, strFromU8 } from 'fflate';
 import { PDFDocument, PDFName } from 'pdf-lib';
 import { wrap as wrapText } from '../src/documents/measure.js';
+import { figureSpace } from '../src/documents/pdfFigures.js';
+import { CREAM } from '../src/documents/house.js';
 
 import { normaliseSpec, parseSections, parseLayout, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
 import { renderPptx } from '../src/documents/pptx.js';
@@ -20,7 +23,7 @@ import { renderDocx } from '../src/documents/docx.js';
 import { createDocument } from '../src/documents/index.js';
 import { loadFonts } from '../src/documents/fonts.js';
 import { deliverDocument, documentStoreStatus, resetCaches } from '../src/documentStore.js';
-import { sentenceCase, eyebrowCase, brandSafe, PALETTE } from '../src/brand.js';
+import { sentenceCase, eyebrowCase, brandSafe, PALETTE, COLOR, GRADIENT } from '../src/brand.js';
 import { FontMetrics, wrap } from '../src/documents/measure.js';
 import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
@@ -1278,6 +1281,14 @@ function recordingFlow() {
   };
 }
 
+/** The 0..1 triple figureDeps' rgb stub produces for a brand hex. */
+const hex = (h) => ({
+  r: parseInt(h.slice(1, 3), 16) / 255,
+  g: parseInt(h.slice(3, 5), 16) / 255,
+  b: parseInt(h.slice(5, 7), 16) / 255,
+});
+const same = (a, b) => !!a && Math.abs(a.r - b.r) < 1e-6 && Math.abs(a.g - b.g) < 1e-6 && Math.abs(a.b - b.b) < 1e-6;
+
 const figureDeps = () => ({
   rgb: (r, g, b) => ({ r, g, b }),
   fonts: { ...FONTS, display: 'display', heading: 'heading', body: 'body' },
@@ -1350,21 +1361,210 @@ test('a paradigm draws two cells and an arrow between them', async () => {
 });
 
 test('a layout pdf.js cannot draw still reaches the page as words', async () => {
-  // drawFigure returns false rather than throwing, so `table` being unfinished
-  // costs formatting and never content.
+  // drawFigure returns false rather than throwing, so a layout this renderer
+  // has not been taught costs formatting and never content.
+  //
+  // This used `table` as the example, which is now drawn — the layouts left
+  // undrawn on a page are the deck furniture: kpi, outcome, logos and suite.
   const { drawFigure } = await import('../src/documents/pdfFigures.js');
   const r = normaliseSpec({
     format: 'pdf',
     title: 'T',
-    content: '## table | The scoreboard | Outcome, Measure | Continuity, Lines held | Effort, Alerts closed',
+    content: '## kpi | The scoreboard | Lines held: 99.2% | Alerts closed: within 4 hours',
   });
   assert.ok(r.ok, r.error);
-  assert.equal(r.spec.sections[0].layout, 'table');
-  assert.match(r.spec.sections[0].points.join(' '), /Lines held/, 'the rows survive as text');
+  assert.equal(r.spec.sections[0].layout, 'kpi');
+  assert.match(r.spec.sections[0].points.join(' '), /Lines held/, 'the measures survive as text');
 
   const flow = recordingFlow();
   assert.equal(drawFigure(flow, r.spec.sections[0], figureDeps()), false);
   assert.equal(flow.calls.rect.length, 0, 'nothing half-drawn');
+});
+
+test('the layouts a brief actually uses are drawn, not flattened to prose', async () => {
+  // Five of eleven layouts reached the page as another navy heading: quote,
+  // split, chain, flow and table. A document ending on a quote set exactly
+  // like the six headings above it has no ending, and a table rendered as a
+  // sentence has lost the only thing it had.
+  //
+  // This matters beyond looks. normaliseSpec now requires a third of sections
+  // to carry a drawn figure, and it counts layouts — so a document could meet
+  // that quota with six quote sections and still render as unbroken text. The
+  // quota is only honest if the renderer draws what the quota counts.
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+
+  const cases = {
+    quote: '## quote | The calendar sets the price of an intrusion.',
+    split: '## split | Ranked by severity | Ranked by consequence',
+    chain: '## chain | Signal > Context > Consequence > Action',
+    flow: '## flow | Detect > *Rank > Act',
+    table: '## table | The scoreboard | Outcome, Measure | Continuity, Lines held | Effort, Alerts closed',
+  };
+
+  for (const [layout, content] of Object.entries(cases)) {
+    const r = normaliseSpec({ format: 'pdf', title: 'T', content });
+    assert.ok(r.ok, `${layout}: ${r.error}`);
+    assert.equal(r.spec.sections[0].layout, layout);
+
+    const flow = recordingFlow();
+    assert.equal(drawFigure(flow, r.spec.sections[0], figureDeps()), true, `${layout} was not drawn`);
+    assert.ok(flow.calls.rect.length >= 2, `${layout} drew only ${flow.calls.rect.length} shapes`);
+
+    // And it reserved room for itself. A figure that reports zero height gets
+    // a page break in the middle of it, which is worse than not drawing at all.
+    assert.ok(
+      figureSpace(r.spec.sections[0], flow, figureDeps()) > 20,
+      `${layout} claims no space`,
+    );
+  }
+});
+
+/**
+ * The colours a rendered PDF actually paints.
+ *
+ * The deck and the docx have had a palette test since they were written, and
+ * the docx one says "the same rule the deck and the pdf live under" — which
+ * was not true: there was no pdf one. A PDF's content streams are Flate
+ * compressed and its type is subsetted, so nothing in the file is greppable,
+ * and the test that should have existed was never written.
+ *
+ * It cost exactly what an untested rule costs. Repainting the page ground from
+ * cream back to white — the single change this whole pass is about — left all
+ * 760 tests green.
+ */
+function pdfFills(bytes) {
+  const buf = Buffer.from(bytes);
+  const fills = [];
+
+  for (const m of buf.toString('latin1').matchAll(/stream\r?\n/g)) {
+    const start = m.index + m[0].length;
+    const end = buf.indexOf('endstream', start, 'latin1');
+    let body;
+    try {
+      body = zlib.inflateSync(buf.subarray(start, end)).toString('latin1');
+    } catch {
+      continue; // a font or image stream, not page content
+    }
+    for (const [, r, g, b] of body.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) (?:rg|RG)/g)) {
+      fills.push({ r: Number(r), g: Number(g), b: Number(b) });
+    }
+  }
+
+  return fills;
+}
+
+/** Is `c` a point on the brand gradient, rather than a colour of its own? */
+const onGradient = (c) => {
+  const stops = GRADIENT.stops.map(hex);
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    const [a, b] = [stops[i], stops[i + 1]];
+    // Solve for t on the channel that moves most, then check the other two.
+    const spans = [['r', b.r - a.r], ['g', b.g - a.g], ['b', b.b - a.b]];
+    const [key, span] = spans.sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))[0];
+    const t = (c[key] - a[key]) / span;
+    if (t < -0.01 || t > 1.01) continue;
+    if (['r', 'g', 'b'].every((k) => Math.abs(a[k] + (b[k] - a[k]) * t - c[k]) < 2 / 255)) return true;
+  }
+  return false;
+};
+
+test('a pdf paints the house ground and only brand colours', async () => {
+  // "There's no color highlights in the document - the entire document feels
+  // monotonous." The ground is the answer to that, and it is the one thing
+  // nothing was watching.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: [
+      '## stat | 265 | attacks in 2025. Source: ISAC.',
+      '## A section\nA paragraph.\n- A point',
+      '## quote | The one line to end on.',
+      '## table | Outcome, Measure | Continuity, Lines held',
+      '## split | Ranked by severity | Ranked by consequence',
+      '## chain | Signal > Context > Action',
+    ].join('\n\n'),
+  });
+  assert.ok(r.ok, r.error);
+
+  const fills = pdfFills(await renderPdf(r.spec, META, FONTS));
+  assert.ok(fills.length > 20, `only ${fills.length} fills: the streams did not decompress`);
+
+  // The ground. Cream, and the FIRST thing painted on the page, or whatever
+  // else is drawn there is painted over.
+  assert.ok(same(fills[0], hex(COLOR.cream)), `the page opens on ${JSON.stringify(fills[0])}`);
+
+  // And every colour after it is one the brand names, or a point on the
+  // gradient between two that it does.
+  const allowed = [...PALETTE, ...Object.values(CREAM)].map(hex);
+  for (const c of fills) {
+    assert.ok(
+      allowed.some((a) => same(c, a)) || onGradient(c),
+      `the pdf paints ${JSON.stringify(c)}, which is not a brand colour`,
+    );
+  }
+});
+
+test('a drawn layout never takes its own data as its headline', async () => {
+  // The rule is recorded three times in spec.js — for stat, for chain, for
+  // flow — and each entry describes the same defect reaching a rendered page:
+  // the layout's own data set as a heading, over a figure drawing it again.
+  //
+  // It was recorded three times and never generalised, so `quote` and `table`
+  // still did it. A quote ended a brief as a navy heading with the identical
+  // sentence reversed out of a navy panel directly beneath. Asserted for every
+  // layout at once, so the fourth one cannot arrive the same way.
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+
+  const noHeading = {
+    stat: '## stat | 265 | attacks in 2025. Source: ISAC.',
+    quote: '## quote | The calendar sets the price of an intrusion.',
+    split: '## split | Ranked by severity | Ranked by consequence',
+    timeline: '## timeline | Week 0 | Week 2 | Week 6',
+    table: '## table | Outcome, Measure | Continuity, Lines held | Effort, Alerts closed',
+    chain: '## chain | Signal > Context > Action',
+    flow: '## flow | Detect > *Rank > Act',
+    paradigm: '## paradigm | Ranked by severity | Ranked by consequence',
+  };
+
+  for (const [layout, content] of Object.entries(noHeading)) {
+    const r = normaliseSpec({ format: 'pdf', title: 'T', content });
+    assert.ok(r.ok, `${layout}: ${r.error}`);
+    assert.equal(r.spec.sections[0].layout, layout);
+    assert.equal(r.spec.sections[0].title, '', `${layout} headlines itself with its own data`);
+
+    // And the words still reach a renderer that cannot draw it.
+    assert.ok(r.spec.sections[0].points.length > 0, `${layout} lost its content`);
+  }
+
+  // The author's own heading is kept, because that is not the figure's data.
+  const titled = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## table | What you get and when | Deliverable, When | Written findings, Week 2',
+  });
+  assert.ok(titled.ok, titled.error);
+  assert.match(titled.spec.sections[0].title, /What you get and when/);
+});
+
+test('the closing line is reversed out, not set as one more heading', async () => {
+  // The specific complaint behind all of this — "the entire document feels
+  // monotonous" — is about fields of colour, not point size. So the assertion
+  // is that the quote paints a navy panel the width of the column, and that
+  // the words on it are NOT navy.
+  const { drawFigure } = await import('../src/documents/pdfFigures.js');
+  const r = normaliseSpec({ format: 'pdf', title: 'T', content: '## quote | The calendar sets the price.' });
+  assert.ok(r.ok, r.error);
+
+  const flow = recordingFlow();
+  drawFigure(flow, r.spec.sections[0], figureDeps());
+
+  const navy = hex(COLOR.navy);
+  const panel = flow.calls.rect.find((c) => same(c.color, navy) && c.width >= 400);
+  assert.ok(panel, `no navy panel: ${JSON.stringify(flow.calls.rect.map((c) => c.width))}`);
+  assert.ok(flow.calls.text.length > 0, 'the line itself has to be drawn');
+  for (const t of flow.calls.text) {
+    assert.ok(!same(t.color, navy), `"${t.t}" is navy on navy`);
+  }
 });
 
 test('a drawn figure replaces its points rather than repeating them', async () => {

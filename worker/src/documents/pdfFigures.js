@@ -21,7 +21,8 @@
  * cursor somewhere unexpected corrupts every page after it.
  */
 
-import { COLOR, INK, eyebrowCase } from '../brand.js';
+import { COLOR, INK, ON_NAVY, eyebrowCase } from '../brand.js';
+import { CREAM } from './house.js';
 
 /** pdf-lib takes colours as 0..1 triples; mirrors pdf.js's helper. */
 function color(hex, rgbFn) {
@@ -150,7 +151,7 @@ function paradigmFigure(flow, section, { rgb, fonts, column, left }) {
       y: top - cellH,
       width: cellW,
       height: cellH,
-      color: color(filled ? '#EEF6F5' : '#FFFFFF', rgb),
+      color: color(filled ? CREAM.tintBand : '#FFFFFF', rgb),
       borderColor: color(filled ? COLOR.circuitTeal : INK.rule, rgb),
       borderWidth: filled ? 1 : 0.75,
     });
@@ -302,6 +303,249 @@ function tilesFigure(flow, section, { rgb, fonts, column, left }) {
   flow.gap(6);
 }
 
+// --- quote ------------------------------------------------------------------
+
+/**
+ * The one line to end on, reversed out of navy.
+ *
+ * This fell through to prose and arrived as another navy heading, which is
+ * the layout doing nothing: a quote slide exists to be the only thing on the
+ * page, and a document ending on a sentence set exactly like the six headings
+ * above it has no ending.
+ *
+ * A filled panel rather than large type, because "the entire document feels
+ * monotonous" is a complaint about fields of colour and not about point size.
+ * Navy is the brand's own reverse ground and the closing block already uses
+ * it, so the document ends on the colour it signs off in.
+ */
+function quoteFigure(flow, section, { rgb, fonts, column, left }) {
+  const { drawText, drawRectangle } = wrap(flow.page);
+
+  const size = F.value + 4;
+  const lines = flow.wrapText(section.line, {
+    metrics: fonts.metrics.display,
+    size,
+    width: column - 76,
+  });
+
+  const height = lines.length * size * 1.35 + 44;
+  const top = flow.y;
+
+  drawRectangle({ x: left, y: top - height, width: column, height, color: color(COLOR.navy, rgb) });
+
+  // The teal edge, the same device the point cards carry, so the closing line
+  // reads as the last item in the argument rather than as a separate object.
+  drawRectangle({ x: left, y: top - height, width: 3, height, color: color(COLOR.brightTeal, rgb) });
+
+  lines.forEach((line, i) => {
+    drawText(line, {
+      x: left + 28,
+      y: top - 32 - i * size * 1.35,
+      size,
+      font: fonts.display,
+      color: color(ON_NAVY.strong, rgb),
+      characterSpacing: -0.02 * size,
+    });
+  });
+
+  flow.y = top - height;
+  flow.gap(14);
+}
+
+// --- split ------------------------------------------------------------------
+
+/**
+ * Two states side by side, the second one the argument.
+ *
+ * Near enough to paradigm to raise the question of why both exist: paradigm is
+ * a movement and carries an arrow, split is a contrast and carries a rule. The
+ * model is given both because it already writes both, and a layout that falls
+ * through to prose is a layout that silently costs the document a figure.
+ */
+function splitFigure(flow, section, { rgb, fonts, column, left }) {
+  const { drawText, drawRectangle } = wrap(flow.page);
+
+  const gutter = 20;
+  const cellW = (column - gutter) / 2;
+  const lines = (text) =>
+    flow.wrapText(text, { metrics: fonts.metrics.heading, size: F.cell, width: cellW - 28 });
+
+  const rows = Math.max(lines(section.left).length, lines(section.right).length);
+  const cellH = Math.max(52, rows * F.cell * 1.4 + 30);
+  const top = flow.y;
+
+  const cell = (x, text, accent) => {
+    drawRectangle({
+      x,
+      y: top - cellH,
+      width: cellW,
+      height: cellH,
+      color: color('#FFFFFF', rgb),
+      borderColor: color(CREAM.tintBorder, rgb),
+      borderWidth: 0.75,
+    });
+    drawRectangle({ x, y: top - cellH, width: 2.5, height: cellH, color: color(accent, rgb) });
+
+    lines(text).forEach((line, i) => {
+      drawText(line, {
+        x: x + 16,
+        y: top - 26 - i * F.cell * 1.4,
+        size: F.cell,
+        font: fonts.heading,
+        color: color(COLOR.navy, rgb),
+      });
+    });
+  };
+
+  // Grey on the left and green on the right: green is the outcome colour and
+  // the right-hand cell is the state being argued for. Grey is not a second
+  // accent, it is the absence of one — and it has to be VISIBLE, which sand
+  // was not: #DCD6C6 on a white card beside a cream page read as a cell that
+  // had failed to draw its edge rather than as a cell with a neutral one.
+  cell(left, section.left, INK.muted);
+  cell(left + cellW + gutter, section.right, COLOR.signalGreen);
+
+  flow.y = top - cellH;
+  flow.gap(14);
+}
+
+// --- chain ------------------------------------------------------------------
+
+/**
+ * A sequence of steps stacked down the column, each on its own row.
+ *
+ * Down and not across, which is where this differs from the deck: five steps
+ * across 13.3 inches is a diagram, and five steps across a 483 point column is
+ * five words nobody can read. Stacked, the step number carries the sequence
+ * and the row can be as long as it needs to be.
+ */
+function chainFigure(flow, section, { rgb, fonts, column, left }) {
+  const { drawText, drawRectangle } = wrap(flow.page);
+
+  const rowH = 26;
+  let y = flow.y;
+
+  // flow marks one step as the emphasis; chain has none, and a sequence is
+  // read for where it ends, so the last step takes the accent by default.
+  // Ignoring `emphasis` here would render a flow identically to a chain and
+  // silently drop the one thing the author marked.
+  const accented = Number.isInteger(section.emphasis) && section.emphasis >= 0
+    ? section.emphasis
+    : Math.min(section.steps.length, 5) - 1;
+
+  section.steps.slice(0, 5).forEach((step, i) => {
+    const last = i === accented;
+
+    drawRectangle({
+      x: left,
+      y: y - rowH + 4,
+      width: column,
+      height: rowH - 4,
+      color: color('#FFFFFF', rgb),
+      borderColor: color(CREAM.tintBorder, rgb),
+      borderWidth: 0.75,
+    });
+
+    // The index, set in the mono face so the column of numbers aligns.
+    drawRectangle({
+      x: left,
+      y: y - rowH + 4,
+      width: 24,
+      height: rowH - 4,
+      color: color(last ? COLOR.signalGreen : COLOR.circuitTeal, rgb),
+    });
+    drawText(String(i + 1), {
+      x: left + 9,
+      y: y - rowH + 12,
+      size: F.label + 1,
+      font: fonts.eyebrow,
+      color: color(ON_NAVY.strong, rgb),
+    });
+
+    drawText(step, {
+      x: left + 36,
+      y: y - rowH + 12,
+      size: F.cell,
+      font: fonts.heading,
+      color: color(COLOR.navy, rgb),
+    });
+
+    y -= rowH;
+  });
+
+  flow.y = y;
+  flow.gap(12);
+}
+
+// --- table ------------------------------------------------------------------
+
+/**
+ * Rows and columns, with the header band carrying the colour.
+ *
+ * "table shipped here unfinished" is what the module header said about this,
+ * and unfinished meant the rows arrived as comma-separated prose. A table is
+ * the one layout whose content is already a grid, so rendering it as a
+ * sentence loses the only thing it had.
+ */
+function tableFigure(flow, section, { rgb, fonts, column, left }) {
+  const { drawText, drawRectangle } = wrap(flow.page);
+
+  const cols = section.columns.length;
+  const colW = column / cols;
+  const headH = 22;
+  const lines = (text) =>
+    flow.wrapText(text, { metrics: fonts.metrics.body, size: F.cell, width: colW - 20 });
+
+  const top = flow.y;
+  let y = top;
+
+  drawRectangle({ x: left, y: y - headH, width: column, height: headH, color: color(COLOR.navy, rgb) });
+  section.columns.forEach((heading, c) => {
+    drawText(eyebrowCase(heading), {
+      x: left + c * colW + 10,
+      y: y - headH + 8,
+      size: F.label,
+      font: fonts.eyebrow,
+      color: color(ON_NAVY.strong, rgb),
+      characterSpacing: 0.12 * F.label,
+    });
+  });
+  y -= headH;
+
+  section.rows.forEach((row, r) => {
+    const rowH = Math.max(...row.map((cell) => lines(cell).length)) * F.cell * 1.35 + 12;
+
+    // Banded, because a hairline between every row of a narrow table is more
+    // rules than data. The band is the tint, not grey.
+    drawRectangle({
+      x: left,
+      y: y - rowH,
+      width: column,
+      height: rowH,
+      color: color(r % 2 ? '#FFFFFF' : CREAM.tintBand, rgb),
+      borderColor: color(CREAM.tintBorder, rgb),
+      borderWidth: 0.5,
+    });
+
+    row.forEach((cell, c) => {
+      lines(cell).forEach((line, i) => {
+        drawText(line, {
+          x: left + c * colW + 10,
+          y: y - 14 - i * F.cell * 1.35,
+          size: F.cell,
+          font: c === 0 ? fonts.heading : fonts.body,
+          color: color(c === 0 ? COLOR.navy : INK.body, rgb),
+        });
+      });
+    });
+
+    y -= rowH;
+  });
+
+  flow.y = y;
+  flow.gap(14);
+}
+
 // --- bars -------------------------------------------------------------------
 
 /**
@@ -365,6 +609,13 @@ const FIGURES = {
   timeline: timelineFigure,
   tiles: tilesFigure,
   bars: barsFigure,
+  quote: quoteFigure,
+  split: splitFigure,
+  chain: chainFigure,
+  // flow is chain with an emphasised step; the page stacks its steps either
+  // way, so one drawing serves both rather than two that drift apart.
+  flow: chainFigure,
+  table: tableFigure,
 };
 
 /**
@@ -385,6 +636,31 @@ const FIGURE_HEIGHT = {
   timeline: () => 62,
   tiles: (s) => Math.ceil(Math.min(s.tiles.length, 6) / 2) * 76 + 6,
   bars: (s) => Math.min(s.bars.length, 6) * 30 + 8,
+  quote: (s, flow, { fonts, column }) =>
+    flow.wrapText(s.line, { metrics: fonts.metrics.display, size: F.value + 4, width: column - 76 }).length
+      * (F.value + 4) * 1.35 + 58,
+  split: (s, flow, { fonts, column }) => {
+    const cellW = (column - 20) / 2;
+    const rows = Math.max(
+      flow.wrapText(s.left, { metrics: fonts.metrics.heading, size: F.cell, width: cellW - 28 }).length,
+      flow.wrapText(s.right, { metrics: fonts.metrics.heading, size: F.cell, width: cellW - 28 }).length,
+    );
+    return Math.max(52, rows * F.cell * 1.4 + 30) + 14;
+  },
+  chain: (s) => Math.min(s.steps.length, 5) * 26 + 12,
+  flow: (s) => Math.min(s.steps.length, 5) * 26 + 12,
+  table: (s, flow, { fonts, column }) => {
+    const colW = column / s.columns.length;
+    const body = s.rows.reduce(
+      (total, row) =>
+        total +
+        Math.max(...row.map((cell) =>
+          flow.wrapText(cell, { metrics: fonts.metrics.body, size: F.cell, width: colW - 20 }).length))
+          * F.cell * 1.35 + 12,
+      0,
+    );
+    return 22 + body + 14;
+  },
 };
 
 /**
