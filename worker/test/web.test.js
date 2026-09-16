@@ -685,6 +685,21 @@ test('the chat sheds web tools once, not in a loop', () => {
   assert.match(branch.slice(0, 400), /restartWithoutWeb = true/, 'and must set it');
 });
 
+test('the deployed WEB_RESEARCH value is the one that actually ships', () => {
+  // Read from wrangler.toml and put through the real loader, because the
+  // question "is the web tool in the request" was answered three times from
+  // reasoning and never once from the shipped config.
+  const toml = fs.readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  const value = /^WEB_RESEARCH\s*=\s*"(\w+)"/m.exec(toml)[1];
+  const tools = webTools(loadConfig({ ...ENV, WEB_RESEARCH: value }));
+
+  if (value === 'off') {
+    assert.deepEqual(tools, [], 'WEB_RESEARCH is off but a web tool still reaches the request');
+  } else {
+    assert.ok(tools.length > 0, 'WEB_RESEARCH is on but no web tool is offered');
+  }
+});
+
 test('WEB_RESEARCH is declared in wrangler.toml, not only in code', () => {
   // The diagnosis in /admin/upstream tells an operator to "set
   // WEB_RESEARCH=off". It was never declared in wrangler.toml, so it took the

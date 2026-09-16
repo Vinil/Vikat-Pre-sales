@@ -91,7 +91,23 @@ RATE_LIMIT_WINDOW_SECONDS = "600"
 # Changing it in the Cloudflare dashboard takes effect immediately and is
 # wiped by the next deploy, which replaces [vars] with this block. For
 # anything beyond a five-minute test, change it here.
-WEB_RESEARCH = "on"
+# OFF, deliberately, on 2026-09-16.
+#
+# Every /chat request was failing with 403 {"error":{"type":"forbidden",
+# "message":"Request not allowed"}} — a body that is not Anthropic's own error
+# envelope, so it was written by something in front of the API. /admin/upstream
+# accepts every part of a real request including one carrying every tool at
+# 364KB, because a ladder proves a server tool is ACCEPTED and never invokes
+# one. A server tool executes outside the Messages API.
+#
+# The recovery in index.js should shed the web tool and retry, and did not.
+# Rather than guess a fourth time at why, this removes the variable outright:
+# no web tool in the request, nothing to execute, nothing to refuse.
+#
+# If chat still fails with this off, the web tool is innocent and the cause is
+# elsewhere — which is worth knowing for certain and is the point of setting
+# it. Turn it back to "on" once the entitlement is confirmed.
+WEB_RESEARCH = "off"
 
 # --- Authentication -------------------------------------------------------
 AUTH_MODE = "cf-access"

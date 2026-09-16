@@ -519,6 +519,22 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
           thinkingDisabled = true;
           return true;
         }
+        // Nothing in the ladder recognised it. This is where a refusal stops
+        // being recoverable and starts being a mystery, so it is also the only
+        // place that can say what it actually was.
+        //
+        // The shape matters: an SDK APIError carries .status, a stream failure
+        // may not, and the difference decides whether a status-matching branch
+        // above could ever have fired. A 403 that reached a rep unrecovered,
+        // while a branch existed for exactly that status, is the reason this
+        // line is here.
+        console.error(
+          '[chat] refusal not recognised by any degrade step:',
+          `status=${err?.status ?? 'none'}`,
+          `name=${err?.name || err?.constructor?.name || 'unknown'}`,
+          `webToolsAttached=${webTools(cfg).some((t) => !dropped.has(t.name))}`,
+          String(err?.message || err).slice(0, 200),
+        );
         return false;
       };
 
