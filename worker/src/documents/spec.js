@@ -116,15 +116,30 @@ export function normaliseSpec(input) {
   //
   // Only for a deck, and only past a few sections: a three-slide summary is
   // legitimately prose, and a pdf is a document where paragraphs are the point.
-  if (format === 'pptx' && sections.length >= LIMITS.proseOnlyDeck && !sections.some((s) => s.layout)) {
+  // EVERY format, not just a deck.
+  //
+  // This read `format === 'pptx'`, and that exemption is why a brief to a
+  // CISO came back as four pages of paragraphs and bullet lists after the PDF
+  // renderer had been taught to draw stat, bars, tiles, timeline and paradigm.
+  // The renderer could draw; nothing required it to; the model wrote prose;
+  // the rule that would have caught it was scoped to decks.
+  //
+  // "Always make the paper / ppt visual in nature" was asked three times
+  // before this changed, which is the real cost of an exemption written once
+  // and never revisited.
+  //
+  // A pdf gets the same threshold as a deck. A short document is legitimately
+  // prose — a two-paragraph note is a note — and past four sections a document
+  // with nothing drawn in it is a wall of text whatever its extension.
+  if (sections.length >= LIMITS.proseOnlyDeck && !sections.some((s) => s.layout)) {
     return {
       ok: false,
       error:
-        `A ${sections.length}-slide deck with no drawn slides is a document with slide breaks. ` +
-        'Rebuild it using at least one of stat, bars, chain, timeline, split or quote for the ' +
-        'content that has that shape — a figure, a comparison, a sequence, a platform, two ' +
-        'states, or the one line to end on. Keep prose slides for the parts that are genuinely ' +
-        'argument.',
+        `${sections.length} sections and not one drawn figure. That is a wall of text, whether it ` +
+        'is a deck or a two-pager. Rebuild it using stat, bars, tiles, table, kpi, timeline, ' +
+        'paradigm, flow, chain, split or quote for the content that already has that shape: a ' +
+        'figure, a comparison, a set, a sequence, two states, or the one line to end on. Keep ' +
+        'prose for the parts that are genuinely argument.',
     };
   }
 

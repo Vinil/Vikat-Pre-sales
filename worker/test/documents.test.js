@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFName } from 'pdf-lib';
 import { wrap as wrapText } from '../src/documents/measure.js';
 
 import { normaliseSpec, parseSections, parseLayout, fileNameFor, DISCLOSURE_LABELS, LIMITS } from '../src/documents/spec.js';
@@ -125,8 +125,14 @@ test('content inside the limits is untouched', () => {
 
 test('the section and point counts are capped', () => {
   const many = Array.from({ length: 40 }, (_, i) => ({ title: `Section ${i}`, points: Array(20).fill('point') }));
-  // As a pdf: the caps are format-independent, and a 40-slide deck of pure
-  // prose is now refused for a different reason entirely.
+  // One drawn section among them, because the prose-only rule now covers every
+  // format and would otherwise refuse this fixture before any cap was reached.
+  // This test is about the caps; it should fail for a cap and nothing else.
+  // Index 1: inside the section cap, which slices to LIMITS.sections BEFORE
+  // the prose-only check, so a drawn section at index 39 is discarded and the
+  // fixture is refused as prose. And not index 0, because the assertions below
+  // read sections[0].points and a stat carries none.
+  many[1] = { layout: 'stat', value: '265', caption: 'attacks. Source: ISAC.', title: '', points: [] };
   const s = spec({ format: 'pdf', sections: many });
   assert.equal(s.sections.length, LIMITS.sections);
   assert.equal(s.sections[0].points.length, LIMITS.points);
@@ -311,6 +317,9 @@ test('a long PDF flows onto more pages rather than off the first one', async () 
     body: 'A paragraph of body copy that takes several lines on an A4 page once wrapped at the column width. '.repeat(3),
     points: ['one', 'two', 'three'],
   }));
+  // One drawn section, so the prose-only rule does not refuse this fixture
+  // before it can measure what it is actually about: flowing onto more pages.
+  long[0] = { layout: 'stat', value: '265', caption: 'attacks. Source: ISAC.', title: '', points: [] };
 
   const one = await PDFDocument.load(await renderPdf(spec({ format: 'pdf' }), META, FONTS));
   const many = await PDFDocument.load(await renderPdf(spec({ format: 'pdf', sections: long }), META, FONTS));
@@ -962,7 +971,7 @@ test('a deck of nothing but prose is refused, not quietly built', () => {
   const r = normaliseSpec({ format: 'pptx', title: 'SecSemantic for agriculture', content: proseDeck(5) });
 
   assert.equal(r.ok, false);
-  assert.match(r.error, /drawn slides/);
+  assert.match(r.error, /not one drawn figure/);
   // The message has to be actionable, or the model cannot fix it.
   for (const layout of ['stat', 'bars', 'chain', 'timeline', 'split', 'quote']) {
     assert.match(r.error, new RegExp(layout), `the refusal must name ${layout}`);
@@ -986,9 +995,24 @@ test('a short deck may be all prose', () => {
   assert.ok(normaliseSpec({ format: 'pptx', title: 'T', content: proseDeck(3) }).ok);
 });
 
-test('a pdf is never refused for being prose', () => {
-  // It is a document. Paragraphs are the point.
-  assert.ok(normaliseSpec({ format: 'pdf', title: 'T', content: proseDeck(8) }).ok);
+test('a pdf of nothing but prose is refused too', () => {
+  // This asserted the opposite: "It is a document. Paragraphs are the point."
+  // That was true while pdf.js could not draw. It can now — stat, bars, tiles,
+  // timeline and paradigm — and the exemption outlived the limitation: a brief
+  // to a CISO came back as four pages of paragraphs and bullet lists, because
+  // nothing required the renderer to draw what it was newly able to draw.
+  const r = normaliseSpec({ format: 'pdf', title: 'T', content: proseDeck(8) });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not one drawn figure/);
+  assert.match(r.error, /stat, bars, tiles/, 'the refusal names what to reach for');
+});
+
+test('a short document is still allowed to be prose', () => {
+  // The threshold matters as much as the rule. A two-paragraph note is a note,
+  // and refusing it would teach the model to pad a short answer into a long
+  // one to satisfy a checker.
+  const r = normaliseSpec({ format: 'pdf', title: 'T', content: proseDeck(2) });
+  assert.ok(r.ok, r.error);
 });
 
 // --- DOCX -----------------------------------------------------------------
@@ -1090,12 +1114,26 @@ test('the disclosure label is in the footer, so it repeats on every page', () =>
   assert.doesNotMatch(cleared['word/footer1.xml'], /INTERNAL ONLY|CLEARED FOR CUSTOMERS/i);
 });
 
-test('a docx of pure prose is allowed', () => {
-  // The drawn-layout rule is about decks. A brief is a document; paragraphs
-  // are what it is for.
+test('a docx of pure prose is refused on the same terms', () => {
+  // Also reversed. The old reasoning — "the drawn-layout rule is about decks"
+  // — treated Word as a place for paragraphs, and this Word output is not a
+  // draft somebody edits: it is brand-locked customer collateral, and it goes
+  // to the same reader as the pdf.
+  //
+  // The layouts still reach it as text, so a docx loses formatting and never
+  // content. What it stops is an eight-section document with nothing in it but
+  // paragraphs.
   const r = normaliseSpec({ format: 'docx', title: 'T', content: proseDeck(8) });
-  assert.ok(r.ok, r.error);
-  assert.ok(renderDocx(r.spec, META).length > 0);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /wall of text/);
+
+  const drawn = normaliseSpec({
+    format: 'docx',
+    title: 'T',
+    content: `${proseDeck(7)}\n\n## stat | 580,000 | cases a year. Source: AAA.`,
+  });
+  assert.ok(drawn.ok, drawn.error);
+  assert.ok(renderDocx(drawn.spec, META).length > 0, 'and it still renders');
 });
 
 test('a bar never spans more of the grid than it has', () => {
@@ -1322,4 +1360,50 @@ test('every field that can overflow is refused, not just the ones in sections', 
     assert.equal(r.ok, false, `an over-long ${field} was accepted`);
     assert.match(r.error, /too long for the layout/, field);
   }
+});
+
+test('the cover carries the lockup ARTWORK, not retyped letterforms', async () => {
+  // pdf.js drew the wordmark as text in Inter Black while the deck renderer
+  // used the extracted artwork. src/brandassets/README.md was written against
+  // exactly this: TM3 §07 says the logotype is a designed lockup and is never
+  // retyped, and "a good imitation of a mark is worse than an obvious one,
+  // because it survives being forwarded". Every brief that went to a customer
+  // carried a redrawn mark.
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: '## stat | 580,000 | cases a year. Source: AAA.',
+  });
+  assert.ok(r.ok, r.error);
+
+  const bytes = await renderPdf(r.spec, META, FONTS);
+  const doc = await PDFDocument.load(bytes);
+
+  // An embedded image is the assertion. Counting XObjects rather than looking
+  // for absent text, because the absence of "vikat.AI" could equally mean the
+  // cover stopped drawing anything at all.
+  const page = doc.getPages()[0];
+  const xobjects = page.node.Resources()?.lookup?.(PDFName.of('XObject'));
+  assert.ok(xobjects, 'the cover embeds no image at all');
+  assert.ok(xobjects.keys().length >= 1, 'no image on the cover');
+});
+
+test('the mark is embedded once, however many pages', async () => {
+  // pdf-lib embeds by document, not by page. Embedding inside drawCover would
+  // put the same artwork in the file twice.
+  const long = Array.from({ length: 8 }, (_, i) => `## Section ${i}\nA paragraph.`).join('\n\n');
+  const r = normaliseSpec({
+    format: 'pdf',
+    title: 'T',
+    content: `${long}\n\n## stat | 580,000 | cases a year. Source: AAA.`,
+  });
+  assert.ok(r.ok, r.error);
+
+  const bytes = Buffer.from(await renderPdf(r.spec, META, FONTS));
+  const doc = await PDFDocument.load(bytes);
+  assert.ok(doc.getPageCount() > 1, 'needs to span pages for this to mean anything');
+
+  // The artwork is 466x232; a second copy would show as a second image object.
+  const images = bytes.toString('latin1').match(/\/Subtype\s*\/Image/g) || [];
+  assert.ok(images.length <= 2, `${images.length} image objects: the lockup and its soft mask, no more`);
 });

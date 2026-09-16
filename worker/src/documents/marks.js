@@ -29,3 +29,21 @@ export function markMedia() {
     'ppt/media/vikat-lockup-reversed.png': new Uint8Array(lockupReversed),
   };
 }
+
+/**
+ * The lockup as raw bytes, for a renderer that embeds rather than zips.
+ *
+ * pdf.js needs the same artwork and cannot use the OOXML map above: pdf-lib
+ * embeds a PNG and draws it, it does not add parts to an archive. Exposing the
+ * bytes here rather than importing the .png in pdf.js keeps the rule this
+ * module exists for — one place imports the artwork, so the Node test hook has
+ * one thing to stub and no renderer holds a file path.
+ *
+ * @param {boolean} [onDark] The reversed lockup, for navy and dark grounds.
+ */
+export function lockupBytes(onDark = false) {
+  return new Uint8Array(onDark ? lockupReversed : lockup);
+}
+
+/** The artwork's true aspect ratio, so no renderer stretches it. */
+export const LOCKUP_ASPECT = 466 / 232;

@@ -16,6 +16,7 @@ import fontkit from '@pdf-lib/fontkit';
 import { COLOR, INK, ON_NAVY, GRADIENT, WORDMARK, TAGLINE, copyrightLine, eyebrowCase } from '../brand.js';
 import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
 import { drawFigure, figureSpace } from './pdfFigures.js';
+import { lockupBytes, LOCKUP_ASPECT } from './marks.js';
 import { wrap } from './measure.js';
 
 /** A4 in points. */
@@ -231,14 +232,37 @@ function drawCover(flow) {
 
   gradientBand(page, PAGE.height - 8, 8);
 
-  page.drawText(WORDMARK, {
-    x: M.left,
-    y: PAGE.height - M.top - 6,
-    size: SIZE.wordmark,
-    font: fonts.display,
-    color: color(COLOR.navy),
-    characterSpacing: -0.03 * SIZE.wordmark,
-  });
+  // The ARTWORK, not the letterforms.
+  //
+  // This drew the wordmark as text in Inter Black, which is the exact thing
+  // src/brandassets/README.md was written to stop: "The logotype 'vikat.AI' is
+  // a designed lockup, never retype it in body text" (TM3 §07), and "a good
+  // imitation of a mark is worse than an obvious one, because it survives
+  // being forwarded." The deck renderer was given the real lockup and the PDF
+  // was left typesetting its own, so every brief that went to a customer
+  // carried a redrawn mark.
+  //
+  // flow.mark is embedded once per document in renderPdf: pdf-lib embeds by
+  // document, not by page, and embedding per cover would add the same image
+  // to the file twice.
+  if (flow.mark) {
+    // Sized and seated against the text it replaced. Two corrections from
+    // looking at the first render: 96pt wide made the mark twice the presence
+    // it has on a slide, on a page a third the width; and drawImage takes y as
+    // the BOTTOM edge where drawText took it as a baseline, so the artwork sat
+    // high and drifted toward the gradient band.
+    //
+    // 78pt puts the lockup at roughly the optical weight of the 15pt wordmark
+    // it replaces, and the top edge is pinned where the old cap-height sat.
+    const w = 78;
+    const h = w / LOCKUP_ASPECT;
+    page.drawImage(flow.mark, {
+      x: M.left,
+      y: PAGE.height - M.top + 4 - h,
+      width: w,
+      height: h,
+    });
+  }
 
   flow.y = PAGE.height - M.top - 76;
 
@@ -470,6 +494,10 @@ export async function renderPdf(spec, meta, fontSet) {
   doc.setCreator('Vikat.AI Sales Assistant');
   doc.setSubject(DISCLOSURE_LABELS[spec.disclosure]);
 
+  // Embedded ONCE per document. pdf-lib embeds by document rather than by
+  // page, so doing this inside drawCover would add the same image twice.
+  const mark = await doc.embedPng(lockupBytes(false));
+
   // Subsetting keeps a four-typeface document to a few tens of kilobytes
   // instead of a megabyte and a half.
   const embed = (bytes) => doc.embedFont(bytes, { subset: true });
@@ -486,6 +514,7 @@ export async function renderPdf(spec, meta, fontSet) {
     year: Number(date.slice(0, 4)),
     preparedBy: meta.preparedBy,
   });
+  flow.mark = mark;
 
   drawCover(flow);
   for (const section of spec.sections) drawSection(flow, section);
