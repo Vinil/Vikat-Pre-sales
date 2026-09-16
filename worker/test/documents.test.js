@@ -1733,3 +1733,46 @@ test('no renderer labels the reader a recipient or the sender a preparer', () =>
     .join('\n');
   assert.doesNotMatch(deck, memo);
 });
+
+test('the sign-off sits at the foot of the page, wherever the content stopped', () => {
+  // The first brief through the coloured renderer put the sign-off alone on a
+  // fourth page: the closing figure's trailing gap left it thirteen points
+  // short, and the block was drawn wherever the cursor happened to be. A
+  // sign-off floating mid-page with 300 points of cream under it looks like
+  // the document ran out rather than ended.
+  const run = (startY) => {
+    const calls = { text: [], rect: [] };
+    const page = {
+      drawText: (t, o) => calls.text.push({ t, ...o }),
+      drawRectangle: (o) => calls.rect.push(o),
+    };
+    let pages = 0;
+    const flow = {
+      spec: spec({ format: 'pdf' }),
+      fonts: { ...FONTS, display: 'display', heading: 'heading', body: 'body', eyebrow: 'eyebrow' },
+      meta: { preparedBy: 'Test Rep', date: '25 August 2026', year: 2026 },
+      page,
+      y: startY,
+      get remaining() { return this.y - 80; },
+      newPage() { pages += 1; this.y = 780; return page; },
+      gap(n) { this.y -= n; },
+      write(text, opts) { calls.text.push({ t: text, ...opts }); this.y -= 12; return 12; },
+    };
+    drawClose(flow);
+    // The navy panel, which is the widest thing drawn.
+    const panel = calls.rect.sort((a, b) => b.width - a.width)[0];
+    return { panel, pages };
+  };
+
+  // Halfway down a page with room to spare: no new page, and the block still
+  // lands at the foot rather than under the cursor.
+  const high = run(600);
+  assert.equal(high.pages, 0, 'a page with room does not need another');
+  assert.ok(high.panel.y < 130, `the block sits at y ${high.panel.y}, not at the foot`);
+  assert.ok(high.panel.y > 60, `the block at y ${high.panel.y} would collide with the footer`);
+
+  // And too low to fit: a new page, and the block at the foot of that one.
+  const low = run(140);
+  assert.equal(low.pages, 1, 'no room left, so a page');
+  assert.ok(low.panel.y < 130 && low.panel.y > 60, `y ${low.panel.y}`);
+});

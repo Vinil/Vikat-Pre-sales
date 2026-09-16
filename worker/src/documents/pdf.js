@@ -512,10 +512,20 @@ export function drawSection(flow, section) {
 export function drawClose(flow) {
   const { fonts, meta } = flow;
 
-  const block = 118;
-  if (block + 24 > flow.remaining) flow.newPage();
+  // Seated at the FOOT of the page, not wherever the last section happened to
+  // stop. A sign-off floating in the middle of a page with 300 points of cream
+  // under it looks like the document ran out rather than ended, and pinning it
+  // down also stops a section's trailing gap deciding whether it fits: the
+  // first brief through this renderer put the block alone on a fourth page
+  // because the closing figure left it thirteen points short.
+  //
+  // 104 rather than 118 for the same reason. The block is a tagline, a sender
+  // line and a copyright line; 118 was room for a fourth that does not exist.
+  const block = 104;
+  const clearance = 30;
+  const top = M.bottom + clearance + block;
 
-  const top = flow.y - 16;
+  if (flow.y < top) flow.newPage();
 
   flow.page.drawRectangle({
     x: M.left,
