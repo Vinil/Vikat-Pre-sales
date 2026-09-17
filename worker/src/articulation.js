@@ -1,3 +1,5 @@
+import { CUSTOMER_BOUND } from './execOutreach.js';
+
 /**
  * articulation.js — how the writing sounds, and how to tell when it doesn't.
  *
@@ -87,6 +89,85 @@ const MODEL_SHAPES = [
   },
 ];
 
+/**
+ * Melodrama. What "cheesy" is, when you have to catch it mechanically.
+ *
+ * "The headlines and title of the document is still very cheesy", on
+ * AAA_CISO_Brief_4.pdf, whose cover said "When a matter leaks, the proceeding
+ * fails." Nothing here caught it, and nothing was going to: it is not jargon,
+ * not a label, and not cryptic. It is a film trailer.
+ *
+ * These are the shapes melodrama actually takes. Each one is a sentence
+ * pattern rather than a word, because the words are always different and the
+ * shape never is.
+ */
+const PORTENTOUS = [
+  {
+    re: /^\s*when\s+[^,.!?]{4,60},\s*[^.!?]{4,60}[.!]?\s*$/i,
+    say: 'the "when X happens, Y fails" shape, which is a film trailer rather than a headline',
+  },
+  {
+    re: /\bin the (?:age|era|world|dawn) of\b/i,
+    say: '"in the age of …", which dates the document and says nothing',
+  },
+  { re: /\bis the new\b/i, say: 'the "X is the new Y" formula' },
+  {
+    re: /\b(?:the|your|every|each)\s+\w+(?:\s+\w+)?\s+(?:fails|collapses|dies|crumbles|is over|ends)\b/i,
+    say: 'a doom clause, which a reader discounts on sight',
+  },
+  { re: /\bmake no mistake\b|\bthe stakes (?:are|have never)\b/i, say: 'a raised voice' },
+  { re: /\bnot a matter of if,? but when\b/i, say: '"not if but when", which every vendor has already said to them' },
+];
+
+/**
+ * "A conflict wall enforced by policy is not a conflict wall."
+ *
+ * The tautology worn as profundity: a phrase, then the same phrase negated.
+ * It reads as a thought and contains none, and it was the closing line of a
+ * brief to a CISO.
+ *
+ * Done as a function rather than a backreference, because the repeated part is
+ * the START of the left side and the WHOLE of the right, and a regex that
+ * expresses that is a regex nobody can change later.
+ */
+function tautology(text) {
+  const m = /^(.*?)\bis not\b(.*)$/i.exec(String(text).trim());
+  if (!m) return false;
+
+  const words = (part) => part.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const left = words(m[1]).join(' ');
+  const right = words(m[2]).join(' ');
+
+  return right.length >= 6 && left.includes(right);
+}
+
+/**
+ * Long words that have a short one, with the short one attached.
+ *
+ * "Simple English. No fancy words." Naming the fault without naming the fix
+ * makes somebody go and think of a synonym, which is the cost this exists to
+ * avoid — so every entry carries its replacement.
+ *
+ * Separate from MODEL_TELLS, which is about sounding like a chatbot. This is
+ * about a reader having to reread a sentence. "Resequencing the same security
+ * budget" went to a CISO; "reordering" is the same word with the Latin taken
+ * out.
+ */
+const FANCY_WORDS = [
+  ['resequencing', 'reordering'], ['resequence', 'reorder'],
+  ['commensurate', 'matching'], ['ascertain', 'find out'],
+  ['commence', 'start'], ['terminate', 'end'], ['necessitate', 'need'],
+  ['facilitate', 'help'], ['endeavour', 'try'], ['endeavor', 'try'],
+  ['instantiate', 'create'], ['operationalize', 'put to work'],
+  ['operationalise', 'put to work'], ['aforementioned', 'that'],
+  ['subsequent to', 'after'], ['prior to', 'before'], ['in order to', 'to'],
+  ['at this juncture', 'now'], ['with regard to', 'about'],
+  ['in the event that', 'if'], ['a multitude of', 'many'],
+  ['in close proximity to', 'near'], ['at the present time', 'now'],
+  ['for the purpose of', 'to'], ['in spite of the fact that', 'although'],
+  ['utilization', 'use'], ['methodology', 'method'], ['functionality', 'what it does'],
+];
+
 /** §07 and §08 both: no emoji, anywhere. */
 const EMOJI =
   /[‼-㊙\u{1F000}-\u{1FAFF}\u{1F900}-\u{1F9FF}\u{2600}-\u{27BF}]/u;
@@ -97,7 +178,39 @@ const EMOJI =
  * Written as instructions to follow rather than adjectives to admire. "Be
  * direct" is not actionable; "the outcome first, in the first sentence" is.
  */
-export const ARTICULATION_BLOCK = `## How it has to read
+export const ARTICULATION_BLOCK = `## Five rules, on everything you write
+
+These come from the person whose name goes on it, and they apply to every
+document, deck, email and post — not only the ones that mention them.
+
+1. **Simple English. No fancy words.** If a shorter, plainer word exists, it is
+   the right word. Reordering, not resequencing. Use, not utilise. Start, not
+   commence. About, not with regard to. A CISO reads fast and is not impressed
+   by vocabulary; they are impressed by not having to reread a sentence.
+2. **Professional and to the point.** Say the thing. Then stop. No throat
+   clearing, no scene setting, no paragraph explaining what the next paragraph
+   will cover. If a sentence survives deletion without the meaning changing,
+   delete it.
+3. **The hook cannot be cryptic.** A headline earns the click by being
+   interesting AND clear. "When a matter leaks, the proceeding fails" is a film
+   trailer. "Beyond detection" is a gesture. Say what you actually mean, in a
+   sentence a stranger understands with no context: who, what, and why it costs
+   them something.
+4. **Dry wit is welcome. Jokes are not.** One wry line that lands the point is
+   worth three earnest ones. The register is a smart colleague being honest,
+   not a comedian and not a preacher. Never a pun, never a joke at the
+   reader's expense, never humour about their incident or their industry's
+   misfortune, and never more than one per document. If you cannot make it
+   funny AND useful, make it useful.
+5. **Nobody may think a machine wrote this.** That is the whole test. A rep
+   sends it under their own name to someone who reads twenty of these a week.
+
+**Never melodramatic.** No doom ("when X happens, Y fails", "the end of Z"). No
+"in the age of…". No "X is not really X" tautologies that sound profound and
+say nothing. No three tidy parallel clauses in a row. State what is true, in
+the order a person would say it out loud.
+
+## How it has to read
 
 Four attributes, from the brand guidelines, and they are the same in both.
 
@@ -333,8 +446,9 @@ const SELF_CONGRATULATION = [
  */
 const NAMES_US = /\bVikat(?:\.AI)?\b/i;
 
-/** Disclosures that mean a customer will read this. */
-const CUSTOMER_BOUND = new Set(['external_ok', 'needs_approval']);
+// Disclosures that mean a customer will read this. Imported rather than
+// declared twice: execOutreach.js reached the same conclusion about a draft
+// separately, and two copies of a rule is one copy waiting to disagree.
 
 /**
  * Words that mean nothing to a reader who has never met us, in reading order.
@@ -507,6 +621,37 @@ export function checkArticulation(text) {
   }
 
   if (EMOJI.test(copy)) notes.push('No emoji in brand materials.');
+
+  // Melodrama, line by line. A headline is a line and so is a closing quote,
+  // and the whole-document scan would report the same shape once wherever it
+  // appeared — which loses WHICH line to rewrite.
+  //
+  // ONE note per line, and one note per shape across the document. A cover
+  // line that is both a conditional catastrophe and a doom clause is still one
+  // sentence to rewrite, and a report that says so twice is a report a rep
+  // starts skimming.
+  const seen = new Set();
+  for (const line of copy.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const shape = PORTENTOUS.find((p) => p.re.test(line) && !seen.has(p.say));
+    if (shape) {
+      seen.add(shape.say);
+      notes.push(`"${line.slice(0, 60)}" uses ${shape.say}. Say what is true, plainly.`);
+      continue;
+    }
+    if (tautology(line) && !seen.has('tautology')) {
+      seen.add('tautology');
+      notes.push(
+        `"${line.slice(0, 60)}" is a phrase and then the same phrase negated. It reads as a thought and contains none.`,
+      );
+    }
+  }
+
+  const fancy = FANCY_WORDS.filter(([word]) => new RegExp(`\\b${word}\\b`, 'i').test(copy));
+  if (fancy.length) {
+    notes.push(
+      `Plainer words exist: ${fancy.slice(0, 5).map(([w, plain]) => `${w} → ${plain}`).join(', ')}.`,
+    );
+  }
 
   // §07, first rule on the page: "No dashes in narrative copy. Use commas,
   // periods or a new sentence instead."

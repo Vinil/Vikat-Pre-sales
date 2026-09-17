@@ -324,3 +324,97 @@ test('a one-word headline is not judged on its grammar', () => {
   // writer can act on.
   assert.equal(headline('Timing'), '');
 });
+
+// --- Melodrama --------------------------------------------------------------
+
+test('a cover line that reads like a film trailer is flagged', () => {
+  // "The headlines and title of the document is still very cheesy", on a brief
+  // whose cover said "When a matter leaks, the proceeding fails." Nothing here
+  // caught it and nothing was going to: it is not jargon, not a filing label,
+  // and not cryptic. It is melodrama, and melodrama is a SHAPE — the words are
+  // always different and the shape never is.
+  for (const line of [
+    'When a matter leaks, the proceeding fails.',
+    'In the age of autonomous agents, governance cannot keep up.',
+    'Consequence is the new severity.',
+    'Make no mistake: this is different.',
+    'It is not a matter of if, but when.',
+  ]) {
+    assert.match(notes(line), /Say what is true, plainly/, line);
+  }
+});
+
+test('a line is worth one note, however many ways it is overwrought', () => {
+  // The cover line is both a conditional catastrophe and a doom clause, and it
+  // is still one sentence to rewrite. A report that says so twice is a report
+  // a rep starts skimming, and then the real note goes with it.
+  const n = checkArticulation('When a matter leaks, the proceeding fails.').notes;
+  assert.equal(n.length, 1, n.join(' | '));
+});
+
+test('a plain statement about something bad is not melodrama', () => {
+  // The direction this has to be wrong in. Security writing is about failure;
+  // flagging every sentence that mentions one makes the note worthless.
+  for (const line of [
+    'A leaked brief exposes party strategy during a live hearing.',
+    'The stack scores every finding by severity.',
+    'Stolen credentials are revoked before first use.',
+    'Arbitration rests on one commitment: what enters a proceeding does not leave it.',
+  ]) {
+    assert.doesNotMatch(notes(line), /Say what is true, plainly/, line);
+  }
+});
+
+test('a phrase and then the same phrase negated is not a thought', () => {
+  // "A conflict wall enforced by policy is not a conflict wall" closed a brief
+  // to a CISO. It reads as profound and contains nothing.
+  assert.match(
+    notes('A conflict wall enforced by policy is not a conflict wall.'),
+    /same phrase negated/,
+  );
+
+  // A real contrast is not a tautology, and this must not eat one.
+  assert.equal(notes('Severity is not the same as consequence.'), '');
+  assert.equal(notes('The model is not hosted by us.'), '');
+});
+
+// --- Simple English ---------------------------------------------------------
+
+test('a long word with a short one available is named WITH the short one', () => {
+  // "Simple English. No fancy words." Naming the fault without naming the fix
+  // sends somebody off to think of a synonym, which is the cost this exists to
+  // avoid — the same reason every retired phrase carries its replacement.
+  const n = notes('Greater risk reduction from resequencing the same security budget prior to the hearing.');
+  assert.match(n, /resequencing → reordering/);
+  assert.match(n, /prior to → before/);
+});
+
+test('ordinary security vocabulary is left alone', () => {
+  // "Severity", "credentials", "arbitration" and "orchestration" are the words
+  // for the things. A checker that calls them fancy is one nobody finishes.
+  assert.equal(
+    notes('Severity scoring, stolen credentials, and agentic orchestration across the arbitration estate.'),
+    '',
+  );
+});
+
+// --- The standing rules -----------------------------------------------------
+
+test('the prompt carries the five rules the work is judged against', () => {
+  // These came from the person whose name goes on the document, and they apply
+  // to every document, deck, email and post. A checker catches it afterwards;
+  // the prompt is what stops it being written.
+  assert.match(ARTICULATION_BLOCK, /Simple English\. No fancy words/);
+  assert.match(ARTICULATION_BLOCK, /Professional and to the point/);
+  assert.match(ARTICULATION_BLOCK, /The hook cannot be cryptic/);
+  assert.match(ARTICULATION_BLOCK, /Dry wit is welcome\. Jokes are not/);
+  assert.match(ARTICULATION_BLOCK, /Nobody may think a machine wrote this/);
+
+  // Rule four is the one that goes wrong if it is left as "be funny". The
+  // limits travel with it or a brief to a CISO arrives with a pun in it.
+  assert.match(ARTICULATION_BLOCK, /never a joke at the\s+reader's expense/);
+  assert.match(ARTICULATION_BLOCK, /never more than one per document/);
+
+  // And the melodrama rule, which is what "cheesy" turned out to mean.
+  assert.match(ARTICULATION_BLOCK, /Never melodramatic/);
+});

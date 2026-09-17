@@ -626,3 +626,29 @@ test('the other channels gain nothing from the new fields', () => {
   assert.equal(draft.hashtags, undefined);
   assert.equal(draft.imageBrief, undefined);
 });
+
+test('a draft is read for how it sounds, not only for how long it is', () => {
+  // "Every time a content request goes out" covers an email and a post as much
+  // as a two-pager, and an email is the one a rep sends soonest and edits
+  // least. checkArticulation was wired to nothing when this was written — the
+  // module that answers "would a reader think a machine wrote this" had never
+  // run on anything at all.
+  const { warnings } = normaliseDraft({
+    channel: 'email',
+    subject: 'When a matter leaks, the proceeding fails',
+    body: 'I hope this finds you well. We can help you leverage a robust, seamless approach.',
+  });
+
+  const said = warnings.join(' | ');
+  assert.match(said, /film trailer/, `the subject line was not read:\n${said}`);
+  assert.match(said, /Reads as generated/, said);
+
+  // And a plain draft still comes back clean, or the warning list stops being
+  // read at all.
+  const clean = normaliseDraft({
+    channel: 'email',
+    subject: 'Thirty minutes on your alert queue',
+    body: 'You run Splunk and CrowdStrike. We read what they already produce and rank it by what each finding can reach today. A 30-minute call this week, and you keep the findings either way.',
+  });
+  assert.deepEqual(clean.warnings, [], clean.warnings.join(' | '));
+});

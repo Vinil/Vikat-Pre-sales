@@ -387,3 +387,94 @@ test('a number welded to a name by a hyphen is an identifier, not a statistic', 
     ['40000'],
   );
 });
+
+test('a drawn figure keeps its source on the same line as its number', () => {
+  // The line-scoping, running in reverse. drawnText emitted a stat's value and
+  // its caption as separate lines, so "7.5x" landed alone and
+  // "…rather than severity. McKinsey." landed on the next — and the checker
+  // reported the best-attributed figure in the document as unattributed.
+  const spec = clean({
+    sections: [
+      {
+        layout: 'stat',
+        title: '',
+        body: '',
+        points: [],
+        value: '7.5x',
+        caption: 'greater risk reduction from reordering the same security budget. McKinsey.',
+      },
+    ],
+  });
+
+  const { problems } = checkExecOutreach(spec);
+  assert.equal(problems.filter((p) => /7\.5x/.test(p)).length, 0, problems.join('\n'));
+
+  // And an unsourced one on a drawn figure is still caught, or this is just a
+  // way of hiding numbers inside a layout.
+  const bare = clean({
+    sections: [
+      { layout: 'stat', title: '', body: '', points: [], value: '7.5x', caption: 'greater risk reduction.' },
+    ],
+  });
+  assert.ok(checkExecOutreach(bare).problems.some((p) => /7\.5x/.test(p)));
+});
+
+test('a draft awaiting approval is checked as customer copy', () => {
+  // The document's own pages said "Draft: needs approval before it leaves
+  // Vikat". Approval is the LAST gate before it leaves, which is exactly when
+  // a retired phrase has to be caught.
+  const withLoop = (disclosure) => {
+    const spec = clean({ disclosure });
+    spec.sections[0].points.push('Forward Deployed Engineers run the Semantic Loop as managed support');
+    return checkExecOutreach(spec).problems.filter((p) => /Semantic Loop/.test(p)).length;
+  };
+
+  assert.equal(withLoop('needs_approval'), 1);
+  assert.equal(withLoop('external_ok'), 1);
+  assert.equal(withLoop('internal_only'), 0, 'an internal deal review may still say it');
+});
+
+test('a regulation listed as a certification is a problem', () => {
+  // "Certifications: SOC 2 Type 2, ISO 27001, HIPAA, GDPR, ISO 9001" went to
+  // the CISO of the American Arbitration Association. Two of those are not
+  // certifications: HIPAA and GDPR are regulations, no body certifies anyone
+  // against either, and a CISO knows that before they finish the line.
+  //
+  // It is also traceable. The knowledge base says "SOC 2 / GDPR / HIPAA
+  // evidence generation" and "aligned to" — never that Vikat is certified in
+  // them. The claim was assembled from source material that says something
+  // narrower and true.
+  const spec = clean();
+  spec.sections[0].points = ['Certifications: SOC 2 Type 2, ISO 27001, HIPAA, GDPR, ISO 9001'];
+
+  const { problems } = checkExecOutreach(spec);
+  const hit = problems.find((p) => /certification/i.test(p));
+  assert.ok(hit, problems.join('\n'));
+  assert.match(hit, /HIPAA and GDPR/);
+  assert.match(hit, /aligned to it, or evidence generated for it/, 'the replacement has to travel with it');
+});
+
+test('the same names are fine when the claim is the true one', () => {
+  // The fault is the WORD next to the name. "Aligned to GDPR" is true and
+  // "certified in GDPR" is not, and they differ by one verb on one line — so
+  // this must not become a ban on naming a regulation.
+  const spec = clean();
+  spec.sections[0].points = [
+    'Evidence generation for SOC 2, GDPR and HIPAA, aligned to NIST AI RMF.',
+    'SOC 2 Type 2 and ISO 27001 certified.',
+  ];
+  assert.equal(
+    checkExecOutreach(spec).problems.filter((p) => /listed as a certification/.test(p)).length,
+    0,
+    checkExecOutreach(spec).problems.join('\n'),
+  );
+});
+
+test('an internal deal review is not policed for it', () => {
+  const spec = clean({ disclosure: 'internal_only' });
+  spec.sections[0].points = ['Certifications: SOC 2, HIPAA, GDPR'];
+  assert.equal(
+    checkExecOutreach(spec).problems.filter((p) => /listed as a certification/.test(p)).length,
+    0,
+  );
+});

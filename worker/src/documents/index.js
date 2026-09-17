@@ -14,6 +14,7 @@ import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS } from './spec.js';
 import { renderPptx } from './pptx.js';
 import { inspectPptx, inspectionSummary } from './inspect.js';
 import { checkGuidelines } from './guidelines.js';
+import { checkArticulation } from '../articulation.js';
 import { checkExecOutreach, recapShare, outreachText } from '../execOutreach.js';
 import { renderPdf } from './pdf.js';
 import { renderDocx } from './docx.js';
@@ -80,6 +81,22 @@ export async function createDocument(input, ctx) {
   //
   // A text rule has no business knowing which renderer ran.
   const outreach = checkExecOutreach({ ...spec, preparedBy });
+
+  // How it SOUNDS, which nothing was asking.
+  //
+  // articulation.js exists to answer one question — would a reader think a
+  // machine wrote this — and checkArticulation() was called by nothing at all.
+  // Not by this pipeline, not by the outreach drafter, not by anything. It was
+  // written, tested, and never run, so its whole list (essay connectives, the
+  // "not just X, it's Y" construction, stacked hedging, dashes in narrative
+  // copy, the assistant sign-off, melodrama) has been reaching customers
+  // untouched since the module landed. ARTICULATION_BLOCK was in the system
+  // prompt, which is the half that asks nicely.
+  //
+  // Advisory by design and reported like every other note here: voice is a
+  // judgement, and a checker that blocked on it would be wrong about a good
+  // sentence sooner or later.
+  for (const n of checkArticulation(outreachText(spec)).notes) outreach.notes.push(n);
 
   // Recap, measured on the OPENING rather than the whole document.
   //

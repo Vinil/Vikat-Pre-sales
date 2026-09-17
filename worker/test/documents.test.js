@@ -1981,3 +1981,80 @@ test('a section never reserves less than it spends', () => {
     assert.equal(flow.pages, 0, `the section broke its own page: ${content.slice(0, 40)}`);
   }
 });
+
+// --- How it sounds ----------------------------------------------------------
+
+test('the report says how the writing SOUNDS, not only what it claims', async () => {
+  // articulation.js exists to answer one question — would a reader think a
+  // machine wrote this — and checkArticulation() was called by nothing. Not by
+  // this pipeline, not by the outreach drafter, not by anything. Written,
+  // tested, and never run, so its whole list has been reaching customers
+  // untouched since the module landed.
+  //
+  // ARTICULATION_BLOCK was in the system prompt, which is the half that asks
+  // nicely. This is the half that looks at what came back.
+  resetCaches();
+  const { cfg, storage } = setup();
+
+  const result = await withFetch(graphStub(), () =>
+    createDocument(
+      {
+        format: 'pdf',
+        title: 'When a matter leaks, the proceeding fails.',
+        audience: 'The CISO at American Arbitration Association',
+        disclosure: 'needs_approval',
+        content: [
+          '## stat | 7.5x | greater risk reduction from reordering the same budget. McKinsey, 2026.',
+          '## context | Vikat is the agent semantics company, and this is what it does\nModerately plain prose about the problem.',
+          '## quote | A conflict wall enforced by policy is not a conflict wall.',
+        ].join('\n\n'),
+      },
+      { storage, user: USER, env: GRAPH_ENV, cfg, fonts: FONTS, isoDate: META.isoDate },
+    ),
+  );
+
+  assert.ok(result.ok !== false, result.error);
+  const said = result.inspection || '';
+
+  assert.match(said, /film trailer/, `the cover melodrama was not reported:\n${said}`);
+  assert.match(said, /same phrase negated/, `the tautology was not reported:\n${said}`);
+});
+
+test('a draft awaiting approval is on its way OUT of the building', async () => {
+  // Both retired phrases reached the CISO of the American Arbitration
+  // Association in one document — "run the Semantic Loop as managed support"
+  // and "an outcome bonus at risk" — and every check that exists for them
+  // stayed quiet, because customerFacing tested `external_ok` alone and the
+  // document had declared itself a draft.
+  //
+  // Its own pages were stamped "Draft: needs approval before it leaves Vikat".
+  // It was on its way out and the checker read it as staying in.
+  resetCaches();
+  const { cfg, storage } = setup();
+
+  const build = (disclosure) =>
+    withFetch(graphStub(), () =>
+      createDocument(
+        {
+          format: 'pdf',
+          title: 'What the ninety days commit to',
+          audience: 'A customer',
+          disclosure,
+          content: [
+            '## stat | 7.5x | greater risk reduction from reordering the same budget. McKinsey, 2026.',
+            '## trust | Vikat is the agent semantics company, and this is what it does\nNamed Forward Deployed Engineers run the Semantic Loop as managed support.\n- Every engagement commits to a 90-day outcome, with a bonus at risk.',
+            '## quote | The calendar sets the price.',
+          ].join('\n\n'),
+        },
+        { storage, user: USER, env: GRAPH_ENV, cfg, fonts: FONTS, isoDate: META.isoDate },
+      ),
+    );
+
+  const draft = (await build('needs_approval')).inspection || '';
+  assert.match(draft, /Semantic Loop/, draft);
+  assert.match(draft, /bonus at risk/, draft);
+
+  // And an internal deal review may still say both.
+  const internal = (await build('internal_only')).inspection || '';
+  assert.doesNotMatch(internal, /Semantic Loop|bonus at risk/);
+});

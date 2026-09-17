@@ -16,6 +16,7 @@
  */
 
 import { noDashes } from './brand.js';
+import { checkArticulation } from './articulation.js';
 
 /** What a draft can be written for. Each has a real limit, not a style note. */
 export const CHANNELS = {
@@ -224,6 +225,19 @@ export function normaliseDraft(input = {}) {
       );
     }
   }
+
+  // How it SOUNDS, on the draft as the recipient will read it.
+  //
+  // "Every time a content request goes out" covers an email and a post as much
+  // as a two-pager, and an email is the one a rep sends soonest and edits
+  // least. checkArticulation was wired to nothing when this was added — the
+  // module that answers "would a reader think a machine wrote this" had never
+  // run on anything.
+  //
+  // Subject and headline included, not just the body: the first line is the
+  // one guaranteed to be read, and it is where melodrama lives.
+  const whole = [draft.subject, postText(draft)].filter(Boolean).join('\n');
+  for (const n of checkArticulation(whole).notes) warnings.push(n);
 
   return { ok: true, draft, warnings };
 }

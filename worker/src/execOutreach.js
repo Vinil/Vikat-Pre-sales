@@ -207,6 +207,31 @@ function cited(line) {
  */
 const IDENTIFIER_BEFORE = /[\w&]-$/;
 
+/**
+ * Things you can hold a certificate for, and things you cannot.
+ *
+ * A brief to the CISO of the American Arbitration Association carried the line
+ * "Certifications: SOC 2 Type 2, ISO 27001, HIPAA, GDPR, ISO 9001". Two of
+ * those are not certifications. HIPAA and GDPR are regulations — there is no
+ * body that certifies anyone against either, and a CISO knows that before they
+ * finish the line. It reads as a company that does not know the difference,
+ * which costs more than the list earns.
+ *
+ * It is also traceable. The knowledge base says "SOC 2 / GDPR / HIPAA evidence
+ * generation", "aligned to", and "compliance controls" — never that Vikat is
+ * certified in them. The claim was assembled here, from source material that
+ * says something narrower and true.
+ *
+ * Only the WORD is checked, not the list. Which certifications Vikat actually
+ * holds is not something this file can know, and guessing would be the same
+ * mistake in the other direction.
+ */
+const NOT_A_CERTIFICATION =
+  /\b(HIPAA|GDPR|CCPA|SOX|DORA|NIS ?2|EU AI Act|NIST(?:\s+AI\s+RMF)?|MITRE ATLAS)\b/gi;
+
+/** A line claiming we hold something, rather than work to it. */
+const CERTIFICATION_CLAIM = /\b(certificat\w+|certified|accredited)\b/i;
+
 // --- The trust anchors a stranger needs -------------------------------------
 
 /**
@@ -262,6 +287,15 @@ const SELLING_REGISTER = [
  */
 function drawnText(s) {
   const out = [];
+
+  // A figure and the words that source it are ONE line, because every rule
+  // here that matters is line-scoped. Emitting them separately put "7.5x" on a
+  // line of its own and "…rather than severity. McKinsey." on the next, so the
+  // sourcing check reported the best-attributed number in the document as
+  // unattributed — the exact laundering failure the line-scoping was added to
+  // stop, running in reverse.
+  if (s.layout === 'stat' && s.value) return [[s.value, s.caption].filter(Boolean).join(': ')];
+
   if (Array.isArray(s.tiles)) for (const t of s.tiles) out.push(`${t.value}: ${t.caption}`);
   if (Array.isArray(s.bars)) for (const b of s.bars) out.push(`${b.label}: ${b.value}`);
   if (Array.isArray(s.kpis)) for (const k of s.kpis) out.push(`${k.code}: ${k.target}`);
@@ -276,6 +310,26 @@ function drawnText(s) {
   }
   return out;
 }
+
+/**
+ * Disclosures that mean a customer will read this.
+ *
+ * `external_ok` alone was the test, and a draft awaiting approval is not
+ * internal — approval is the LAST gate before it leaves, which is exactly when
+ * a retired phrase has to be caught rather than the moment after.
+ *
+ * A brief to the CISO of the American Arbitration Association carried both
+ * retired phrases at once, "run the Semantic Loop as managed support" and "an
+ * outcome bonus at risk", and every check that exists for them stayed quiet
+ * because the document had declared itself a draft. The stamp on its own
+ * pages read "Draft: needs approval before it leaves Vikat" — it was on its
+ * way out of the building and the checker read it as staying in.
+ *
+ * Shared with articulation.js's introduction check, which had already reached
+ * the same conclusion separately. Two copies of a rule is one copy waiting to
+ * disagree.
+ */
+export const CUSTOMER_BOUND = new Set(['external_ok', 'needs_approval']);
 
 /** Everything the document says, in reading order. */
 export function outreachText(spec) {
@@ -305,7 +359,7 @@ export function checkExecOutreach(spec, opts = {}) {
   const notes = [];
   const text = outreachText(spec);
   const customerFacing =
-    opts.customerFacing === undefined ? spec.disclosure === 'external_ok' : Boolean(opts.customerFacing);
+    opts.customerFacing === undefined ? CUSTOMER_BOUND.has(spec.disclosure) : Boolean(opts.customerFacing);
 
   // --- Retired language. Not a judgement call.
   for (const rule of RETIRED_PHRASES) {
@@ -352,6 +406,26 @@ export function checkExecOutreach(spec, opts = {}) {
 
   // --- What a stranger needs in order to reply. Notes, because a second
   // touch legitimately leans on the first and need not repeat its credentials.
+  // A regulation listed as a certification.
+  //
+  // Line-scoped, because the fault is the WORD next to the name: "aligned to
+  // GDPR" is true and "certified in GDPR" is not, and they differ by one verb
+  // on one line.
+  if (customerFacing) {
+    for (const line of text.split('\n')) {
+      if (!CERTIFICATION_CLAIM.test(line)) continue;
+      const named = [...new Set((line.match(NOT_A_CERTIFICATION) || []).map((m) => m.trim()))];
+      if (!named.length) continue;
+
+      problems.push(
+        `${named.join(' and ')} listed as a certification. ` +
+          `${named.length > 1 ? 'Those are regulations' : 'That is a regulation'}, not something anyone is ` +
+          'certified in, and a CISO knows that before they finish the line. Say what is true and narrower: ' +
+          'aligned to it, or evidence generated for it. Keep SOC 2 and ISO where they belong.',
+      );
+    }
+  }
+
   if (!TRUST_ANCHORS.test(text)) {
     notes.push(
       'No trust anchor: no named integration, certification or reference. A stranger does not act on ' +
