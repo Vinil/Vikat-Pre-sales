@@ -42,6 +42,46 @@ const HOLLOW_OPENERS = [
 ];
 
 /**
+ * Telling the reader what their own actions prove about them.
+ *
+ * The one that has to go. An email to Zscaler opened:
+ *
+ *   "The AI security hires you're making right now, engineers working in Go,
+ *    Rust, and Python on agent security, show you're thinking carefully about
+ *    what Model Context Protocol in production actually means for your attack
+ *    surface."
+ *
+ * Thirty-eight words, two nested clauses before the verb arrives, and the
+ * sentence spends all of them awarding the reader a compliment inferred from
+ * a job advert. Nobody writes like this. A person writes "You're hiring Go,
+ * Rust and Python engineers for agent security" and moves on, because the
+ * reader already knows what their own hiring means and did not ask a stranger
+ * to tell them.
+ *
+ * It is the most reliable tell there is: a machine reaching for rapport by
+ * reading a mind from a public fact. Every one of these shapes does it.
+ */
+const MIND_READING = [
+  {
+    re: /\b(?:shows?|suggests?|signals?|tells (?:me|us))\b[^.!?]{0,40}\byou(?:'re| are|r team)\b/i,
+    say: 'telling them what their own actions prove about them',
+  },
+  { re: /\bthe fact that you\b/i, say: 'an inference about them, drawn out loud' },
+  {
+    re: /\byou(?:'re| are) (?:clearly|obviously|evidently)\b|\bit(?:'s| is) clear (?:that )?you\b/i,
+    say: 'deciding on their behalf what is clear',
+  },
+  { re: /\bi(?:'ve| have) been (?:following|watching|tracking) (?:your|the)\b/i, say: 'a stranger saying they have been watching' },
+  { re: /\bcongratulations on\b|\bimpressive\b/i, say: 'a compliment nobody asked for' },
+  {
+    re: /\byour (?:commitment|focus|dedication|investment|emphasis|approach) (?:to|on|in)\b/i,
+    say: 'praising an attitude you inferred from a web page',
+  },
+  { re: /\bas (?:someone|a (?:leader|company|team|pioneer)) who\b/i, say: 'a flattery opener' },
+  { re: /\bspeaks volumes\b|\bsays a lot about\b/i, say: 'a reading of their character' },
+];
+
+/**
  * Words a model reaches for and a person does not.
  *
  * Not banned for being long. Banned because each one replaces a specific verb
@@ -205,6 +245,33 @@ document, deck, email and post — not only the ones that mention them.
 5. **Nobody may think a machine wrote this.** That is the whole test. A rep
    sends it under their own name to someone who reads twenty of these a week.
 
+## How to open
+
+Name the fact. Stop. Do not say what it proves.
+
+A real email to a real CISO opened: "The AI security hires you're making right
+now, engineers working in Go, Rust, and Python on agent security, show you're
+thinking carefully about what Model Context Protocol in production actually
+means for your attack surface." Thirty-eight words, two nested clauses before
+the verb, all of them spent awarding the reader a compliment inferred from a
+job advert. Nobody writes like that.
+
+A person writes: "You're hiring Go, Rust and Python engineers for agent
+security. So MCP in production is already on your plate." Two short sentences,
+same information, no mind-reading.
+
+So, in the first line:
+
+- **The fact, in their words, and nothing after it.** They already know what
+  their own hiring means. Being told is the single most reliable sign a machine
+  wrote this.
+- **Never "your X shows you're…", "the fact that you…", "you're clearly…",
+  "I've been following…", "your commitment to…", "impressive".** Each one is a
+  stranger reading a mind from a public page.
+- **Short.** Open under twenty-five words, then earn the longer sentence. A
+  first sentence with clauses nested inside it is a machine warming up.
+- Then go straight to what changed and why it costs them something.
+
 **Never melodramatic.** No doom ("when X happens, Y fails", "the end of Z"). No
 "in the age of…". No "X is not really X" tautologies that sound profound and
 say nothing. No three tidy parallel clauses in a row. State what is true, in
@@ -284,8 +351,10 @@ company. Someone rolling AI agents across four hundred sites is proud of that
 and should be. The opportunity is the NEXT level, not the hole.
 
 1. **Personalize.** Name the work they have actually done: the programme, the
-   launch, the thing the executive said in public. Specific, or leave it out. A
-   compliment that would fit any company is worse than none.
+   launch, the posting, the thing the executive said in public. Name it and
+   STOP — do not say what it shows about them. Specific, or leave it out. A
+   compliment that would fit any company is worse than none, and an inferred
+   one is worse than that.
 2. **Their priorities.** What they are trying to do next and where it gets
    hard. The thing keeping them up, in their words. Opportunity, never deficiency.
 3. **Why now.** What changed and what waiting costs. A date, a filing, a
@@ -326,8 +395,8 @@ what you built and what they should check before it leaves the building.`;
 export const STORY_ARC = [
   {
     beat: 'Personalize',
-    does: 'Acknowledge the work they have actually done. The programme, the launch, the thing the executive said in public. Named and specific, or leave it out.',
-    fails: 'A compliment that would fit any company is worse than no compliment.',
+    does: 'Name the work they have actually done — the programme, the launch, the posting — and stop there. Named and specific, or leave it out.',
+    fails: 'A compliment that would fit any company, or any sentence telling them what their own work shows about them. "Acknowledge" is what licensed an email to open on what a job advert proved about the reader.',
   },
   {
     beat: 'Their priorities',
@@ -621,6 +690,32 @@ export function checkArticulation(text) {
   }
 
   if (EMOJI.test(copy)) notes.push('No emoji in brand materials.');
+
+  for (const shape of MIND_READING) {
+    if (shape.re.test(copy)) {
+      notes.push(
+        `Reads as generated: ${shape.say}. Say the fact and stop — "you are hiring Go and Rust ` +
+          'engineers for agent security" — and let them draw their own conclusion. They already know ' +
+          'what their own decisions mean.',
+      );
+      break;
+    }
+  }
+
+  // The FIRST sentence, on its own.
+  //
+  // Separate from the mean below, which a long opener barely moves. The
+  // opening sentence is the one a reader uses to decide whether a person or a
+  // machine wrote this, and the tell is length: the Zscaler email spent 38
+  // words and two nested clauses before its verb arrived. A person opens
+  // short, then earns the longer sentence.
+  const opening = (copy.trim().split(/(?<=[.!?])\s/)[0] || '').split(/\s+/).filter(Boolean).length;
+  if (opening > 25) {
+    notes.push(
+      `The opening sentence is ${opening} words. It is the one a reader uses to decide whether a ` +
+        'person wrote this. Open short and plain, then earn the longer sentence.',
+    );
+  }
 
   // Melodrama, line by line. A headline is a line and so is a closing quote,
   // and the whole-document scan would report the same shape once wherever it

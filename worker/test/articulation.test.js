@@ -418,3 +418,84 @@ test('the prompt carries the five rules the work is judged against', () => {
   // And the melodrama rule, which is what "cheesy" turned out to mean.
   assert.match(ARTICULATION_BLOCK, /Never melodramatic/);
 });
+
+// --- Mind-reading -----------------------------------------------------------
+
+test('telling the reader what their own actions prove about them is flagged', () => {
+  // The one that had to go. An email to a CISO at Zscaler opened:
+  //
+  //   "The AI security hires you're making right now, engineers working in Go,
+  //    Rust, and Python on agent security, show you're thinking carefully about
+  //    what Model Context Protocol in production actually means for your attack
+  //    surface."
+  //
+  // Thirty-eight words spent awarding the reader a compliment inferred from a
+  // job advert. The reader already knows what their own hiring means and did
+  // not ask a stranger to tell them. It is the most reliable tell there is.
+  for (const line of [
+    "Your AI security hires show you're thinking carefully about agent risk.",
+    'The fact that you posted three detection roles says this is a priority.',
+    "You're clearly investing in agent governance.",
+    "I've been following your security programme.",
+    'Congratulations on the new detection team.',
+    'Your commitment to agent governance is impressive.',
+    'As a leader who runs a global SOC, you already know this.',
+  ]) {
+    assert.match(notes(line), /Reads as generated/, line);
+  }
+});
+
+test('the note says what to write instead', () => {
+  // Naming the fault without the fix is how a rep ends up rewriting the same
+  // sentence three ways and picking the one that sounds most like the last.
+  const n = notes("Your AI security hires show you're thinking carefully about agent risk.");
+  assert.match(n, /Say the fact and stop/);
+  assert.match(n, /draw their own conclusion/);
+});
+
+test('an ordinary sentence about their systems is not mind-reading', () => {
+  // The direction this has to be wrong in. Outreach is ABOUT the reader's
+  // estate; a rule that fires on every sentence mentioning them is a rule that
+  // gets the whole report skipped.
+  for (const line of [
+    'You run Splunk and CrowdStrike, and we read what they already produce.',
+    'Your SIEM does not know which matters are in active hearing.',
+    "You're hiring Go, Rust and Python engineers for agent security.",
+    'GitLab appears in your own job postings.',
+    'Your stack ranks alerts by severity.',
+  ]) {
+    assert.doesNotMatch(notes(line), /Reads as generated/, line);
+  }
+});
+
+test('a long opening sentence is flagged on its own', () => {
+  // Separate from the sentence-length average, which a single long opener
+  // barely moves. The first sentence is the one a reader uses to decide
+  // whether a person wrote this, and the tell is nested clauses before the
+  // verb arrives.
+  const long =
+    'The AI security hires you are making right now, engineers working in Go, Rust and Python on ' +
+    'agent security, point at a question about what Model Context Protocol in production means here.';
+  assert.match(notes(long), /opening sentence is \d+ words/);
+
+  // Two short sentences carrying the same information pass.
+  assert.equal(
+    notes("You're hiring Go, Rust and Python engineers for agent security. So MCP in production is already on your plate."),
+    '',
+  );
+});
+
+test('the prompt says how to open, with the sentence that went wrong in it', () => {
+  // A checker catches it afterwards. The prompt is what stops it being written,
+  // and a rule stated as "be human" is not a rule.
+  assert.match(ARTICULATION_BLOCK, /## How to open/);
+  assert.match(ARTICULATION_BLOCK, /Name the fact\. Stop\. Do not say what it proves/);
+  assert.match(ARTICULATION_BLOCK, /your X shows you're…/);
+  assert.match(ARTICULATION_BLOCK, /Open under twenty-five words/);
+
+  // And the arc beat that licensed it. "Acknowledge the work they have done"
+  // is what a model reads as permission to editorialise about it.
+  const arc = STORY_ARC.find((b) => b.beat === 'Personalize');
+  assert.match(arc.does, /and stop there/);
+  assert.match(arc.fails, /what their own work shows about them/);
+});
