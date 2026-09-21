@@ -244,9 +244,52 @@ const CERTIFICATION_CLAIM = /\b(certificat\w+|certified|accredited)\b/i;
 const TRUST_ANCHORS =
   /\b(SOC ?2|ISO ?27001|FedRAMP|HIPAA|PCI[- ]?DSS|Splunk|Sentinel|CrowdStrike|Defender|Qualys|Tenable|Rapid7|Okta|reference customer|case study)\b/i;
 
-/** A CTA is only an ask if it names a when. */
-const DATED_ASK =
-  /\b(this week|next week|monday|tuesday|wednesday|thursday|friday|\d{1,2}\s?(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|by\s+\w+day|\d{4}-\d{2}-\d{2}|before\s+(?:the\s+)?\w+)\b/i;
+/**
+ * A CTA is only an ask if it names a when.
+ *
+ * "before\s+(?:the\s+)?\w+" used to be the last branch, and it matches
+ * "before it", "before you", "before anything" — ordinary English. An email to
+ * Zscaler closed on "Worth 20 minutes to walk through what that looks like on
+ * your infrastructure?", which names no day at all, and this rule stayed quiet
+ * because a paragraph further up said a vulnerability should be closed "before
+ * it finds it". A rule satisfied by prose about something else is not a rule.
+ *
+ * "before" now needs a TIME after it, and so does "by".
+ */
+const WEEKDAY = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday';
+const MONTH_NAME = 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
+const DATED_ASK = new RegExp(
+  '\\b(' +
+    `this week|next week|this month|${WEEKDAY}|` +
+    `\\d{1,2}\\s?(?:st|nd|rd|th)?\\s+(?:${MONTH_NAME})|` +
+    `(?:${MONTH_NAME})[a-z]*\\s+\\d{1,2}\\b|` +
+    '\\d{4}-\\d{2}-\\d{2}|' +
+    `(?:by|before)\\s+(?:the\\s+)?(?:end of\\s+)?(?:${WEEKDAY}|next week|this week|month end|quarter end|the \\w+day)` +
+  ')\\b',
+  'i',
+);
+
+/**
+ * The line that proposes the meeting, which is where the date has to be.
+ *
+ * Measured on the whole document before, so any date anywhere satisfied it —
+ * including the date CISA published the CVE the email was about, which is a
+ * fact about a vulnerability and not an invitation.
+ *
+ * "The last few lines" was the first attempt and it is not the shape of a real
+ * document: a brief puts the ask two bullets from the end and signs off after
+ * it. What identifies the ask is what it proposes, so that is what is matched.
+ */
+const ASK_LINE =
+  /\b(call|meeting|minutes|walk through|walkthrough|session|demo|intro|briefing|assessment|scoping|conversation|catch up)\b/i;
+
+function theAsk(text) {
+  const lines = String(text).split('\n').map((l) => l.trim()).filter(Boolean);
+  const asks = lines.filter((l) => ASK_LINE.test(l));
+  // Nothing proposing anything: fall back to the last line, so a document with
+  // no ask at all is still judged on where an ask would have been.
+  return (asks.length ? asks : lines.slice(-1)).join('\n');
+}
 
 /** A sender block a stranger can reply to. */
 const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[\w.]+/;
@@ -433,7 +476,7 @@ export function checkExecOutreach(spec, opts = {}) {
     );
   }
 
-  if (!DATED_ASK.test(text)) {
+  if (!DATED_ASK.test(theAsk(text))) {
     notes.push(
       'The ask has no date. "A 30-minute call" is an intention; a specific window, a named owner, and ' +
         'what they keep from the call even if nothing proceeds, is an ask.',

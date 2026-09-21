@@ -478,3 +478,54 @@ test('an internal deal review is not policed for it', () => {
     0,
   );
 });
+
+test('the date has to be in the ASK, not somewhere else in the copy', () => {
+  // An email to Zscaler closed on "Worth 20 minutes to walk through what that
+  // looks like on your infrastructure?" — which names no day at all — and this
+  // rule stayed quiet, because a paragraph further up said a vulnerability
+  // should be closed "before it finds it".
+  //
+  // Two faults in one line. `before\s+(?:the\s+)?\w+` matches ordinary English
+  // ("before it", "before you"), and the whole document was searched when only
+  // the ask can carry the answer. A rule satisfied by prose about something
+  // else is not a rule.
+  const spec = (body) => ({
+    ...clean(),
+    sections: [{ eyebrow: '', title: '', body, points: [] }],
+  });
+  const undated = (body) => checkExecOutreach(spec(body)).notes.some((n) => /no date/i.test(n));
+
+  assert.equal(
+    undated('We close the path a vulnerability could use before it finds it.\nWorth 20 minutes?'),
+    true,
+    'prose elsewhere must not stand in for the ask',
+  );
+
+  // And a REAL date elsewhere must not either — this is the half the tightened
+  // pattern cannot catch on its own. The email named the day CISA published
+  // the CVE, which is a date about the vulnerability and not an invitation.
+  assert.equal(
+    undated('CISA added the CVE to its catalog on September 11.\nWorth 20 minutes on your infrastructure?'),
+    true,
+    'a date about something else is not the ask having one',
+  );
+
+  // "before" on the ask line, and still not a date. The pattern used to be
+  // `before\s+(?:the\s+)?\w+`, which matches "before you", "before it",
+  // "before anything" — ordinary English doing the work of a calendar.
+  assert.equal(
+    undated('Worth 20 minutes to walk through this before you scale further?'),
+    true,
+    '"before you" is not a when',
+  );
+
+  // And a real date in the ask still passes, in the shapes a person writes.
+  for (const ask of [
+    'A 30-minute scoping call this week, with findings you keep either way.',
+    'Thirty minutes on Thursday, and you keep the findings either way.',
+    'Can we put 30 minutes in before the end of next week?',
+    'Twenty minutes on September 24?',
+  ]) {
+    assert.equal(undated(ask), false, ask);
+  }
+});
