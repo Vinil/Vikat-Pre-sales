@@ -529,3 +529,44 @@ test('the date has to be in the ASK, not somewhere else in the copy', () => {
     assert.equal(undated(ask), false, ask);
   }
 });
+
+test('a self-description nobody approved is a problem', () => {
+  // "Vikat is the Agent Semantics Company" in one brief, "Vikat is a security
+  // solutions company" in the next email — to a company that IS a security
+  // solutions company. Neither line appears anywhere in this repository.
+  //
+  // The model is not inventing out of mischief: the prompt hands it a TAGLINE,
+  // and a tagline is not a predicate you can drop into a paragraph, so it
+  // writes one and writes a different one next time.
+  for (const line of [
+    'Vikat is a security solutions company.',
+    'Vikat is the Agent Semantics Company.',
+    'Vikat provides an AI-native defence platform.',
+  ]) {
+    const spec = clean();
+    spec.sections[0].body = line;
+    const hit = checkExecOutreach(spec).problems.find((p) => /not a line this company uses/.test(p));
+    assert.ok(hit, `${line}: ${checkExecOutreach(spec).problems.join(' | ')}`);
+    assert.match(hit, /vendor-neutral semantic context layer/, 'the real lines have to travel with it');
+  }
+});
+
+test('the sanctioned wording passes, in any of its forms', () => {
+  // Three real lines exist and they disagree; guidelines.js records that
+  // conflict and says a deck can only open on one. Picking the winner is a
+  // brand decision, not this file's — so all of them pass and only a FOURTH
+  // invented on the spot is refused.
+  for (const line of [
+    'Vikat is the vendor-neutral semantic context layer for Sec and Dev AI agents.',
+    'Vikat builds the semantic context layer for security operations.',
+    'Vikat is the Personalized and Preemptive CyberSec and SRE company.',
+  ]) {
+    const spec = clean();
+    spec.sections[0].body = line;
+    assert.equal(
+      checkExecOutreach(spec).problems.filter((p) => /not a line this company uses/.test(p)).length,
+      0,
+      line,
+    );
+  }
+});

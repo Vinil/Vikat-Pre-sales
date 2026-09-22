@@ -2005,7 +2005,7 @@ test('the report says how the writing SOUNDS, not only what it claims', async ()
         disclosure: 'needs_approval',
         content: [
           '## stat | 7.5x | greater risk reduction from reordering the same budget. McKinsey, 2026.',
-          '## context | Vikat is the agent semantics company, and this is what it does\nModerately plain prose about the problem.',
+          '## context | Vikat builds the semantic context layer for security operations\nModerately plain prose about the problem.',
           '## quote | A conflict wall enforced by policy is not a conflict wall.',
         ].join('\n\n'),
       },
@@ -2042,7 +2042,7 @@ test('a draft awaiting approval is on its way OUT of the building', async () => 
           disclosure,
           content: [
             '## stat | 7.5x | greater risk reduction from reordering the same budget. McKinsey, 2026.',
-            '## trust | Vikat is the agent semantics company, and this is what it does\nNamed Forward Deployed Engineers run the Semantic Loop as managed support.\n- Every engagement commits to a 90-day outcome, with a bonus at risk.',
+            '## trust | Vikat builds the semantic context layer for security operations\nNamed Forward Deployed Engineers run the Semantic Loop as managed support.\n- Every engagement commits to a 90-day outcome, with a bonus at risk.',
             '## quote | The calendar sets the price.',
           ].join('\n\n'),
         },

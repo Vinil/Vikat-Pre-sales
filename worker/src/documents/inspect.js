@@ -330,7 +330,21 @@ function rhythmNotes(spec) {
  * teaches people to skip the warnings on a bad one.
  */
 export function inspectionSummary({ problems, notes }) {
-  if (problems.length) return `Check before sending — ${problems.join(' ')}`;
-  if (notes.length) return notes.join(' ');
-  return '';
+  // BOTH, in order. This returned problems OR notes and never both, so a
+  // single problem silently discarded every note beside it.
+  //
+  // That was defensible while a note was cosmetic — "slide 4 is sparse" does
+  // not deserve to bury "slide 3 has no readable text". It stopped being
+  // defensible the moment the voice checks started reporting here. Melodrama,
+  // mind-reading, the plain-word list and the opening sentence are all NOTES,
+  // and almost every document has at least one problem, so wiring
+  // checkArticulation into this pipeline bought nothing: its findings were
+  // dropped on the way out for as long as anything else was wrong.
+  //
+  // The serious one still leads. It is now followed rather than followed by
+  // silence.
+  const parts = [];
+  if (problems.length) parts.push(`Check before sending — ${problems.join(' ')}`);
+  if (notes.length) parts.push(`Also worth a look — ${notes.join(' ')}`);
+  return parts.join('\n');
 }

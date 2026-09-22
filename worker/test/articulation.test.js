@@ -499,3 +499,40 @@ test('the prompt says how to open, with the sentence that went wrong in it', () 
   assert.match(arc.does, /and stop there/);
   assert.match(arc.fails, /what their own work shows about them/);
 });
+
+test('an absolute about their own stack is flagged', () => {
+  // The mirror of mind-reading, and the one that costs most. The Zscaler email
+  // said "no SIEM or scanner in your stack answers it" — an absolute, about an
+  // estate we have never seen, to a company that sells security tooling. The
+  // reader's first thought is "you don't know what's in my stack", and they
+  // are right.
+  for (const line of [
+    'It is a business context question, and no SIEM or scanner in your stack answers it.',
+    'Your SIEM cannot see which matters are in active hearing.',
+    'Nothing you run today can answer that.',
+    'Nothing in your estate answers it.',
+  ]) {
+    assert.match(notes(line), /absolute about their own stack/, line);
+  }
+
+  // The same claim as a question survives, and the note says so.
+  assert.equal(notes('Does anything you run answer that today?'), '');
+  assert.match(
+    notes('Nothing in your estate answers it.'),
+    /does anything you run\s+answer that today/i,
+    'the replacement has to travel with the refusal',
+  );
+});
+
+test('describing their stack without judging it is fine', () => {
+  // Outreach is about their estate. A rule that fires on every mention of it
+  // is a rule that gets the report skipped.
+  for (const line of [
+    'We work alongside your existing SIEM, EDR and cloud tooling.',
+    'Your stack ranks alerts by severity.',
+    'Nothing is ripped out.',
+    'You run Splunk and CrowdStrike.',
+  ]) {
+    assert.doesNotMatch(notes(line), /absolute about their own stack/, line);
+  }
+});

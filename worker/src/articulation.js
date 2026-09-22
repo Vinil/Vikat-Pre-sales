@@ -82,6 +82,25 @@ const MIND_READING = [
 ];
 
 /**
+ * Telling them what their own tooling cannot do.
+ *
+ * The mirror of mind-reading, and the one that costs most. The Zscaler email
+ * said "no SIEM or scanner in your stack answers it" — an absolute, about an
+ * estate we have never seen, to a company that sells security tooling. The
+ * reader's first thought is "you don't know what's in my stack", and they are
+ * right.
+ *
+ * The claim is usually TRUE and always unprovable from outside. Said as a
+ * question it survives: "does anything in your stack answer that?" invites a
+ * reply instead of daring one.
+ */
+const KNOWS_THEIR_STACK = [
+  /\bno\s+\w+(?:[,\s]+(?:or|and)\s+\w+)?\s+in your (?:stack|estate|environment|tooling)\b/i,
+  /\byour (?:stack|estate|tools?|tooling|SIEM|scanner)s?\s+(?:cannot|can't|does not|doesn't|won't|will not)\b/i,
+  /\bnothing (?:you (?:run|own|have)|in your \w+)\b[^.!?]{0,20}\b(?:can|does|will|answers?)\b/i,
+];
+
+/**
  * Words a model reaches for and a person does not.
  *
  * Not banned for being long. Banned because each one replaces a specific verb
@@ -700,6 +719,14 @@ export function checkArticulation(text) {
       );
       break;
     }
+  }
+
+  if (KNOWS_THEIR_STACK.some((re) => re.test(copy))) {
+    notes.push(
+      'An absolute about their own stack, which you have never seen. Their first thought is "you do ' +
+        'not know what is in my estate", and they are right. Ask it instead: "does anything you run ' +
+        'answer that today?" invites a reply where the statement dares one.',
+    );
   }
 
   // The FIRST sentence, on its own.

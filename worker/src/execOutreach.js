@@ -232,6 +232,38 @@ const NOT_A_CERTIFICATION =
 /** A line claiming we hold something, rather than work to it. */
 const CERTIFICATION_CLAIM = /\b(certificat\w+|certified|accredited)\b/i;
 
+/**
+ * Who we say we are, which has been a different sentence every time.
+ *
+ *   "Vikat is the Agent Semantics Company."   (AAA_CISO_Brief_4.pdf)
+ *   "Vikat is a security solutions company."  (the Zscaler email)
+ *
+ * Neither appears anywhere in this repository, and the second was sent to a
+ * company that IS a security solutions company. The model is not inventing out
+ * of mischief: the prompt gives it a TAGLINE, and a tagline is not a predicate
+ * you can drop into a paragraph, so it writes one and writes a different one
+ * next time.
+ *
+ * Three real lines exist and they disagree — guidelines.js records the
+ * conflict and says "a deck can only open on one". Picking the winner is a
+ * brand decision and not this file's to make. What this file can do is refuse
+ * a FOURTH invented on the spot, and put the real three in front of whoever
+ * reads the report.
+ */
+const SELF_DESCRIPTION =
+  /\bVikat(?:\.AI)?\s+(?:is|builds|provides|offers|makes|delivers)\s+(?:a|an|the)\s+([^.,;:]{3,70})/i;
+
+/** Wording the repository actually sanctions, in any of its three forms. */
+const SANCTIONED_SELF = [
+  /semantic context layer/i,
+  /(?:personali[sz]ed and preemptive|cybersec and sre)/i,
+];
+
+const REAL_LINES = [
+  '"The vendor-neutral semantic context layer for Sec and Dev AI agents." (brand guidelines)',
+  '"Personalized and Preemptive CyberSec and SRE." (the presentation instruction set)',
+].join(' or ');
+
 // --- The trust anchors a stranger needs -------------------------------------
 
 /**
@@ -467,6 +499,16 @@ export function checkExecOutreach(spec, opts = {}) {
           'aligned to it, or evidence generated for it. Keep SOC 2 and ISO where they belong.',
       );
     }
+  }
+
+  // A self-description nobody approved.
+  const described = SELF_DESCRIPTION.exec(text);
+  if (customerFacing && described && !SANCTIONED_SELF.some((re) => re.test(described[1]))) {
+    problems.push(
+      `"Vikat is ${described[1].trim()}" is not a line this company uses anywhere. Saying who we are ` +
+        'is the one sentence that has to be the same every time, and it has been different in every ' +
+        `document. Use ${REAL_LINES}.`,
+    );
   }
 
   if (!TRUST_ANCHORS.test(text)) {

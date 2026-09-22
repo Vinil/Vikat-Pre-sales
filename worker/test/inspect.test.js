@@ -237,12 +237,28 @@ test('a problem leads with what to do about it', () => {
   assert.match(line, /^Check before sending/);
 });
 
-test('problems outrank notes', () => {
+test('problems lead, and notes are not thrown away behind them', () => {
+  // This asserted that notes were DISCARDED whenever a problem existed, on
+  // the reasoning that "slide 4 is sparse" must not bury "slide 3 has no
+  // readable text". Sound while a note was cosmetic.
+  //
+  // It stopped being sound the moment the voice checks started reporting
+  // here. Melodrama, mind-reading, the plain-word list and the opening
+  // sentence are all notes, and almost every document has at least one
+  // problem — so wiring checkArticulation into the pipeline bought nothing.
+  // Its findings were dropped on the way out for as long as anything else was
+  // wrong, which is always.
   const line = inspectionSummary({
     problems: ['Slide 3 has no readable text on it.'],
-    notes: ['Slide 4 is sparse.'],
+    notes: ['The opening sentence is 38 words.'],
   });
-  assert.ok(!line.includes('sparse'), 'the serious one must not be buried under the cosmetic one');
+
+  assert.match(line, /^Check before sending/, 'the serious one still leads');
+  assert.match(line, /38 words/, 'and the note survives behind it');
+  assert.ok(
+    line.indexOf('no readable text') < line.indexOf('38 words'),
+    'in that order',
+  );
 });
 
 test('a step too long for its box is refused before anything is rendered', () => {
