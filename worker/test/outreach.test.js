@@ -645,10 +645,81 @@ test('a draft is read for how it sounds, not only for how long it is', () => {
 
   // And a plain draft still comes back clean, or the warning list stops being
   // read at all.
+  // A clean cold email has to NAME us early — the reader has never heard of
+  // Vikat, and this fixture did not, which is the rule arriving after the
+  // test was written rather than the test being wrong.
   const clean = normaliseDraft({
     channel: 'email',
     subject: 'Thirty minutes on your alert queue',
-    body: 'You run Splunk and CrowdStrike. We read what they already produce and rank it by what each finding can reach today. A 30-minute call this week, and you keep the findings either way.',
+    body: 'You run Splunk and CrowdStrike. Vikat builds the semantic context layer that reads what they already produce and ranks it by what each finding can reach today. A 30-minute call this week, and you keep the findings either way.',
   });
   assert.deepEqual(clean.warnings, [], clean.warnings.join(' | '));
+});
+
+test('a cold email that never says who is writing is flagged', () => {
+  // The prospect has never heard of Vikat. The email to Zscaler ran three
+  // paragraphs — a CVE, a hiring signal, a claim about what their SIEM cannot
+  // do — before the sender was named at all. A stranger reads all of that
+  // asking "who is this and why is it in my inbox", and nothing answers until
+  // they have already decided.
+  const late = normaliseDraft({
+    channel: 'email',
+    subject: 'Your GitLab is on the exploited list',
+    body: [
+      "Your GitLab is on CISA's exploited list as of Friday.",
+      'Your own job postings name it.',
+      'An advisory names the flaw, not which instance sits near something critical.',
+      'That is a context question.',
+      'Vikat builds the semantic context layer for security operations.',
+    ].join(' '),
+  });
+  assert.ok(
+    late.warnings.some((w) => /not named until sentence 5/.test(w)),
+    late.warnings.join(' | '),
+  );
+
+  const never = normaliseDraft({
+    channel: 'email',
+    subject: 'Your GitLab is on the exploited list',
+    body: "Your GitLab is on CISA's exploited list as of Friday. Worth a look this week?",
+  });
+  assert.ok(never.warnings.some((w) => /Nothing here says who is writing/.test(w)));
+
+  // Named in the first three sentences, and the note goes away.
+  const early = normaliseDraft({
+    channel: 'email',
+    subject: 'Your GitLab is on the exploited list',
+    body: "Your GitLab is on CISA's exploited list as of Friday. Vikat builds the semantic context layer for security operations, so we see which instance sits near something critical. Twenty minutes on Thursday?",
+  });
+  assert.ok(!early.warnings.some((w) => /who is writing|not named until/.test(w)), early.warnings.join(' | '));
+});
+
+test('a subject line is not stapled to the body to make one long sentence', () => {
+  // A subject has no full stop, so a sentence splitter runs straight through
+  // it into the body and calls the two of them one sentence. Found by this
+  // rule firing on a draft that opened in 22 words and was reported as 31 —
+  // the missing nine being the subject.
+  const { warnings } = normaliseDraft({
+    channel: 'email',
+    subject: 'Your GitLab is on the CISA exploited list as of Friday',
+    body:
+      'Your GitLab is on the known-exploited list as of Friday, and your own postings name it. ' +
+      'Vikat builds the semantic context layer for security operations. Twenty minutes on Thursday?',
+  });
+
+  assert.ok(
+    !warnings.some((w) => /opening sentence is/.test(w)),
+    warnings.join(' | '),
+  );
+
+  // And a genuinely long body opener is still caught, subject or no subject.
+  const long = normaliseDraft({
+    channel: 'email',
+    subject: 'Quick one',
+    body:
+      'The AI security hires you are making right now, engineers working in Go, Rust and Python on ' +
+      'agent security, point at a question about what Model Context Protocol in production means. ' +
+      'Vikat builds the semantic context layer. Twenty minutes on Thursday?',
+  });
+  assert.ok(long.warnings.some((w) => /opening sentence is 3\d words/.test(w)), long.warnings.join(' | '));
 });

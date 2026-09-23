@@ -201,6 +201,28 @@ function tautology(text) {
 }
 
 /**
+ * An identifier is data. A company selling context does not open on data.
+ *
+ * The sharpest note anyone has given this project: "opening the email like
+ * that is totally out of context for a company selling context."
+ *
+ * The email opened "CISA added CVE-2026-85706 in GitLab CE/EE to its
+ * known-exploited vulnerabilities catalog on September 11." Every word true,
+ * and the whole sentence is a record from a catalogue. The pitch two
+ * paragraphs later is that a CVE number tells you nothing until you know what
+ * it can reach — so the opening refutes the argument before the reader gets
+ * to it.
+ *
+ * The fix is the order, not the content. Say what it means for them, then name
+ * the thing. "Your GitLab is on CISA's exploited list as of last Friday" is
+ * the same fact with the reader in it.
+ */
+const BARE_IDENTIFIER =
+  /\b(?:CVE|CWE|CAPEC|GHSA)[- ]?\d{4}[- ]?\d+\b|\b(?:ISO|IEC|SP|NIST SP)\s?\d{3,5}(?:[-:]\d+)?\b/i;
+
+const MENTIONS_READER = /\byou(?:r|rs|'re|'ve)?\b/i;
+
+/**
  * Long words that have a short one, with the short one attached.
  *
  * "Simple English. No fancy words." Naming the fault without naming the fix
@@ -290,6 +312,28 @@ So, in the first line:
 - **Short.** Open under twenty-five words, then earn the longer sentence. A
   first sentence with clauses nested inside it is a machine warming up.
 - Then go straight to what changed and why it costs them something.
+
+## Writing to someone who has never heard of us
+
+Assume they have not. On cold outreach they have not seen the website, do not
+know the product, and did not ask. Two things follow.
+
+**Say who is writing, in the first two or three sentences.** One plain
+sentence: what we do, in their language. Not paragraph four, after three
+paragraphs of analysis they have been reading while wondering who this is.
+An email has no cover with a logo on it — the words are the whole introduction.
+
+**Open on what it means for them, then name the thing.** We sell context. An
+email that opens on a bare CVE number, a standard, or a statistic is a
+catalogue entry, and it refutes the argument two paragraphs before the argument
+arrives. "CISA added CVE-2026-85706 in GitLab CE/EE to its known-exploited
+vulnerabilities catalog on September 11" is a record. "Your GitLab is on CISA's
+exploited list as of Friday" is the same fact with the reader in it — and the
+number still goes in, right after, for whoever wants to look it up.
+
+The order is the whole trick: consequence, then evidence. A company whose
+product says a severity score means nothing without context cannot open its own
+email on a severity score.
 
 **Never melodramatic.** No doom ("when X happens, Y fails", "the end of Z"). No
 "in the age of…". No "X is not really X" tautologies that sound profound and
@@ -678,10 +722,23 @@ export function checkHeadline(headline) {
  * @param {string} text  What the rep is about to send or present.
  * @returns {{ notes: string[] }}  Advisory, always. Voice is a judgement.
  */
-export function checkArticulation(text) {
+export function checkArticulation(text, { opening = null } = {}) {
   const copy = String(text || '');
   const notes = [];
   if (!copy.trim()) return { notes };
+
+  // What counts as "the opening", which the caller sometimes knows better.
+  //
+  // A subject line has no full stop, so a sentence splitter runs straight
+  // through it into the body and calls the two of them one sentence. Caught by
+  // this rule firing on a draft that opened in 22 words and was reported as 31
+  // — the missing nine being the subject.
+  //
+  // A newline ends a sentence: subjects, headlines and bullets all end that
+  // way and nothing else does. And a caller holding the body separately hands
+  // it over rather than letting this guess.
+  const first = String(opening ?? copy);
+  const firstSentence = first.trim().split(/\n|(?<=[.!?])\s/)[0] || '';
 
   // The first line carries the whole message, so it gets its own check rather
   // than being one more hit in a list.
@@ -729,6 +786,16 @@ export function checkArticulation(text) {
     );
   }
 
+  // An identifier before the reader.
+  if (BARE_IDENTIFIER.test(firstSentence) && !MENTIONS_READER.test(firstSentence)) {
+    notes.push(
+      'The first sentence is a catalogue entry: an identifier, and the reader is not in it. This ' +
+        'company sells context, and opening on a bare CVE or standard number refutes the argument ' +
+        'before the reader reaches it. Same fact, reader first: "your GitLab is on CISA\'s exploited ' +
+        'list as of Friday" — then the number, for whoever wants to look it up.',
+    );
+  }
+
   // The FIRST sentence, on its own.
   //
   // Separate from the mean below, which a long opener barely moves. The
@@ -736,10 +803,10 @@ export function checkArticulation(text) {
   // machine wrote this, and the tell is length: the Zscaler email spent 38
   // words and two nested clauses before its verb arrived. A person opens
   // short, then earns the longer sentence.
-  const opening = (copy.trim().split(/(?<=[.!?])\s/)[0] || '').split(/\s+/).filter(Boolean).length;
-  if (opening > 25) {
+  const openingWords = firstSentence.split(/\s+/).filter(Boolean).length;
+  if (openingWords > 25) {
     notes.push(
-      `The opening sentence is ${opening} words. It is the one a reader uses to decide whether a ` +
+      `The opening sentence is ${openingWords} words. It is the one a reader uses to decide whether a ` +
         'person wrote this. Open short and plain, then earn the longer sentence.',
     );
   }

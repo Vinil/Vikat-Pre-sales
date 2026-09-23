@@ -536,3 +536,79 @@ test('describing their stack without judging it is fine', () => {
     assert.doesNotMatch(notes(line), /absolute about their own stack/, line);
   }
 });
+
+// --- Context, from a company selling context --------------------------------
+
+test('an opening that is a catalogue entry is flagged', () => {
+  // The sharpest note anyone gave this project: "opening the email like that
+  // is totally out of context for a company selling context."
+  //
+  // "CISA added CVE-2026-85706 in GitLab CE/EE to its known-exploited
+  // vulnerabilities catalog on September 11." Every word true, and the whole
+  // sentence is a record from a catalogue. The pitch two paragraphs later is
+  // that a CVE number tells you nothing until you know what it can reach — so
+  // the opening refutes the argument before the reader gets to it.
+  for (const line of [
+    'CISA added CVE-2026-85706 in GitLab CE/EE to its known-exploited vulnerabilities catalog on September 11.',
+    'Vikat holds ISO 27001 and SOC 2 Type 2.',
+  ]) {
+    assert.match(notes(line), /catalogue entry/, line);
+  }
+
+  // The fix is the ORDER, not the content. The same fact with the reader in
+  // it passes, and the number still goes in right after.
+  assert.equal(
+    notes("Your GitLab is on CISA's exploited list as of Friday. The entry is CVE-2026-85706."),
+    '',
+  );
+
+  // And the number may stay in the FIRST sentence, as long as the reader is
+  // there too. This is a rule about who the sentence is about, not a ban on
+  // identifiers — without that assertion it passes as a ban.
+  assert.equal(
+    notes("Your GitLab instance is affected by CVE-2026-85706, added to CISA's list on Friday."),
+    '',
+  );
+});
+
+test('an identifier later in the copy is not an opening', () => {
+  // Only the FIRST sentence. A CVE named in paragraph three is evidence, which
+  // is where evidence belongs.
+  assert.doesNotMatch(
+    notes('Your GitLab sits two hops from the build pipeline.\nThe entry is CVE-2026-85706, added on Friday.'),
+    /catalogue entry/,
+  );
+
+  // Including when the opening has no reader in it either — it is the FIRST
+  // sentence that is judged, and this one carries no identifier to judge.
+  assert.doesNotMatch(
+    notes('The advisory landed on Friday.\nThe entry is CVE-2026-85706.'),
+    /catalogue entry/,
+  );
+});
+
+test('the prompt says the order out loud', () => {
+  assert.match(ARTICULATION_BLOCK, /## Writing to someone who has never heard of us/);
+  assert.match(ARTICULATION_BLOCK, /Say who is writing, in the first two or three sentences/);
+  assert.match(ARTICULATION_BLOCK, /consequence, then evidence/);
+  assert.match(
+    ARTICULATION_BLOCK,
+    /cannot open its own\s+email on a severity score/,
+    'the contradiction has to be named, not implied',
+  );
+});
+
+test('a heading with no full stop does not merge into the line below it', () => {
+  // A title, a subject or a bullet ends without punctuation, so a sentence
+  // splitter runs straight through into whatever follows and reports the two
+  // as one long sentence. A newline ends a sentence: those three things all
+  // end that way and nothing else does.
+  const heading = 'Where the GitLab exposure actually reaches today';
+  const body = 'The advisory names the flaw and stops there, which leaves the question of which instance sits near something critical.';
+
+  // Twelve words plus twenty is over the limit only if they are treated as one.
+  assert.equal(notes(`${heading}\n${body}`), '', `${heading} / ${body}`);
+
+  // And the long one on its own is still caught.
+  assert.match(notes(`${heading} ${body}`), /opening sentence is \d+ words/);
+});

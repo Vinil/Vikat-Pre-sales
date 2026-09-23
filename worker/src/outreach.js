@@ -237,7 +237,37 @@ export function normaliseDraft(input = {}) {
   // Subject and headline included, not just the body: the first line is the
   // one guaranteed to be read, and it is where melodrama lives.
   const whole = [draft.subject, postText(draft)].filter(Boolean).join('\n');
-  for (const n of checkArticulation(whole).notes) warnings.push(n);
+  // The BODY is the opening, not the subject stapled to it. See
+  // checkArticulation: a subject line has no full stop, so a splitter runs
+  // through it into the first sentence and reports the two as one.
+  for (const n of checkArticulation(whole, { opening: draft.body }).notes) warnings.push(n);
+
+  // WHERE we say who we are, which in a cold email is not paragraph four.
+  //
+  // The prospect has never heard of Vikat. The email to Zscaler ran three
+  // paragraphs of security analysis — a CVE, a hiring signal, a claim about
+  // what their SIEM cannot do — before the sender was named at all. A stranger
+  // reading that is asking "who is this and why is it in my inbox" the whole
+  // way down, and nothing answers until they have already decided.
+  //
+  // A document does not have this problem: the logo is on the cover and the
+  // question is answered before a word is read. An email has no cover, which
+  // is why this lives here and not in checkArticulation.
+  const sentences = whole.split(/(?<=[.!?])\s+/).filter((x) => x.trim());
+  const introducedAt = sentences.findIndex((x) => /\bVikat(?:\.AI)?\b/i.test(x));
+
+  if (introducedAt === -1) {
+    warnings.push(
+      'Nothing here says who is writing. The reader has never heard of Vikat: one plain sentence, ' +
+        'early, saying what we do — before the analysis, not after it.',
+    );
+  } else if (introducedAt > 2) {
+    warnings.push(
+      `Vikat is not named until sentence ${introducedAt + 1}. The reader has never heard of us and ` +
+        'spends everything before that wondering who is writing. Say it in the first two or three ' +
+        'sentences, plainly, then make the argument.',
+    );
+  }
 
   return { ok: true, draft, warnings };
 }
