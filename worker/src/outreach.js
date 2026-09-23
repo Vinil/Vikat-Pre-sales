@@ -149,7 +149,7 @@ function clean(value, max) {
  *
  * @returns {{ ok: true, draft: object, warnings: string[] } | { ok: false, error: string }}
  */
-export function normaliseDraft(input = {}) {
+export function normaliseDraft(input = {}, { forbidden = [] } = {}) {
   const channel = CHANNELS[input.channel] ? input.channel : 'email';
   const spec = CHANNELS[channel];
   const warnings = [];
@@ -266,6 +266,23 @@ export function normaliseDraft(input = {}) {
       `Vikat is not named until sentence ${introducedAt + 1}. The reader has never heard of us and ` +
         'spends everything before that wondering who is writing. Say it in the first two or three ' +
         'sentences, plainly, then make the argument.',
+    );
+  }
+
+  // A customer we may not name, in the thing a rep sends soonest and edits
+  // least. See execOutreach.js: the real names are already in the assistant's
+  // context from the knowledge base, so the instruction not to use them is
+  // competing with a fact it can see. This does not depend on it cooperating.
+  //
+  // First in the list, because it is the only warning here that is about
+  // somebody else's confidence rather than about our own writing.
+  const leaked = forbidden.filter((name) =>
+    new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(whole),
+  );
+  if (leaked.length) {
+    warnings.unshift(
+      `${leaked.join(' and ')} may not be named to a customer. The approved references describe them ` +
+        'instead, and the description is the whole permission: use it word for word and take the name out.',
     );
   }
 

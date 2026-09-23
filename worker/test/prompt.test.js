@@ -371,3 +371,30 @@ test('the prompt says to take the wording as written and never resolve it', asyn
   );
   assert.match(ARTICULATION_BLOCK, /a vague one[\s\S]{0,80}is the same mistake wearing a hat/);
 });
+
+const { referencesBlock, forbiddenNames } = await import('../src/references.js');
+
+test('a name recorded for the checker never reaches the model', () => {
+  // The whole design. "Never print: Reiter Affiliated" is stripped before the
+  // block is injected, because a line carrying the name would hand the model
+  // the very thing the line exists to protect.
+  const saved = {
+    content: [
+      'Who: the world’s largest berry producer',
+      'Never print: Reiter Affiliated, Reiter',
+      'Problem: agent access sprawling across a distributed estate',
+      '',
+      'Who: one of the largest process intelligence companies',
+      'Never print: Skan, Skan.ai',
+    ].join('\n'),
+  };
+
+  const block = referencesBlock(saved);
+  assert.match(block, /largest berry producer/, 'the descriptor goes in');
+  assert.doesNotMatch(block, /Reiter|Skan/, 'the name does not');
+  assert.doesNotMatch(block, /Never print/i, 'nor the instruction that would point at it');
+
+  // And the checker gets every one of them, split and de-duplicated.
+  assert.deepEqual(forbiddenNames(saved), ['Reiter Affiliated', 'Reiter', 'Skan', 'Skan.ai']);
+  assert.deepEqual(forbiddenNames(null), []);
+});

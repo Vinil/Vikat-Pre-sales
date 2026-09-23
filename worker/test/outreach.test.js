@@ -723,3 +723,52 @@ test('a subject line is not stapled to the body to make one long sentence', () =
   });
   assert.ok(long.warnings.some((w) => /opening sentence is 3\d words/.test(w)), long.warnings.join(' | '));
 });
+
+test('a customer we may not name is refused even when the name is right there', () => {
+  // The hard part of a descriptor-only reference is not saying the descriptor.
+  // It is that the real name is already in the assistant's context from
+  // somewhere else — Skan.ai is in the knowledge base, because the public
+  // website names it as technology Vikat builds on — so "never work out which
+  // company the descriptor points at" is an instruction competing with a fact
+  // the model can see.
+  //
+  // An instruction cannot be relied on there. This is the part that does not
+  // depend on the model cooperating.
+  const forbidden = ['Reiter Affiliated', 'Reiter', 'Skan', 'Skan.ai'];
+
+  const leaked = normaliseDraft(
+    {
+      channel: 'email',
+      subject: 'What we did at Reiter Affiliated',
+      body: 'Vikat did this for Reiter Affiliated last year. Twenty minutes on Thursday?',
+    },
+    { forbidden },
+  );
+  assert.ok(leaked.warnings.some((w) => /may not be named/.test(w)), leaked.warnings.join(' | '));
+  assert.match(leaked.warnings[0], /Reiter/, 'and it leads, because it is somebody else’s confidence');
+
+  // The descriptor is the whole permission, and it passes.
+  const described = normaliseDraft(
+    {
+      channel: 'email',
+      subject: 'A hand with the CVE, and a report either way',
+      body: 'Vikat did this for the world’s largest berry producer. Twenty minutes on Thursday?',
+    },
+    { forbidden },
+  );
+  assert.ok(!described.warnings.some((w) => /may not be named/.test(w)), described.warnings.join(' | '));
+});
+
+test('a name that is not on the list is nobody’s business', () => {
+  // The check must not become a general ban on proper nouns. Only what the
+  // approved references explicitly mark.
+  const { warnings } = normaliseDraft(
+    {
+      channel: 'email',
+      subject: 'Your GitLab is on the exploited list',
+      body: 'Vikat reads what Splunk and CrowdStrike already produce. Twenty minutes on Thursday?',
+    },
+    { forbidden: ['Reiter Affiliated'] },
+  );
+  assert.ok(!warnings.some((w) => /may not be named/.test(w)), warnings.join(' | '));
+});

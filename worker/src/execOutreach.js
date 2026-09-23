@@ -454,6 +454,7 @@ export function outreachText(spec) {
  * @param {object} spec              A normalised document spec.
  * @param {object} [opts]
  * @param {boolean} [opts.customerFacing]  Defaults to true for external_ok.
+ * @param {string[]} [opts.forbidden]        Customer names that may not be printed.
  * @param {string}  [opts.recipient]       Who it is addressed to, for the recap check.
  * @returns {{ problems: string[], notes: string[] }}
  */
@@ -544,6 +545,28 @@ export function checkExecOutreach(spec, opts = {}) {
       'No trust anchor: no named integration, certification or reference. A stranger does not act on ' +
         'claims alone. Name tools they already run, or a certification, or a customer in their vertical.',
     );
+  }
+
+  // A customer we are not allowed to name.
+  //
+  // The instruction alone cannot hold this. The real names are usually already
+  // in the assistant's context from somewhere else — Skan.ai is in the
+  // knowledge base because the public website names it as technology Vikat
+  // builds on — so "never work out which company the descriptor points at" is
+  // a rule competing with a fact the model can see. This is the part that does
+  // not depend on the model cooperating.
+  //
+  // A PROBLEM and not a note. A descriptor is what somebody uses when the name
+  // is not theirs to give, and the cost of getting that wrong lands on the
+  // customer who trusted us with it, not on us.
+  for (const name of opts.forbidden || []) {
+    const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (customerFacing && re.test(text)) {
+      problems.push(
+        `"${name}" is a customer we may not name. The approved references describe them instead, and ` +
+          'the description is the whole permission: use it exactly as written and take the name out.',
+      );
+    }
   }
 
   // A customer, which is a different thing from a tool.

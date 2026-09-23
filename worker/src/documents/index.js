@@ -15,6 +15,7 @@ import { renderPptx } from './pptx.js';
 import { inspectPptx, inspectionSummary } from './inspect.js';
 import { checkGuidelines } from './guidelines.js';
 import { checkArticulation } from '../articulation.js';
+import { REFERENCES_KEY, forbiddenNames } from '../references.js';
 import { checkExecOutreach, recapShare, outreachText } from '../execOutreach.js';
 import { renderPdf } from './pdf.js';
 import { renderDocx } from './docx.js';
@@ -80,7 +81,17 @@ export async function createDocument(input, ctx) {
   // nothing to come back.
   //
   // A text rule has no business knowing which renderer ran.
-  const outreach = checkExecOutreach({ ...spec, preparedBy });
+  // Names the approved references say must not be printed. Read here rather
+  // than trusted to the prompt: the block the model sees has them stripped
+  // out, so this is the only place that knows what to look for.
+  let forbidden = [];
+  try {
+    forbidden = forbiddenNames(await storage.getSetting(REFERENCES_KEY));
+  } catch (err) {
+    console.error('[documents] references unavailable:', err?.message || err);
+  }
+
+  const outreach = checkExecOutreach({ ...spec, preparedBy }, { forbidden });
 
   // How it SOUNDS, which nothing was asking.
   //

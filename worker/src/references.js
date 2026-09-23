@@ -48,15 +48,56 @@ export const REFERENCES_MAX_CHARS = 8000;
  * grower in front of an arbitration body and calls it relevance; matching on
  * the problem puts the right one there.
  */
+/**
+ * Lines that exist for the CHECKER and never reach the model.
+ *
+ * The hard part of a descriptor-only reference is not saying the descriptor.
+ * It is that the real name is usually somewhere else in the assistant's
+ * context anyway — Skan.ai is in the knowledge base already, because the
+ * public website names it as technology Vikat builds on — so "never work out
+ * which company this points at" is an instruction competing with a fact the
+ * model can already see.
+ *
+ * An instruction cannot be relied on there. A check can. So the name is
+ * recorded on a "Never print:" line, STRIPPED before the block is injected,
+ * and used for one purpose: refusing any customer-facing text that contains
+ * it. The model never receives the name from here, and if it produces one
+ * from elsewhere the output does not leave the building.
+ */
+const NEVER_PRINT = /^\s*never print\s*:\s*(.+)$/gim;
+
+/**
+ * Names that must not appear in anything a customer reads.
+ *
+ * @param {{content?: string}|null} saved
+ * @returns {string[]}
+ */
+export function forbiddenNames(saved) {
+  const content = String(saved?.content || '');
+  const out = [];
+
+  for (const [, list] of content.matchAll(NEVER_PRINT)) {
+    for (const name of list.split(',')) {
+      const trimmed = name.trim();
+      if (trimmed.length >= 3) out.push(trimmed);
+    }
+  }
+
+  return [...new Set(out)];
+}
+
 export const REFERENCE_TEMPLATE = [
   'One block per customer. Leave out anything you cannot evidence.',
   '',
-  'How to name them: exactly as you want it printed. If the name is not cleared,',
-  'write the descriptor you are allowed to use and nothing else — the assistant',
-  'is told never to work out who it points at.',
+  'How to name them: exactly as you want it printed.',
+  '',
+  'If the name is not cleared, write the descriptor you are allowed to use as',
+  'Who, and put the real name on a "Never print" line. That line never reaches',
+  'the assistant. It is used to REFUSE any draft the name turns up in, from',
+  'wherever it came from, which an instruction on its own cannot do.',
   '',
   'Who: the world\'s largest berry producer',
-  'Name cleared: no — descriptor only',
+  'Never print: Reiter Affiliated, Reiter',
   'Problem: what was going wrong, in their words',
   'What we did: the part that was ours',
   'Outcome: what changed, with the number if you have one and nothing if you do not',
@@ -71,7 +112,9 @@ export const REFERENCE_TEMPLATE = [
  * a model supplies one.
  */
 export function referencesBlock(saved) {
-  const content = String(saved?.content || '').trim();
+  // Stripped, not trusted to be ignored. A "Never print" line reaching the
+  // model would hand it the name the line exists to protect.
+  const content = String(saved?.content || '').replace(NEVER_PRINT, '').trim();
   if (!content) return '';
 
   return [

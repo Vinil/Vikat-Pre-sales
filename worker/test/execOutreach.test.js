@@ -645,3 +645,33 @@ test('an internal document is not asked for customer proof', () => {
   const internal = clean({ disclosure: 'internal_only' });
   assert.ok(!checkExecOutreach(internal).notes.some((n) => /No customer proof/.test(n)));
 });
+
+test('a document carrying a name we may not print is refused too', () => {
+  // A deck reaches the same reader as an email and travels further, because a
+  // PDF gets forwarded. The leak guard cannot live only on the draft path.
+  const spec = clean();
+  spec.sections[0].points = ['We did the same for Reiter Affiliated last year.'];
+
+  const { problems } = checkExecOutreach(spec, { forbidden: ['Reiter Affiliated', 'Skan'] });
+  const hit = problems.find((p) => /may not name/.test(p));
+  assert.ok(hit, problems.join('\n'));
+  assert.match(hit, /use it exactly as written and take the name out/);
+
+  // The descriptor passes.
+  const described = clean();
+  described.sections[0].points = ['We did the same for the world’s largest berry producer.'];
+  assert.equal(
+    checkExecOutreach(described, { forbidden: ['Reiter Affiliated', 'Skan'] })
+      .problems.filter((p) => /may not name/.test(p)).length,
+    0,
+  );
+
+  // And an internal deal review may say the name: that is where it belongs.
+  const internal = clean({ disclosure: 'internal_only' });
+  internal.sections[0].points = ['We did the same for Reiter Affiliated last year.'];
+  assert.equal(
+    checkExecOutreach(internal, { forbidden: ['Reiter Affiliated'] })
+      .problems.filter((p) => /may not name/.test(p)).length,
+    0,
+  );
+});

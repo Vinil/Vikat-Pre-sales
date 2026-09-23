@@ -20,6 +20,7 @@
 
 import { deliverLead } from './leadSink.js';
 import { normaliseDraft, CHANNEL_NAMES } from './outreach.js';
+import { REFERENCES_KEY, forbiddenNames } from './references.js';
 import { generateImage } from './imageGen.js';
 import { searchCollateral, collateralCount } from './collateral.js';
 import { createDocument } from './documents/index.js';
@@ -468,7 +469,17 @@ export async function runTool(call, ctx) {
       }
 
       case 'draft_outreach': {
-        const read = normaliseDraft(call.input);
+        // The names the approved references say must not be printed. Read from
+        // storage rather than taken from the prompt: the block the model sees
+        // has them stripped, so this is the only place that knows them.
+        let forbidden = [];
+        try {
+          forbidden = forbiddenNames(await storage.getSetting(REFERENCES_KEY));
+        } catch (err) {
+          console.error('[tools] references unavailable:', err?.message || err);
+        }
+
+        const read = normaliseDraft(call.input, { forbidden });
         if (!read.ok) {
           return {
             content: `That draft could not be used: ${read.error} Write the message itself and call the tool again.`,
