@@ -318,3 +318,56 @@ test('the voice rules are in the CACHED half of the prompt', async () => {
   const blocks = systemBlocks(cfg, await retrieve('x', {}), { user: REP });
   assert.match(blocks[0].text, /## How it has to read/);
 });
+
+// --- Customer proof ---------------------------------------------------------
+
+test('proof reaches the model on every turn, not when a search happens to find it', async () => {
+  // "This has to be weaved into all the emails by default." A retrieval hit
+  // cannot promise that: it would land on the turns where a search surfaced it
+  // and nowhere else. So proof is injected the way positioning is.
+  const { retrieve } = await import('../src/retrieve.js');
+  const { REFERENCES_KEY } = await import('../src/references.js');
+
+  const settings = new Map();
+  const storage = {
+    getSetting: async (k) => settings.get(k) || null,
+    listKnowledge: async () => [],
+  };
+
+  settings.set(REFERENCES_KEY, {
+    content: 'Who: the world’s largest berry producer\nOutcome: something measurable.',
+  });
+
+  const out = await retrieve('anything at all', { storage });
+  assert.match(out, /<references/, 'the block has to be there');
+  assert.match(out, /largest berry producer/);
+  assert.match(out, /never\s+work out which company the description points at/i, 'with its clearance rule');
+});
+
+test('nothing saved means nothing said, which is the safe default', async () => {
+  // A model told to name a reference with none available supplies one. Silence
+  // is the only correct behaviour when the store is empty.
+  const { retrieve } = await import('../src/retrieve.js');
+  const storage = { getSetting: async () => null, listKnowledge: async () => [] };
+
+  const out = await retrieve('anything at all', { storage });
+  assert.doesNotMatch(out, /<references/);
+});
+
+test('the prompt says to take the wording as written and never resolve it', async () => {
+  const { ARTICULATION_BLOCK } = await import('../src/articulation.js');
+
+  assert.match(ARTICULATION_BLOCK, /Name somebody you have done this for/);
+  assert.match(ARTICULATION_BLOCK, /whose PROBLEM was closest/);
+  assert.match(
+    ARTICULATION_BLOCK,
+    /never work out which company the description points at/,
+    'a descriptor is what somebody uses when the name is not theirs to give',
+  );
+  assert.match(
+    ARTICULATION_BLOCK,
+    /write the email with no reference at all/,
+    'an absent store must produce silence, not invention',
+  );
+  assert.match(ARTICULATION_BLOCK, /a vague one[\s\S]{0,80}is the same mistake wearing a hat/);
+});

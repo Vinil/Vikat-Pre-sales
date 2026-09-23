@@ -14,6 +14,7 @@
 
 import { KNOWLEDGE, KNOWLEDGE_TOKENS, KNOWLEDGE_META } from './knowledge.js';
 import { POSITIONING_KEY, positioningBlock } from './positioning.js';
+import { REFERENCES_KEY, referencesBlock } from './references.js';
 
 /** Every page in the compiled base, for retiring superseded uploads. */
 const COMPILED_PAGES = new Set(KNOWLEDGE.map((c) => c.page));
@@ -81,6 +82,22 @@ export async function retrieve(query, sessionContext = {}) {
     }
   }
 
+  // Customer proof, on the same terms and for the same reason. "In every email
+  // by default" is not something a retrieval hit can promise: it would appear
+  // on the turns where a search happened to surface it and nowhere else.
+  //
+  // Silent when nothing is saved. A model told to name a reference with none
+  // available supplies one, and an invented customer is the failure this
+  // project has refused from its first line.
+  let references = '';
+  if (sessionContext.storage) {
+    try {
+      references = referencesBlock(await sessionContext.storage.getSetting(REFERENCES_KEY));
+    } catch (err) {
+      console.error('[retrieve] references unavailable:', err?.message || err);
+    }
+  }
+
   // Admin-authored entries are merged at request time, so a correction typed
   // into the panel is live on the next message rather than the next deploy.
   // They come last: later entries read as the more recent word on a subject,
@@ -110,7 +127,11 @@ export async function retrieve(query, sessionContext = {}) {
   }
 
   const base = format([...KNOWLEDGE, ...runtime]);
-  return positioning ? `${positioning}\n\n${base}` : base;
+
+  // Positioning first, then proof, then what we can do. That is the order a
+  // person would say it in, and the order of precedence too: who we are wins
+  // over what we have done for somebody else, which wins over a product page.
+  return [positioning, references, base].filter(Boolean).join('\n\n');
 }
 
 /**

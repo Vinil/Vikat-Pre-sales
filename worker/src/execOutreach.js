@@ -291,6 +291,20 @@ const TRUST_ANCHORS =
   );
 
 /**
+ * Evidence that somebody else bought this and it worked.
+ *
+ * Deliberately loose. The approved wording is admin-authored and unknown here,
+ * so this looks for the SHAPE a proof point takes — a customer referred to and
+ * something that happened to them — rather than for any particular customer.
+ *
+ * Under-matching costs a note that fires on an email which already carries
+ * proof, and that is the expensive direction: a report wrong about the thing
+ * you just did is the report a rep stops reading.
+ */
+const CUSTOMER_PROOF =
+  /\b(?:we (?:did|do|run|built|deliver|delivered) (?:this|the same|that)|for (?:the|a|an) (?:world|largest|biggest|leading)|another (?:customer|client)|a customer (?:of ours|in)|reference customer|case study|we work with|we did this for|we are doing this for)\b/i;
+
+/**
  * A CTA is only an ask if it names a when.
  *
  * "before\s+(?:the\s+)?\w+" used to be the last branch, and it matches
@@ -529,6 +543,25 @@ export function checkExecOutreach(spec, opts = {}) {
     notes.push(
       'No trust anchor: no named integration, certification or reference. A stranger does not act on ' +
         'claims alone. Name tools they already run, or a certification, or a customer in their vertical.',
+    );
+  }
+
+  // A customer, which is a different thing from a tool.
+  //
+  // TRUST_ANCHORS is satisfied by naming Splunk, and naming a tool the READER
+  // owns is not evidence that anyone ever bought this. Proof that somebody did
+  // is what a stranger actually weighs, and no draft has ever carried it —
+  // because until references.js there was nowhere to keep it.
+  //
+  // A NOTE and never a refusal. With the reference store empty the correct
+  // email has no customer in it, and a check that insisted otherwise would be
+  // pressure to invent one.
+  if (customerFacing && !CUSTOMER_PROOF.test(text)) {
+    notes.push(
+      'No customer proof. One line saying who else had this problem and what changed for them is ' +
+        'what a stranger actually weighs, and naming a tool they already own is not it. Take it from ' +
+        'the approved references word for word, or leave it out — never describe a customer you ' +
+        'cannot name from that list.',
     );
   }
 

@@ -17,6 +17,7 @@ import { ROLES, resolveRole, wouldLeaveNoAdmin } from './roles.js';
 import { documentStoreStatus, listLibraries, uploadDocument } from './documentStore.js';
 import { ingest, SUPPORTED_EXTENSIONS } from './ingest.js';
 import { POSITIONING_KEY, POSITIONING_MAX_CHARS } from './positioning.js';
+import { REFERENCES_KEY, REFERENCES_MAX_CHARS, REFERENCE_TEMPLATE } from './references.js';
 import { retrievalStatus, retrieve } from './retrieve.js';
 import { collateralCount } from './collateral.js';
 import { buildSystemPrompt } from './systemPrompt.js';
@@ -645,6 +646,8 @@ export async function handleAdmin(request, url, ctx) {
       return handleUpload(request, url, ctx);
     case '/admin/positioning':
       return handlePositioning(request, url, ctx);
+    case '/admin/references':
+      return handleReferences(request, url, ctx);
     case '/admin/sharepoint':
       return handleSharePoint(request, url, ctx);
     case '/admin/users':
@@ -656,7 +659,67 @@ export async function handleAdmin(request, url, ctx) {
   }
 }
 
-/** Everything the panel needs to render itself on load. */
+/**
+ * Customer proof, on the same terms as positioning: one editable text, saved
+ * by a person who has read it, live on the next message.
+ *
+ * GET and PUT only. Positioning accepts a file upload because a positioning
+ * statement usually arrives as one; proof points are typed, a few lines at a
+ * time, as deals close.
+ */
+async function handleReferences(request, url, ctx) {
+  const { storage, user, cors } = ctx;
+
+  if (request.method === 'GET') {
+    const saved = (await storage.getSetting(REFERENCES_KEY)) || null;
+    return json(
+      {
+        content: saved?.content || '',
+        updatedBy: saved?.updatedBy || null,
+        updatedAt: saved?.updatedAt || null,
+        maxChars: REFERENCES_MAX_CHARS,
+        template: REFERENCE_TEMPLATE,
+      },
+      200,
+      cors,
+    );
+  }
+
+  if (request.method !== 'PUT') {
+    return json({ error: 'Use GET or PUT.', code: 'method_not_allowed' }, 405, cors);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Send JSON.' }, 400, cors);
+  }
+
+  const content = clean(body.content).slice(0, REFERENCES_MAX_CHARS);
+
+  // Saving nothing turns it off, and that has to be possible. A reference the
+  // customer has withdrawn permission for is worse than no reference, and the
+  // person who finds that out needs to be able to act in one step.
+  const saved = await storage.saveSetting(REFERENCES_KEY, { content }, user.email);
+
+  return json(
+    {
+      content: saved.content,
+      updatedBy: saved.updatedBy,
+      updatedAt: saved.updatedAt,
+      note: content
+        ? 'Saved. Outreach carries one of these from the next message on.'
+        : 'Cleared. Outreach will name no customers at all, which is the safe default.',
+    },
+    200,
+    cors,
+  );
+}
+
+/**
+ * Everything the panel needs to render itself on load.
+ */
 export async function handleAdminSummary(request, ctx) {
   const { storage, user, cfg, cors } = ctx;
   const { role, source } = await resolveRole(user, storage, cfg);

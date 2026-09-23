@@ -617,3 +617,31 @@ test('a 30-minute overview is an ask, and a cloud platform is an anchor', () => 
     checkExecOutreach(singular).notes.join('\n'),
   );
 });
+
+test('naming a tool the reader owns is not proof that anyone bought this', () => {
+  // TRUST_ANCHORS is satisfied by the word "Splunk", and Splunk is THEIRS.
+  // What a stranger weighs is evidence somebody else had this problem and
+  // something changed — and no draft in this project has ever carried it,
+  // because until references.js there was nowhere to keep one.
+  const spec = clean();
+  spec.sections[0].points = ['Runs alongside Splunk and CrowdStrike. Nothing is ripped out.'];
+
+  const bare = checkExecOutreach(spec).notes;
+  assert.ok(bare.some((n) => /No customer proof/.test(n)), bare.join('\n'));
+  assert.ok(!bare.some((n) => /trust anchor/i.test(n)), 'and the tool still counts as an anchor');
+
+  // A proof point in the shape one actually takes, and the note goes.
+  spec.sections[0].points.push(
+    'We did the same for the world’s largest berry producer: the fix order followed consequence, not CVSS.',
+  );
+  assert.ok(
+    !checkExecOutreach(spec).notes.some((n) => /No customer proof/.test(n)),
+    checkExecOutreach(spec).notes.join('\n'),
+  );
+});
+
+test('an internal document is not asked for customer proof', () => {
+  // A deal review is written for people who already know the references.
+  const internal = clean({ disclosure: 'internal_only' });
+  assert.ok(!checkExecOutreach(internal).notes.some((n) => /No customer proof/.test(n)));
+});
