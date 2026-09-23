@@ -201,6 +201,32 @@ function tautology(text) {
 }
 
 /**
+ * Telling a CISO they have missed something.
+ *
+ * Every draft so far has carried the same posture: here is a gap you cannot
+ * see, and we can see it. To the person whose job is seeing it, that reads as
+ * a stranger who has not considered that they might already be on it.
+ *
+ * The knowledge base is where it comes from. "Most CISOs can't answer the
+ * first one" is a line in the source material, and the model is repeating the
+ * register it was given.
+ *
+ * The courteous version costs nothing and is also more likely to be true: they
+ * are prioritising it, and what a vendor can offer is speed, not discovery.
+ * "I would guess this is already on your plate this week" grants them the
+ * competence they have, and the rest of the email is then about going faster
+ * rather than about catching up.
+ */
+const CONDESCENDING = [
+  { re: /\bmost (?:teams|CISOs|organi[sz]ations|companies) (?:can'?t|cannot|do ?n'?t|fail to|miss)\b/i, say: 'telling them what most people in their job cannot do' },
+  { re: /\byou (?:may|might|probably) not (?:realise|realize|know|be aware)\b/i, say: 'assuming they have not noticed' },
+  { re: /\b(?:blind spot|what (?:you|most teams) miss|the gap you)\b/i, say: 'a gap you are claiming to see and they are not' },
+  { re: /\bchances are (?:you|your)\b/i, say: 'a guess about their competence' },
+  { re: /\bbefore it(?:'s| is) too late\b|\bif you wait\b/i, say: 'a warning they did not ask for' },
+  { re: /\bare you (?:even )?(?:aware|sure you)\b/i, say: 'a question that is really an accusation' },
+];
+
+/**
  * An identifier is data. A company selling context does not open on data.
  *
  * The sharpest note anyone has given this project: "opening the email like
@@ -322,6 +348,21 @@ know the product, and did not ask. Two things follow.
 sentence: what we do, in their language. Not paragraph four, after three
 paragraphs of analysis they have been reading while wondering who this is.
 An email has no cover with a logo on it — the words are the whole introduction.
+
+**Say hello, and say who you are.** "Hi <name>, I'm <rep> at Vikat." A cold
+email with no greeting and no name reads as a broadcast. One line, then the
+point.
+
+**Assume they are already on it.** They are the person whose job this is. A
+CVE that made the news on Friday is on their list by Monday, and a stranger
+implying otherwise has lost the room. "I'd guess this is already on your plate
+this week" costs nothing, is almost certainly true, and changes what you are
+offering from discovery to speed. Never "most teams miss this", never "your
+blind spot", never "before it's too late".
+
+**Give them something they keep.** A trends report, a findings memo, a map of
+their own estate — something useful whether or not they reply. Say so plainly:
+"either way, here is X". An email that only asks is an email that only takes.
 
 **Open on what it means for them, then name the thing.** We sell context. An
 email that opens on a bare CVE number, a standard, or a statistic is a
@@ -773,6 +814,17 @@ export function checkArticulation(text, { opening = null } = {}) {
         `Reads as generated: ${shape.say}. Say the fact and stop — "you are hiring Go and Rust ` +
           'engineers for agent security" — and let them draw their own conclusion. They already know ' +
           'what their own decisions mean.',
+      );
+      break;
+    }
+  }
+
+  for (const shape of CONDESCENDING) {
+    if (shape.re.test(copy)) {
+      notes.push(
+        `Reads as ${shape.say}. They are the person whose job this is, and they are probably already ` +
+          'on it. Assume they are: "I would guess this is already on your plate this week" grants them ' +
+          'that, and what is left to offer is speed rather than discovery.',
       );
       break;
     }

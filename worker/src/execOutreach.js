@@ -274,7 +274,21 @@ const REAL_LINES = [
  * reader could check. The cheapest fix is naming tools they already run.
  */
 const TRUST_ANCHORS =
-  /\b(SOC ?2|ISO ?27001|FedRAMP|HIPAA|PCI[- ]?DSS|Splunk|Sentinel|CrowdStrike|Defender|Qualys|Tenable|Rapid7|Okta|reference customer|case study)\b/i;
+  new RegExp(
+    '\\b(' +
+      // Certifications and frameworks.
+      'SOC ?2|ISO ?27001|FedRAMP|HIPAA|PCI[- ]?DSS|' +
+      // Security tooling.
+      'Splunk|Sentinel|CrowdStrike|Defender|Qualys|Tenable|Rapid7|Okta|' +
+      // And the platforms an estate actually runs on. Naming AWS, GCP and
+      // Azure — the three the lead itself listed for this account — was
+      // reported as naming nothing, because the list was security products
+      // only. A hyperscaler is a tool they already run by any reading.
+      'AWS|Azure|GCP|Google Cloud|Kubernetes|GitLab|GitHub|ServiceNow|Jira|' +
+      'reference customer|case study' +
+    ')\\b',
+    'i',
+  );
 
 /**
  * A CTA is only an ask if it names a when.
@@ -313,7 +327,7 @@ const DATED_ASK = new RegExp(
  * it. What identifies the ask is what it proposes, so that is what is matched.
  */
 const ASK_LINE =
-  /\b(call|meeting|minutes|walk through|walkthrough|session|demo|intro|briefing|assessment|scoping|conversation|catch up)\b/i;
+  /\b(call|meeting|minutes?|walk through|walkthrough|walk you through|session|demo|intro|overview|briefing|assessment|scoping|conversation|catch up)\b/i;
 
 function theAsk(text) {
   const lines = String(text).split('\n').map((l) => l.trim()).filter(Boolean);
@@ -592,7 +606,12 @@ export function unsourcedFigures(text) {
   const out = [];
   const seen = new Set();
 
-  for (const line of String(text).split('\n')) {
+  for (const raw of String(text).split('\n')) {
+    // A sender block is contact details, not evidence. "+1 512 555 0134" was
+    // reported as an unattributed figure, on the line that exists so a
+    // stranger can reply — so the check asking for a source was pointing at
+    // the phone number.
+    const line = raw.replace(HAS_PHONE, ' ').replace(HAS_EMAIL, ' ');
     if (SOURCE_NEARBY.test(line) || cited(line)) continue;
 
     for (const m of line.matchAll(ANCHOR_FIGURE)) {

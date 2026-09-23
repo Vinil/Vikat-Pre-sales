@@ -570,3 +570,50 @@ test('the sanctioned wording passes, in any of its forms', () => {
     );
   }
 });
+
+test('a sender block is contact details, not evidence', () => {
+  // "+1 512 555 0134" was reported as an unattributed figure — on the line
+  // that exists so a stranger can reply. The check asking for a source was
+  // pointing at the phone number.
+  assert.deepEqual(unsourcedFigures('Vinil Vadi, Head of Sales, Vikat'), []);
+  assert.deepEqual(unsourcedFigures('vinil@vikat.ai | +1 512 555 0134'), []);
+
+  // And a real figure on a line that also carries contact details is still
+  // caught, or the sender block becomes a place to hide numbers.
+  assert.deepEqual(
+    unsourcedFigures('Call +1 512 555 0134. We handled 40000 incidents last year.'),
+    ['40000'],
+  );
+});
+
+test('a 30-minute overview is an ask, and a cloud platform is an anchor', () => {
+  // Two misses on the same clean email. "Worth a 30-minute overview on
+  // Thursday?" was not recognised as the ask — the pattern had "minutes" and
+  // the text said "30-minute" — so the date check fell back to the sender
+  // block and reported no date. And naming AWS, GCP and Azure, the three tools
+  // the lead itself listed for the account, counted as naming nothing, because
+  // the anchor list held security products only.
+  const spec = clean();
+  spec.sections[0].body =
+    'It fits over what you already run across AWS, GCP and Azure. Worth a 30-minute overview on Thursday?';
+  spec.sections[0].points = [];
+
+  const { notes } = checkExecOutreach(spec);
+  assert.ok(!notes.some((n) => /no date/i.test(n)), notes.join('\n'));
+  assert.ok(!notes.some((n) => /trust anchor/i.test(n)), notes.join('\n'));
+
+  // "minute" singular on its own, with no other ask word on the line — which
+  // is what "a 30-minute slot" is, and what the plural-only pattern missed.
+  //
+  // And the ask is NOT the last line: a real email signs off after it. That
+  // matters, because with no line recognised as an ask the check falls back to
+  // the last line, and a fixture whose ask IS the last line passes whether or
+  // not the pattern works.
+  const singular = clean();
+  singular.sections[0].body = 'Shall we book a 30-minute slot on Thursday?';
+  singular.sections[0].points = ['Either way, the trends report is attached.'];
+  assert.ok(
+    !checkExecOutreach(singular).notes.some((n) => /no date/i.test(n)),
+    checkExecOutreach(singular).notes.join('\n'),
+  );
+});

@@ -612,3 +612,46 @@ test('a heading with no full stop does not merge into the line below it', () => 
   // And the long one on its own is still caught.
   assert.match(notes(`${heading} ${body}`), /opening sentence is \d+ words/);
 });
+
+// --- Courtesy ---------------------------------------------------------------
+
+test('telling a CISO they have missed something is flagged', () => {
+  // Every draft so far carried the same posture: here is a gap you cannot
+  // see, and we can see it. To the person whose job is seeing it, that reads
+  // as a stranger who has not considered they might already be on it.
+  //
+  // It comes from the source material — "Most CISOs can't answer the first
+  // one" is a line in the knowledge base — so the model is repeating the
+  // register it was handed.
+  for (const line of [
+    'Most CISOs cannot answer the board five basic questions.',
+    'You may not realise how many agents are running unsanctioned.',
+    'This is the blind spot in most agent programmes.',
+    'Act before it is too late.',
+  ]) {
+    assert.match(notes(line), /already\s+on it/, line);
+  }
+});
+
+test('granting them the competence they have is not flagged', () => {
+  // The courteous version costs nothing, is almost certainly true, and changes
+  // what is on offer from discovery to speed.
+  for (const line of [
+    'I would guess this is already on your plate this week.',
+    'Where we tend to help is speed.',
+    'GitLab shows up in your job postings.',
+  ]) {
+    assert.doesNotMatch(notes(line), /already\s+on it/, line);
+  }
+});
+
+test('the prompt asks for a greeting, deference and something they keep', () => {
+  assert.match(ARTICULATION_BLOCK, /Say hello, and say who you are/);
+  assert.match(ARTICULATION_BLOCK, /Assume they are already on it/);
+  assert.match(ARTICULATION_BLOCK, /Give them something they keep/);
+  assert.match(
+    ARTICULATION_BLOCK,
+    /An email that only asks is an email that only takes/,
+    'the reason has to travel with the rule',
+  );
+});
