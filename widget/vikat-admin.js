@@ -401,6 +401,60 @@
     $('#pos-save').click();
   });
 
+  // --- Customer proof ------------------------------------------------------
+
+  var refMax = 8000;
+
+  function refCount() {
+    var n = $('#ref-content').value.length;
+    $('#ref-count').textContent =
+      n + ' / ' + refMax.toLocaleString() + ' characters' + (n >= refMax ? ' — at the limit' : '');
+  }
+
+  function showReferences(r) {
+    if (typeof r.content === 'string') $('#ref-content').value = r.content;
+    if (r.maxChars) refMax = r.maxChars;
+
+    // The template as the placeholder rather than as prose above the box: the
+    // shape is only useful while you are typing into it, and four fields are
+    // more than anybody reads twice.
+    if (r.template) $('#ref-content').setAttribute('placeholder', r.template);
+
+    $('#ref-meta').textContent = r.updatedAt
+      ? 'Last saved ' + fmtDate(r.updatedAt) + (r.updatedBy ? ' by ' + r.updatedBy : '') + '.'
+      : 'Nothing saved yet — outreach names no customers.';
+
+    refCount();
+  }
+
+  function loadReferences() {
+    return api('/admin/references').then(showReferences);
+  }
+
+  $('#ref-content').addEventListener('input', refCount);
+
+  $('#ref-save').addEventListener('click', function () {
+    var btn = $('#ref-save');
+    btn.disabled = true;
+
+    api('/admin/references', { method: 'PUT', body: { content: $('#ref-content').value } })
+      .then(function (r) {
+        toast(r.note || 'Saved.');
+        showReferences(r);
+      })
+      .catch(function () {})
+      .finally(function () { btn.disabled = false; });
+  });
+
+  $('#ref-clear').addEventListener('click', function () {
+    // One obvious action, because the reason to reach for it is usually that a
+    // customer has withdrawn permission and somebody needs it gone now.
+    if (!window.confirm('Clear all customer proof? Outreach will name no customers at all.')) return;
+    $('#ref-content').value = '';
+    refCount();
+    $('#ref-save').click();
+  });
+
   // --- Upload --------------------------------------------------------------
 
   function loadUploadTargets() {
@@ -763,7 +817,7 @@
 
         // Independent, and kept that way: a throw in one used to take the
         // rest of the sequence with it.
-        [loadKnowledge, loadPositioning, loadUploadTargets, loadSharePoint, loadUsers].forEach(function (load) {
+        [loadKnowledge, loadPositioning, loadReferences, loadUploadTargets, loadSharePoint, loadUsers].forEach(function (load) {
           try {
             load();
           } catch (err) {

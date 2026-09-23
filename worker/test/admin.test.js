@@ -14,6 +14,9 @@ import { handleAdmin, handleAdminSummary } from '../src/admin.js';
 import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
 import { fakeKV } from './helpers.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ADMIN = { email: 'boss@vikat.ai', name: 'Boss' };
 const REP = { email: 'rep@vikat.ai', name: 'Rep' };
@@ -635,4 +638,56 @@ test('the tools rung is measured twice with the same payload', async () => {
 
   assert.deepEqual(at('tools').tools, at('tools again').tools);
   assert.ok(at('tools again').tools.length > 1);
+});
+
+// --- Customer proof -------------------------------------------------------
+
+test('references save, come back, and clear in one action', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const empty = await (await call('/admin/references', 'GET', ctx)).json();
+  assert.equal(empty.content, '', 'nothing saved means outreach names no customers');
+  assert.ok(empty.template, 'and the admin is shown the shape an entry takes');
+
+  const saved = await (
+    await call('/admin/references', 'PUT', ctx, {
+      content: 'Who: the world’s largest berry producer\nNever print: Reiter Affiliated',
+    })
+  ).json();
+  assert.match(saved.content, /berry producer/);
+  assert.equal(saved.updatedBy, ADMIN.email);
+
+  const read = await (await call('/admin/references', 'GET', ctx)).json();
+  assert.match(read.content, /Never print: Reiter Affiliated/, 'the checker half is stored, not dropped');
+
+  // Clearing has to work in one step. The reason somebody reaches for it is
+  // usually that a customer has withdrawn permission and it needs to be gone.
+  const cleared = await (await call('/admin/references', 'PUT', ctx, { content: '' })).json();
+  assert.equal(cleared.content, '');
+  assert.match(cleared.note, /name no customers/);
+});
+
+test('the references panel exists and warns that the name is not sent', () => {
+  // The API route landed before the panel did, and a store only reachable by
+  // curl is a store nobody fills in.
+  const html = fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget/admin.html'),
+    'utf8',
+  );
+  const js = fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget/vikat-admin.js'),
+    'utf8',
+  );
+
+  assert.match(html, /id="ref-content"/);
+  assert.match(html, /never sent to the assistant/i, 'the one thing an admin has to understand about it');
+  assert.match(js, /'\/admin\/references'/);
+  // The BOOT list, not merely the function's definition. A panel whose loader
+  // exists and is never called is a panel that renders empty every time.
+  assert.match(
+    js,
+    /\[loadKnowledge, loadPositioning, loadReferences,/,
+    'it has to load on boot with everything else',
+  );
 });

@@ -273,6 +273,37 @@
     </div>
 
     <div class="card">
+      <h2>Customer proof</h2>
+      <p class="sub">
+        Who else had this problem, and what changed for them. One of these goes into every customer-facing
+        email and document, chosen by whose <strong>problem</strong> is closest to the reader — not whose
+        industry is. Leave it empty and outreach names no customers at all, which is the safe default.
+        <span id="ref-meta" class="hint" style="display:inline"></span>
+      </p>
+
+      <p class="sub">
+        If a name is not cleared, put the description you are allowed to use on the <code>Who</code> line and
+        the real name on a <code>Never print</code> line. That line is <strong>never sent to the assistant</strong>.
+        It is used to refuse any draft the name turns up in, whatever the assistant got it from — which an
+        instruction on its own cannot do.
+      </p>
+
+      <div class="row">
+        <div>
+          <label for="ref-content">Approved references</label>
+          <textarea id="ref-content" rows="16"></textarea>
+          <p class="hint" id="ref-count"></p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="primary" id="ref-save">Save</button>
+        <button type="button" id="ref-clear">Clear</button>
+        <span id="ref-status" class="hint" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Upload a document</h2>
       <p class="sub">
         A deck, brief, one-pager or PDF. Its text is read and added to the assistant's knowledge straight
