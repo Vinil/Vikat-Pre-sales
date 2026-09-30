@@ -176,7 +176,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'draft_outreach',
     description:
-      "Write an email or a LinkedIn draft the rep can copy and send. Call it whenever a rep asks for outreach, a follow-up, a connection note, an InMail, a sequence, or LinkedIn content — one call per draft, and call it several times in one turn for a sequence or a campaign. The draft is shown as a card with its own copy buttons, so write ONLY the message: no 'here is a draft', no commentary, no placeholder like [name] unless the rep genuinely has not said who it is for. Every claim in it must come from the knowledge base or from what the rep or your research established, and anything drawn from the web must be true to its source — a rep will send this to a real person under their own name.",
+      "Write an email, a Teams message or a LinkedIn draft the rep can copy and send. Call it whenever a rep asks for outreach, a follow-up, a connection note, an InMail, a Teams message, a sequence, or LinkedIn content — one call per draft, and call it several times in one turn for a sequence or a campaign. The draft is shown as a card with its own copy buttons, so write ONLY the message: no 'here is a draft', no commentary, no placeholder like [name] unless the rep genuinely has not said who it is for. Every claim in it must come from the knowledge base or from what the rep or your research established, and anything drawn from the web must be true to its source — a rep will send this to a real person under their own name.",
     // Flat, and not strict. See create_document below for why nesting and
     // `strict` are both avoided: the schema budget is a request-level limit,
     // and normaliseDraft() validates and trims everything regardless.
@@ -188,7 +188,7 @@ export const TOOL_DEFINITIONS = [
           type: 'string',
           enum: CHANNEL_NAMES,
           description:
-            'Where this is going. linkedin_note is a connection request and is HARD LIMITED to 300 characters by LinkedIn itself; linkedin_post is public content, not a message to one person.',
+            'Where this is going. linkedin_note is a connection request and is HARD LIMITED to 300 characters by LinkedIn itself; linkedin_post is public content, not a message to one person; teams_message is a Teams chat message to someone the rep already works with or who uses Teams: short, conversational, no subject.',
         },
         subject: {
           type: 'string',
@@ -568,10 +568,19 @@ export async function runTool(call, ctx) {
         // assistant was "a text assistant" with "no ability to render a visual
         // UI" — while the preview sat on screen. The model cannot see the card,
         // so it has to be told what the card is every time it makes one.
+        //
+        // A Teams message has the opposite risk. Told only "a Teams message",
+        // the model tells the rep it went — and the rep finds out otherwise
+        // when nobody replies. The card opens a chat with the text typed in;
+        // sending is the rep's click, and it has to say so.
         const shown =
           draft.channel === 'linkedin_post'
             ? ' The card lays the post out as the LinkedIn feed shows it, with the "see more" fold marked, the banner, and each part copyable on its own. That IS the preview: do not tell the rep you cannot show them how it will look.'
-            : '';
+            : draft.channel === 'teams_message'
+              ? draft.to
+                ? ` The card opens a Teams chat with ${draft.to} with this text in the compose box. Nothing is sent: the rep presses Send.`
+                : ' It has no address, so the card can copy it but not open it in Teams. Nothing is sent.'
+              : '';
 
         return {
           content:

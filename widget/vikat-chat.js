@@ -635,8 +635,30 @@
     return out;
   }
 
+  /**
+   * A Teams chat with the recipient, the message already in the compose box.
+   *
+   * Microsoft's documented "start a new chat" deep link:
+   * teams.microsoft.com/l/chat/0/0?users=<address>&message=<text>. It opens
+   * the Teams client, or Teams on the web, on a chat with that person —
+   * the existing one if there is one — with the text typed in. Nothing is
+   * sent: the rep reads it and presses Send, which is the point.
+   *
+   * Null without an address, because a chat link naming nobody opens Teams on
+   * nothing and the rep finds that out after the click. And null past the
+   * same kind of ceiling mailto: has, for the same reason: somewhere between
+   * the browser and the client a long link is cut SILENTLY, and the rep sends
+   * half a message believing it was whole.
+   */
+  function teamsLink(draft) {
+    var to = linkAddress(addressOf(draft));
+    if (!to) return null;
+    var href = 'https://teams.microsoft.com/l/chat/0/0?users=' + to + '&message=' + encodeURIComponent(draft.body);
+    return href.length <= 2000 ? href : null;
+  }
+
   /** The channels a To line means anything on. Kept in step with CHANNELS[*].to on the server. */
-  var ADDRESSED = { email: true };
+  var ADDRESSED = { email: true, teams_message: true };
 
   /**
    * One plain address — the same test the server applies before it keeps one.
@@ -810,10 +832,10 @@
       foot.appendChild(copyButton('Copy whole post', wholePost(draft), true));
     }
 
-    // Email only. There is no URL that pre-fills a LinkedIn message or an
-    // InMail the way mailto: does, so that channel gets Copy and nothing that
-    // pretends to be more — a button opening an empty compose window is worse
-    // than no button, because the rep finds out after the click.
+    // Email and Teams only. There is no URL that pre-fills a LinkedIn message
+    // or an InMail the way mailto: does, so that channel gets Copy and nothing
+    // that pretends to be more — a button opening an empty compose window is
+    // worse than no button, because the rep finds out after the click.
     if (draft.channel === 'email') {
       var links = mailLinks(draft);
       links.forEach(function (link) {
@@ -825,6 +847,27 @@
       });
       if (!links.length) {
         foot.appendChild(el('span', 'vk-draft-note', 'Too long to open in a mail client — copy it.'));
+      }
+    }
+
+    // Teams does have a link that fills in a message for a person, so this
+    // channel gets one — but only with somebody to send it to.
+    if (draft.channel === 'teams_message') {
+      var chat = teamsLink(draft);
+      if (chat) {
+        var openChat = el('a', 'vk-copy vk-draft-mail vk-draft-mail-main vk-draft-teams', 'Open in Teams');
+        openChat.href = chat;
+        openChat.target = '_blank';
+        openChat.rel = 'noopener noreferrer';
+        foot.appendChild(openChat);
+      } else {
+        foot.appendChild(
+          el(
+            'span',
+            'vk-draft-note',
+            addressOf(draft) ? 'Too long to open in Teams — copy it.' : 'Add who this is for to open it in Teams.',
+          ),
+        );
       }
     }
 

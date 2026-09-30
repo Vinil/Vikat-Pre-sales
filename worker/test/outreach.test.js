@@ -927,3 +927,52 @@ test('the chat route checks the To line against what the rep actually said', asy
   const [guessed] = await turnWith(env, 'Write Priya Shah at Example a first touch.', input);
   assert.equal(guessed.to, undefined, 'a name and a company are not an address');
 });
+
+// --- a Teams message -------------------------------------------------------
+
+test('a Teams message is a channel of its own, with no subject line', () => {
+  // A chat, not a letter: nobody reads a subject on a Teams message, and the
+  // card should not ask the rep to copy one.
+  assert.equal(CHANNELS.teams_message.label, 'Teams message');
+  assert.equal(CHANNELS.teams_message.subject, false);
+
+  const read = normaliseDraft({
+    channel: 'teams_message',
+    subject: 'Ignored',
+    body: 'Hi Priya, Vikat here. Saw the GitLab listing this morning. Ten minutes this week?',
+  });
+  assert.equal(read.draft.channel, 'teams_message');
+  assert.equal(read.draft.channelLabel, 'Teams message');
+  assert.equal(read.draft.subject, undefined);
+  assert.ok(!read.warnings.some((w) => /subject/i.test(w)), read.warnings.join(' | '));
+});
+
+test('a long Teams message is trimmed as advice, not as a Teams limit', () => {
+  // Teams itself takes far more than this. The number is about what reads as
+  // a chat, and a warning claiming Teams "will not accept more" would be a
+  // claim about a platform that is not true.
+  assert.equal(CHANNELS.teams_message.bodyChars, 2000);
+  assert.notEqual(CHANNELS.teams_message.hard, true);
+
+  const read = normaliseDraft({ channel: 'teams_message', body: 'z'.repeat(3000) });
+  assert.equal(read.draft.body.length, 2000);
+  assert.ok(read.warnings.includes('Trimmed to 2000 characters.'), read.warnings.join(' | '));
+  assert.ok(!read.warnings.some((w) => /will not accept/.test(w)), read.warnings.join(' | '));
+});
+
+test('a Teams message keeps a To line the conversation gave, and only that', () => {
+  // The Teams link opens a chat with whoever is named in it. An invented
+  // address there is a message to a stranger with the text already typed.
+  const kept = normaliseDraft(
+    { channel: 'teams_message', body: 'Hi Priya, Vikat here.', to: 'priya@example.com' },
+    { knownEmails: ['priya@example.com'] },
+  );
+  assert.equal(kept.draft.to, 'priya@example.com');
+
+  const guessed = normaliseDraft(
+    { channel: 'teams_message', body: 'Hi Priya, Vikat here.', to: 'priya@example.com' },
+    { knownEmails: [] },
+  );
+  assert.equal(guessed.draft.to, undefined);
+  assert.ok(guessed.warnings.some((w) => /was not in the conversation/.test(w)), guessed.warnings.join(' | '));
+});

@@ -258,6 +258,16 @@ test('the prompt says where an address may come from, and that a guess is not on
   assert.match(text, /Never\s+build\s+one\s+from\s+a\s+name\s+and\s+a\s+domain/);
 });
 
+test('the prompt says what a Teams message is for', async () => {
+  // Otherwise it is an email with the subject cut off, which is the one thing
+  // a chat to a colleague must not read like.
+  const text = await prompt();
+
+  assert.match(text, /\\?`teams_message\\?`/);
+  assert.match(text, /someone\s+the\s+rep\s+already\s+works\s+with\s+or\s+who\s+uses\s+Teams/);
+  assert.match(text, /short,\s+conversational,\s+no\s+subject/);
+});
+
 // --- Prompt caching -------------------------------------------------------
 
 test('the cache breakpoint sits on the part that never changes', async () => {

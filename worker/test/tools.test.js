@@ -68,7 +68,7 @@ test('a tool is strict unless its handler validates the input itself', () => {
   // now owes.
   //
   // draft_outreach is exempt for the budget reason too. It carries a
-  // four-value enum, and every enum value is an alternative the constrained
+  // five-value enum, and every enum value is an alternative the constrained
   // grammar has to admit — the multiplier that took production down.
   const VALIDATES_ITS_OWN_INPUT = new Set(['create_document', 'log_prospect', 'draft_outreach']);
 
@@ -693,4 +693,37 @@ test("the rep's own address is not a recipient the conversation gave", async () 
   );
 
   assert.equal(res.effect.drafts[0].to, undefined);
+});
+
+// --- draft_outreach: a Teams message --------------------------------------
+
+test('the model can ask for a Teams message, and is told what one is', () => {
+  const tool = TOOL_DEFINITIONS.find((t) => t.name === 'draft_outreach');
+  const channel = tool.input_schema.properties.channel;
+
+  assert.ok(channel.enum.includes('teams_message'), channel.enum.join(', '));
+  assert.match(channel.description, /teams_message/);
+  assert.match(tool.description, /Teams/);
+});
+
+test('a Teams result says the card opens a chat and does not send it', async () => {
+  // The model cannot see the card. Told only "a Teams message", it tells the
+  // rep the message went — and the rep finds out otherwise when nobody
+  // replies.
+  const input = { ...DRAFT_INPUT, channel: 'teams_message', subject: '', body: 'Hi Priya, Vikat here. Ten minutes this week?' };
+  const messages = [{ role: 'user', content: 'Teams Priya at priya.shah@example.com.' }];
+
+  const addressed = await runTool(
+    { name: 'draft_outreach', input: { ...input, to: 'priya.shah@example.com' } },
+    { ...ctx(), messages },
+  );
+  assert.ok(!addressed.isError, addressed.content);
+  assert.equal(addressed.effect.drafts[0].to, 'priya.shah@example.com');
+  assert.match(addressed.content, /the rep presses Send/);
+
+  const unaddressed = await runTool(
+    { name: 'draft_outreach', input: { ...input, to: '' } },
+    { ...ctx(), messages },
+  );
+  assert.match(unaddressed.content, /copy it but not open it in Teams/);
 });

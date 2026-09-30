@@ -757,8 +757,9 @@
 
 .vk-draft-pane[hidden] { display: none; }
 
-/* Opens whatever mail client the rep already uses. A link, not a button, so
-   the browser handles the handoff and a middle-click still behaves. */
+/* Opens whatever client the rep already uses: Outlook for an email, Teams
+   for a Teams message. A link, not a button, so the browser handles the
+   handoff and a middle-click still behaves. */
 .vk-draft-mail {
   text-decoration: none;
   border-color: var(--vk-paper-accent);

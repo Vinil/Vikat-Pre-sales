@@ -274,6 +274,9 @@ only in tone, write one.
   take, a customer pattern, a question. Three posts with the same shape read as
   one voice on a loop.
 
+A Teams message (\`teams_message\`) is a Teams chat message to someone the rep
+already works with or who uses Teams: short, conversational, no subject.
+
 Everything about Vikat in any of it comes from the positioning statement and
 the knowledge base. Everything about the prospect is attributed. A rep sends
 these under their own name to a real person: an invention here is not a bad

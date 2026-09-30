@@ -1873,6 +1873,76 @@ test('a LinkedIn draft shows no To line even if one arrives', async () => {
   await page.close();
 });
 
+// --- a Teams message -------------------------------------------------------
+
+const TEAMS = {
+  channel: 'teams_message',
+  channelLabel: 'Teams message',
+  label: '',
+  body: 'Hi Priya, Vikat here & glad to help.\n\nFree for ten minutes? #gitlab 100%',
+  to: 'priya.shah@example.com',
+};
+
+test('a Teams message opens a chat to the person, with the text in the box', async () => {
+  // Microsoft's documented "start a new chat" deep link. It opens Teams on a
+  // chat with that person and the message typed in — and the rep still
+  // presses Send, which is the point.
+  const page = await withDraft(TEAMS);
+
+  const links = await page.$$eval('.vk-draft-teams', (n) =>
+    n.map((a) => ({ label: a.textContent, href: a.getAttribute('href'), target: a.target, rel: a.rel })),
+  );
+  assert.equal(links.length, 1);
+  assert.equal(links[0].label, 'Open in Teams');
+  assert.equal(
+    links[0].href,
+    'https://teams.microsoft.com/l/chat/0/0?users=priya.shah@example.com&message=' + encodeURIComponent(TEAMS.body),
+  );
+  assert.equal(links[0].target, '_blank');
+  assert.match(links[0].rel, /noopener/);
+
+  await page.close();
+});
+
+test('a Teams message is not an email and has no subject', async () => {
+  const page = await withDraft(TEAMS);
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.deepEqual(keys, ['To', 'Message']);
+  const hrefs = await page.$$eval('.vk-draft a[href]', (n) => n.map((a) => a.getAttribute('href')));
+  assert.ok(!hrefs.some((h) => /^mailto:|outlook\.office\.com/.test(h)), hrefs.join(' | '));
+  assert.equal(await page.textContent('.vk-draft-ch'), 'Teams message');
+
+  await page.close();
+});
+
+test('a Teams message with nobody on it can be copied, and says why there is no button', async () => {
+  // A chat link with no one in it opens Teams on nothing. The rep finds that
+  // out after the click, which is worse than no button.
+  const page = await withDraft({ ...TEAMS, to: '' });
+
+  assert.equal(await page.$$eval('.vk-draft-teams', (n) => n.length), 0);
+  assert.equal(await page.textContent('.vk-draft-note'), 'Add who this is for to open it in Teams.');
+
+  await page.click('.vk-draft-body .vk-copy');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__copied[0]), TEAMS.body);
+
+  await page.close();
+});
+
+test('a Teams message too long for a link gets Copy, not a truncated chat', async () => {
+  // Like mailto:, a long link is cut SILENTLY somewhere between the browser
+  // and the client, and the rep sends half a message.
+  const page = await withDraft({ ...TEAMS, body: 'x'.repeat(1990) });
+
+  assert.equal(await page.$$eval('.vk-draft-teams', (n) => n.length), 0);
+  assert.match(await page.textContent('.vk-draft-note'), /Too long/);
+  assert.equal(await page.$$eval('.vk-draft-body .vk-copy', (n) => n.length), 1);
+
+  await page.close();
+});
+
 // --- a campaign is not a choice --------------------------------------------
 
 const CAMPAIGN = [1, 2, 3].map((n) => ({

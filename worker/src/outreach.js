@@ -7,10 +7,10 @@
  * draft is a THING, so it travels as one: subject and body as separate fields,
  * rendered as a card with its own copy buttons.
  *
- * Email and LinkedIn share this rather than getting a tool each. They are the
- * same act — a short piece of writing aimed at one person, built from a real
- * trigger — and the differences are length and whether there is a subject
- * line. Two tools would have been two schemas to keep in step, and the schema
+ * Email, LinkedIn and Teams share this rather than getting a tool each. They
+ * are the same act — a short piece of writing aimed at one person, built from
+ * a real trigger — and the differences are length and whether there is a
+ * subject line. Two tools would have been two schemas to keep in step, and the schema
  * budget is not free: "Schema is too complex" is a REQUEST-level 400 that once
  * killed every conversation, including ones that never touched a tool.
  */
@@ -66,6 +66,24 @@ export const CHANNELS = {
     headline: true,
     hashtags: true,
     image: true,
+  },
+  teams_message: {
+    // A chat to someone the rep already works with, or who is on Teams: a
+    // partner, a customer on a shared channel, a colleague being asked for an
+    // intro. No subject, because nobody reads one on a chat.
+    label: 'Teams message',
+    subject: false,
+    // ADVISORY, not Teams'. Teams' own ceiling on a chat message is far higher
+    // than this — "Limits and specifications for Microsoft Teams" gives chat
+    // size as approximately 100 KB per post — so enforcing 2000 hard would
+    // cut a message at a number no platform applies, the mistake the InMail
+    // ceiling above is careful not to make.
+    // This is about what still reads as a chat: past a screenful it is an
+    // email in the wrong window. It also happens to be about where the card's
+    // "Open in Teams" link stops fitting in a URL.
+    bodyChars: 2000,
+    // The card opens a chat with this person, the text already in the box.
+    to: true,
   },
 };
 
