@@ -694,6 +694,25 @@ test('a cold email that never says who is writing is flagged', () => {
   assert.ok(!early.warnings.some((w) => /who is writing|not named until/.test(w)), early.warnings.join(' | '));
 });
 
+test('a Teams message to a colleague is not told to introduce Vikat', () => {
+  // A Teams chat goes to someone the rep already works with — a colleague
+  // asked for an intro, a partner — under the rep's own name. "The reader
+  // has never heard of Vikat" is false of every one of them, and relayed to
+  // the rep on each draft it is noise, and then a pitch in a chat to a
+  // colleague on the next revision.
+  for (const body of [
+    'Hey Sam! Quick one: did Acme come back on the pilot scope? Want to chase them before Friday.',
+    'Hi Anil, are you free for 10 mins today? I want to run the Acme renewal past you before I call them. It will not take long. Thanks.',
+    'Priya, can you intro me to the Acme CISO?',
+  ]) {
+    const read = normaliseDraft({ channel: 'teams_message', body });
+    assert.ok(
+      !read.warnings.some((w) => /who is writing|never heard of|not named until/.test(w)),
+      `${body}: ${read.warnings.join(' | ')}`,
+    );
+  }
+});
+
 test('a subject line is not stapled to the body to make one long sentence', () => {
   // A subject has no full stop, so a sentence splitter runs straight through
   // it into the body and calls the two of them one sentence. Found by this

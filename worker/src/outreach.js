@@ -84,6 +84,13 @@ export const CHANNELS = {
     bodyChars: 2000,
     // The card opens a chat with this person, the text already in the box.
     to: true,
+    // The reader knows who is writing. A chat arrives under the rep's own
+    // name, in a tool the two of them already share, and it goes to a
+    // colleague, a partner or a customer who knows us. The "who is writing"
+    // check in normaliseDraft() is for a stranger's inbox; run on a chat it
+    // told the rep, on every draft, that a colleague "has never heard of
+    // Vikat" — and the model put a pitch into the next revision.
+    knowsSender: true,
   },
 };
 
@@ -378,20 +385,25 @@ export function normaliseDraft(input = {}, { forbidden = [], knownEmails = [] } 
   // A document does not have this problem: the logo is on the cover and the
   // question is answered before a word is read. An email has no cover, which
   // is why this lives here and not in checkArticulation.
-  const sentences = whole.split(/(?<=[.!?])\s+/).filter((x) => x.trim());
-  const introducedAt = sentences.findIndex((x) => /\bVikat(?:\.AI)?\b/i.test(x));
+  //
+  // Not on a channel whose reader already knows the sender (a Teams chat;
+  // see CHANNELS). There is no stranger there to answer.
+  if (!spec.knowsSender) {
+    const sentences = whole.split(/(?<=[.!?])\s+/).filter((x) => x.trim());
+    const introducedAt = sentences.findIndex((x) => /\bVikat(?:\.AI)?\b/i.test(x));
 
-  if (introducedAt === -1) {
-    warnings.push(
-      'Nothing here says who is writing. The reader has never heard of Vikat: one plain sentence, ' +
-        'early, saying what we do — before the analysis, not after it.',
-    );
-  } else if (introducedAt > 2) {
-    warnings.push(
-      `Vikat is not named until sentence ${introducedAt + 1}. The reader has never heard of us and ` +
-        'spends everything before that wondering who is writing. Say it in the first two or three ' +
-        'sentences, plainly, then make the argument.',
-    );
+    if (introducedAt === -1) {
+      warnings.push(
+        'Nothing here says who is writing. The reader has never heard of Vikat: one plain sentence, ' +
+          'early, saying what we do — before the analysis, not after it.',
+      );
+    } else if (introducedAt > 2) {
+      warnings.push(
+        `Vikat is not named until sentence ${introducedAt + 1}. The reader has never heard of us and ` +
+          'spends everything before that wondering who is writing. Say it in the first two or three ' +
+          'sentences, plainly, then make the argument.',
+      );
+    }
   }
 
   // A customer we may not name, in the thing a rep sends soonest and edits
