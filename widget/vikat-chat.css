@@ -776,6 +776,16 @@
 }
 .vk-draft-mail:not(.vk-draft-mail-main):hover { color: var(--vk-paper-ink); }
 
+/* Saving into the rep's own Drafts, through the page around the assistant.
+   A button rather than a link — nothing is opened — so it borrows the link
+   look and adds a waiting state: disabled from the click until the page
+   answers, and for good once the draft exists. */
+.vk-draft-save[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+.vk-draft-save[disabled]:hover { background: none; }
+
 /* Why there is no button: a mail client truncates a long URL silently, and a
    half-written email with no warning is worse than a copy. */
 .vk-draft-note {
@@ -819,6 +829,10 @@
 
 .vk-draft-foot {
   display: flex;
+  /* Wraps rather than overflowing the card: with a page that can save to
+     Outlook there are four actions, a status line and a count, and a phone
+     is 360px wide. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;

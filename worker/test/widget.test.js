@@ -1943,6 +1943,193 @@ test('a Teams message too long for a link gets Copy, not a truncated chat', asyn
   await page.close();
 });
 
+// --- saving into the rep's own Drafts --------------------------------------
+//
+// The agent has no mail permission and must not get one: its Graph app is
+// app-only for SharePoint, and app-only Mail.ReadWrite reaches every mailbox
+// in the tenant. A page that embeds the assistant and already acts as the rep
+// can offer it instead, through window.VikatChatHost.saveEmailDraft.
+
+/**
+ * A widget page whose host can save drafts.
+ *
+ * `answer` is what the hook resolves with, or 'throw' for a hook that throws.
+ * Every call is recorded in window.__saved, and the hook waits `delay` ms so a
+ * test can click again while the first save is still in flight.
+ */
+async function withHost(answer, { draft = ADDRESSED, delay = 0 } = {}) {
+  const page = await widgetPage();
+  await page.evaluate(
+    ({ answer, delay }) => {
+      window.__saved = [];
+      window.VikatChatHost = {
+        saveEmailDraft(args) {
+          window.__saved.push(args);
+          return new Promise((resolve, reject) =>
+            setTimeout(() => (answer === 'throw' ? reject(new Error('Graph said no')) : resolve(answer)), delay),
+          );
+        },
+      };
+    },
+    { answer, delay },
+  );
+  await page.evaluate((d) => window.VikatChatInternals.addDraft(d), draft);
+  await page.waitForSelector('.vk-draft');
+  return page;
+}
+
+const SAVED = {
+  ok: true,
+  message: 'Saved to your Drafts folder in Outlook.',
+  webLink: 'https://outlook.office.com/mail/drafts/id/AAMkADraft',
+};
+
+test('without a host that can save, an email card is what it always was', async () => {
+  // The CEO's own deployment has no such page around it. Nothing may change.
+  const page = await withDraft(ADDRESSED);
+  assert.equal(await page.$$eval('.vk-draft-save', (n) => n.length), 0);
+
+  const main = await page.$$eval('.vk-draft-mail-main', (n) => n.map((a) => a.textContent));
+  assert.deepEqual(main, ['Open in Outlook'], 'the desktop link still leads');
+  await page.close();
+});
+
+test('a host that can save gets Save to Outlook Drafts, as the lead action', async () => {
+  const page = await withHost(SAVED);
+
+  const save = await page.$$eval('.vk-draft-save', (n) =>
+    n.map((b) => ({ text: b.textContent, main: b.classList.contains('vk-draft-mail-main'), tag: b.tagName })),
+  );
+  assert.deepEqual(save, [{ text: 'Save to Outlook Drafts', main: true, tag: 'BUTTON' }]);
+
+  // One lead action, not two: the links step back beside it.
+  const main = await page.$$eval('.vk-draft-mail-main', (n) => n.map((a) => a.textContent));
+  assert.deepEqual(main, ['Save to Outlook Drafts']);
+  assert.equal(await page.$$eval('a.vk-draft-mail', (n) => n.length), 2, 'and both links are still there');
+
+  await page.close();
+});
+
+test('saving hands the host exactly what is on the card', async () => {
+  const page = await withHost(SAVED);
+
+  await page.click('.vk-draft-save');
+  await page.waitForFunction(() => window.__saved.length === 1, null, { timeout: 5000 });
+  assert.deepEqual(await page.evaluate(() => window.__saved[0]), {
+    to: ADDRESSED.to,
+    subject: ADDRESSED.subject,
+    body: ADDRESSED.body,
+  });
+
+  await page.close();
+});
+
+test('a draft with nobody on it is saved with an empty To', async () => {
+  // The rep fills it in in Outlook. The host is never handed a guess.
+  const page = await withHost(SAVED, { draft: DRAFT });
+
+  await page.click('.vk-draft-save');
+  await page.waitForFunction(() => window.__saved.length === 1, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__saved[0].to), '');
+
+  await page.close();
+});
+
+test('a double click saves once', async () => {
+  // Two clicks are two drafts in the rep's mailbox, and the second is the one
+  // they do not notice until a colleague asks why there are two.
+  const page = await withHost(SAVED, { delay: 300 });
+
+  await page.dblclick('.vk-draft-save');
+  await page.click('.vk-draft-save', { force: true }).catch(() => {});
+  assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), true, 'it waits, visibly');
+
+  await page.waitForSelector('.vk-draft-saved:not([hidden])', { timeout: 5000 });
+  await page.waitForFunction(() => /Drafts folder/.test(document.querySelector('.vk-draft-saved').textContent), null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__saved.length), 1);
+
+  await page.close();
+});
+
+test("the host's answer is shown on the card, with the way to the draft", async () => {
+  const page = await withHost(SAVED);
+
+  await page.click('.vk-draft-save');
+  await page.waitForSelector('.vk-draft-saved-link', { timeout: 5000 });
+
+  assert.equal(await page.textContent('.vk-draft-saved'), SAVED.message);
+  const link = await page.$eval('.vk-draft-saved-link', (a) => ({
+    text: a.textContent,
+    href: a.getAttribute('href'),
+    target: a.target,
+    rel: a.rel,
+  }));
+  assert.equal(link.text, 'Open the draft');
+  assert.equal(link.href, SAVED.webLink);
+  assert.equal(link.target, '_blank');
+  assert.match(link.rel, /noopener/);
+
+  // Saved is saved. A second click would be a second draft.
+  assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), true);
+
+  await page.close();
+});
+
+test('only an https link to the draft is ever shown', async () => {
+  // The link comes from the host page, which is ours — but it becomes an
+  // href a rep clicks, and a javascript: one would run in this page.
+  for (const webLink of ['javascript:alert(1)', 'http://outlook.office.com/x', 'not a url']) {
+    const page = await withHost({ ...SAVED, webLink });
+    await page.click('.vk-draft-save');
+    await page.waitForFunction(() => /Drafts folder/.test(document.querySelector('.vk-draft-saved').textContent), null, { timeout: 5000 });
+    assert.equal(await page.$$eval('.vk-draft-saved-link', (n) => n.length), 0, webLink);
+    await page.close();
+  }
+});
+
+test('a save that failed says so, and can be tried again', async () => {
+  const page = await withHost({ ok: false, message: 'Outlook is not connected for your account.' });
+
+  await page.click('.vk-draft-save');
+  await page.waitForFunction(() => /not connected/.test(document.querySelector('.vk-draft-saved').textContent), null, { timeout: 5000 });
+  assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), false);
+  assert.equal(await page.$$eval('.vk-draft-saved-link', (n) => n.length), 0);
+
+  await page.close();
+});
+
+test('a hook that throws, or answers nonsense, is reported as not saved', async () => {
+  for (const answer of ['throw', 'yes', null]) {
+    const page = await withHost(answer);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+
+    await page.click('.vk-draft-save');
+    await page.waitForFunction(() => document.querySelector('.vk-draft-saved')?.textContent === 'Could not save the draft.', null, { timeout: 5000 });
+    assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), false, `${answer}: it can be tried again`);
+    assert.deepEqual(errors, [], `${answer}: the card must not take the page down`);
+    await page.close();
+  }
+});
+
+test('a draft too long for a link can still be saved, and is not told to copy', async () => {
+  const page = await withHost(SAVED, { draft: { ...ADDRESSED, body: 'x'.repeat(7000) } });
+
+  assert.equal(await page.$$eval('.vk-draft-save', (n) => n.length), 1);
+  assert.equal(await page.$$eval('a.vk-draft-mail', (n) => n.length), 0);
+  assert.match(await page.textContent('.vk-draft-note'), /save it or copy it/);
+
+  await page.close();
+});
+
+test('only an email is offered to Drafts', async () => {
+  // Outlook Drafts holds email. A Teams message there would be a mail with no
+  // subject, addressed to someone who was meant to get a chat.
+  const page = await withHost(SAVED, { draft: TEAMS });
+  assert.equal(await page.$$eval('.vk-draft-save', (n) => n.length), 0);
+  await page.close();
+});
+
 // --- a campaign is not a choice --------------------------------------------
 
 const CAMPAIGN = [1, 2, 3].map((n) => ({

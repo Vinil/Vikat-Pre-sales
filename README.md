@@ -421,6 +421,42 @@ from it, and tests assert every topic and owner reaches the prompt.
 
 ---
 
+## Embedding: saving drafts in the rep's mailbox
+
+Drafts arrive as cards: email, Teams message, LinkedIn connection note, InMail
+and post. An email card opens Outlook (`mailto:` and Outlook on the web), and a
+Teams card opens a Teams chat with the message in the compose box — both
+addressed to the recipient when the draft carries one. The model may only put
+an address on a draft that is written in the conversation (or in an account
+block the embedding worker injects); anything else is taken off before the rep
+sees it.
+
+The assistant itself has **no mail permission, on purpose**. Its Graph app is
+app-only, for SharePoint, and app-only `Mail.ReadWrite` would reach every
+mailbox in the tenant. So "Save to Outlook Drafts" is offered by the page that
+embeds the widget, which can act as the signed-in rep:
+
+```js
+// Set by the embedding page, before or after vikat-chat.js loads.
+window.VikatChatHost = {
+  async saveEmailDraft({ to, subject, body }) {
+    // e.g. POST /me/messages with the rep's own delegated token
+    return { ok: true, message: 'Saved to your Drafts folder.', webLink: 'https://outlook.office.com/…' };
+  },
+};
+```
+
+When `saveEmailDraft` is a function, every email card gets **Save to Outlook
+Drafts** as its lead action. `to` is the checked recipient or an empty string.
+The button is disabled from the click until the promise settles, so a double
+click saves once; `message` is shown on the card as text, and `webLink`
+becomes an "Open the draft" link only when it is an `https:` URL. `ok: false`
+shows the message and lets the rep try again; a throw, a rejection or an answer
+that is not an object shows "Could not save the draft." Without the hook — this
+repository's own deployment — the card is unchanged.
+
+---
+
 ## Admin panel
 
 `widget/admin.html`, served alongside the assistant. Requires the `admin` role;
