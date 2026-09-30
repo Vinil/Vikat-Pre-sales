@@ -25,7 +25,9 @@ worker/           Cloudflare Worker — the agent backend
     retrieve.js     Knowledge abstraction
     collateral.js   SharePoint document index — search and links
     tools.js        log_prospect, ask_expert, flag_content_gap,
-                    find_collateral, create_document
+                    find_collateral, draft_outreach, create_document
+    outreach.js     Draft channels (email, Teams message, LinkedIn note,
+                    InMail and post), their limits, and the To-line check
     brand.js        The Vikat.AI visual system, as data
     documentStore.js Generated-document delivery abstraction (Graph)
     documents/      Deck and document renderers
