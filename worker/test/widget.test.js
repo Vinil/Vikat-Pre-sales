@@ -1783,6 +1783,96 @@ test('the mail link cannot carry anything but a mailto', async () => {
   await page.close();
 });
 
+// --- addressed to someone --------------------------------------------------
+
+const ADDRESSED = { ...DRAFT, to: 'priya.shah@example.com' };
+
+test('an addressed email opens in Outlook already addressed', async () => {
+  // The rep should not be retyping an address the conversation already had.
+  // The @ stays literal, the way RFC 6068 and Microsoft's own examples write
+  // it; everything else in the address is encoded like any other value.
+  const page = await withDraft(ADDRESSED);
+
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  assert.equal(hrefs.length, 2, hrefs.join(' | '));
+  assert.ok(hrefs[0].startsWith('mailto:priya.shah@example.com?subject='), hrefs[0].slice(0, 60));
+  assert.ok(
+    hrefs[1].startsWith('https://outlook.office.com/mail/deeplink/compose?to=priya.shah@example.com&subject='),
+    hrefs[1].slice(0, 90),
+  );
+  for (const href of hrefs) {
+    assert.ok(href.includes(encodeURIComponent('Worth fifteen minutes?')), 'and the body still survives');
+  }
+
+  await page.close();
+});
+
+test('the recipient is on the card, first, with its own Copy', async () => {
+  // Where an email client puts it, and copyable for the rep who is sending
+  // from somewhere else.
+  const page = await withDraft(ADDRESSED);
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.equal(keys[0], 'To', keys.join(' | '));
+  assert.equal(await page.textContent('.vk-draft-row:first-child .vk-draft-v'), 'priya.shah@example.com');
+
+  await page.click('.vk-draft-row:first-child .vk-copy');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__copied[0]), 'priya.shah@example.com');
+
+  await page.close();
+});
+
+test('an email with nobody on it opens as it always did', async () => {
+  const page = await withDraft({ ...DRAFT, to: '' });
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.ok(!keys.includes('To'), keys.join(' | '));
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  assert.ok(hrefs[0].startsWith('mailto:?subject='), hrefs[0].slice(0, 40));
+  assert.ok(hrefs[1].startsWith('https://outlook.office.com/mail/deeplink/compose?subject='), hrefs[1].slice(0, 70));
+
+  await page.close();
+});
+
+test('an address cannot bring recipients or parameters of its own', async () => {
+  // The server only keeps a plain address it found in the conversation, but a
+  // card also draws from stored conversations, written by whatever build
+  // stored them. So the card checks again, and encodes what it keeps.
+  for (const to of ['Priya <priya@example.com>', 'priya@example.com,boss@example.com', 'priya@example.com?bcc=boss@example.com']) {
+    const page = await withDraft({ ...DRAFT, to });
+    const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+    assert.ok(!keys.includes('To'), `${to}: ${keys.join(' | ')}`);
+    const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+    assert.ok(hrefs[0].startsWith('mailto:?subject='), `${to}: ${hrefs[0].slice(0, 60)}`);
+    await page.close();
+  }
+
+  // One @, so it is shaped like an address — and its ? and = stay inside it.
+  const page = await withDraft({ ...DRAFT, to: 'priya@example.com?cc=x' });
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  for (const href of hrefs) {
+    assert.ok(!/[?&]cc=/.test(href), `a parameter got out of the address: ${href.slice(0, 80)}`);
+  }
+  await page.close();
+});
+
+test('a LinkedIn draft shows no To line even if one arrives', async () => {
+  // There is nothing on LinkedIn for an address to fill in.
+  const page = await withDraft({
+    channel: 'linkedin_message',
+    channelLabel: 'LinkedIn InMail',
+    label: '',
+    subject: 'A subject',
+    body: 'A body.',
+    to: 'priya@example.com',
+  });
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.ok(!keys.includes('To'), keys.join(' | '));
+  await page.close();
+});
+
 // --- a campaign is not a choice --------------------------------------------
 
 const CAMPAIGN = [1, 2, 3].map((n) => ({

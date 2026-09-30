@@ -620,15 +620,50 @@
   function mailLinks(draft) {
     var subject = encodeURIComponent(draft.subject || '');
     var body = encodeURIComponent(draft.body);
+    var to = linkAddress(addressOf(draft));
     var out = [];
 
-    var mailto = 'mailto:?subject=' + subject + '&body=' + body;
+    var mailto = 'mailto:' + to + '?subject=' + subject + '&body=' + body;
     if (mailto.length <= 1800) out.push({ label: 'Open in Outlook', href: mailto, primary: true });
 
-    var web = 'https://outlook.office.com/mail/deeplink/compose?subject=' + subject + '&body=' + body;
+    var web =
+      'https://outlook.office.com/mail/deeplink/compose?' +
+      (to ? 'to=' + to + '&' : '') +
+      'subject=' + subject + '&body=' + body;
     if (web.length <= 6000) out.push({ label: 'Outlook on the web', href: web });
 
     return out;
+  }
+
+  /** The channels a To line means anything on. Kept in step with CHANNELS[*].to on the server. */
+  var ADDRESSED = { email: true };
+
+  /**
+   * One plain address — the same test the server applies before it keeps one.
+   *
+   * Applied again here because a card is not only drawn from a live turn: a
+   * reopened conversation replays whatever drafts were stored, written by
+   * whatever build stored them. An address that could carry a second
+   * recipient or a parameter of its own does not get as far as a link.
+   */
+  var PLAIN_ADDRESS = /^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/;
+
+  /** The draft's recipient, if it has one this card should use. Otherwise ''. */
+  function addressOf(draft) {
+    var to = draft && ADDRESSED[draft.channel] && typeof draft.to === 'string' ? draft.to : '';
+    return PLAIN_ADDRESS.test(to) ? to : '';
+  }
+
+  /**
+   * An address, fit to go into a link.
+   *
+   * Encoded like any other value, so a ? or & inside it stays inside it — with
+   * the one exception of the @, which is left literal because that is how
+   * RFC 6068 and Microsoft's own deep-link examples write it, and a query
+   * string allows it.
+   */
+  function linkAddress(to) {
+    return to ? encodeURIComponent(to).replace(/%40/g, '@') : '';
   }
 
   /** One variant: the rows, the actions, the count. */
@@ -702,6 +737,17 @@
 
   function draftPane(draft) {
     var pane = el('div', 'vk-draft-pane');
+
+    // First, where a mail client puts it. Copyable for the rep who sends from
+    // somewhere the buttons below do not reach.
+    var to = addressOf(draft);
+    if (to) {
+      var toRow = el('div', 'vk-draft-row');
+      toRow.appendChild(el('div', 'vk-draft-k', 'To'));
+      toRow.appendChild(el('div', 'vk-draft-v', to));
+      toRow.appendChild(copyButton('Copy', to));
+      pane.appendChild(toRow);
+    }
 
     if (draft.headline) {
       var headRow = el('div', 'vk-draft-row');
