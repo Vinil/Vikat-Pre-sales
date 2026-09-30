@@ -23,7 +23,7 @@ import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
 import { retrieve } from '../src/retrieve.js';
 import { runTool, TOOL_DEFINITIONS } from '../src/tools.js';
-import { normaliseDraft, CHANNELS, postText } from '../src/outreach.js';
+import { normaliseDraft, CHANNELS, postText, addressesIn } from '../src/outreach.js';
 import { positioningBlock, POSITIONING_KEY, POSITIONING_MAX_CHARS } from '../src/positioning.js';
 import { buildSystemPrompt } from '../src/systemPrompt.js';
 import { fakeKV } from './helpers.js';
@@ -44,7 +44,7 @@ function setup() {
 }
 
 /** The API, stubbed: one draft_outreach call, then a line of explanation. */
-function anthropicDrafting() {
+function anthropicDrafting(input) {
   let turn = 0;
 
   const frames = (blocks, stopReason) => {
@@ -72,7 +72,7 @@ function anthropicDrafting() {
     return out.join('\n');
   };
 
-  const INPUT = {
+  const INPUT = input || {
     channel: 'email',
     subject: 'The March ruling',
     body: 'Saw the ruling last month.\n\nWorth fifteen minutes?',
@@ -771,4 +771,159 @@ test('a name that is not on the list is nobody’s business', () => {
     { forbidden: ['Reiter Affiliated'] },
   );
   assert.ok(!warnings.some((w) => /may not be named/.test(w)), warnings.join(' | '));
+});
+
+// --- who a draft is for ----------------------------------------------------
+//
+// The To line is the one field on a draft that decides who receives it. Every
+// other field a rep reads before sending; an address they glance at. So an
+// address the model made up — firstname.lastname at the company's domain,
+// which is a guess that looks exactly like knowledge — must never reach a
+// mail client, and the only proof it did not make it up is that the address
+// was already written somewhere it was given.
+
+const A_DRAFT = {
+  channel: 'email',
+  subject: 'Your GitLab is on the exploited list',
+  body: 'Vikat reads what your SIEM already produces. Twenty minutes on Thursday?',
+  label: '',
+};
+
+test('a To line the conversation gave is kept, lower-cased', () => {
+  const read = normaliseDraft(
+    { ...A_DRAFT, to: '  Priya.Shah@Example.com ' },
+    { knownEmails: ['priya.shah@example.com'] },
+  );
+
+  assert.equal(read.draft.to, 'priya.shah@example.com');
+  assert.ok(!read.warnings.some((w) => /left off/.test(w)), read.warnings.join(' | '));
+});
+
+test('an address the conversation never contained is left off, and the rep is told', () => {
+  // The exact failure: a name and a domain in the chat, and a confident
+  // address assembled from them.
+  const read = normaliseDraft(
+    { ...A_DRAFT, to: 'priya.shah@example.com' },
+    { knownEmails: ['security@example.com'] },
+  );
+
+  assert.equal(read.draft.to, undefined, 'an invented address must never reach the card');
+  assert.ok(
+    read.warnings.some((w) =>
+      /The address priya\.shah@example\.com was not in the conversation, so it was left off\. Check who this goes to\./.test(w),
+    ),
+    read.warnings.join(' | '),
+  );
+  assert.match(read.draft.body, /Twenty minutes/, 'the draft itself survives');
+});
+
+test('with nothing to check it against, no address is trusted', () => {
+  // A caller that forgets to pass the conversation gets the safe answer, not
+  // the model's word for it.
+  const read = normaliseDraft({ ...A_DRAFT, to: 'priya.shah@example.com' });
+  assert.equal(read.draft.to, undefined);
+  assert.ok(read.warnings.some((w) => /left off/.test(w)), read.warnings.join(' | '));
+});
+
+test('a To line that is not one plain address is left off', () => {
+  // A display name, a list, a second recipient smuggled after a separator:
+  // each is something a mail client would parse into more than one person.
+  const knownEmails = ['priya@example.com', 'sam@example.test'];
+
+  for (const to of [
+    'Priya Shah <priya@example.com>',
+    'priya@example.com, sam@example.test',
+    'priya@example.com;sam@example.test',
+    'priya@example.com sam@example.test',
+    'priya at example dot com',
+    'priya@example',
+  ]) {
+    const read = normaliseDraft({ ...A_DRAFT, to }, { knownEmails });
+    assert.equal(read.draft.to, undefined, `${to} must not reach the card`);
+    assert.ok(read.warnings.some((w) => /left off/.test(w)), `${to}: ${read.warnings.join(' | ')}`);
+  }
+});
+
+test('no address is no problem', () => {
+  // Most drafts are written before anyone knows the address. Empty is the
+  // honest answer and costs nothing.
+  const read = normaliseDraft({ ...A_DRAFT, to: '' }, { knownEmails: ['priya@example.com'] });
+  assert.equal(read.draft.to, undefined);
+  assert.ok(!read.warnings.some((w) => /address|left off/i.test(w)), read.warnings.join(' | '));
+});
+
+test('LinkedIn has no To line to fill, so it keeps none', () => {
+  // There is no link that pre-fills a LinkedIn message for a person, so an
+  // address on one of these would be carried for nothing and shown for less.
+  for (const channel of ['linkedin_note', 'linkedin_message', 'linkedin_post']) {
+    const read = normaliseDraft(
+      { ...A_DRAFT, channel, to: 'priya@example.com' },
+      { knownEmails: ['priya@example.com'] },
+    );
+    assert.equal(read.draft.to, undefined, channel);
+    assert.ok(!read.warnings.some((w) => /left off/.test(w)), `${channel}: ${read.warnings.join(' | ')}`);
+  }
+});
+
+test('addresses are read out of prose the way people actually write them', () => {
+  const found = addressesIn(
+    'Write to Priya (Priya.Shah@Example.com), copy <sam@example.test>. ' +
+      'Their form posts to https://example.com/contact?email=ops@example.com&x=1 and ' +
+      'the old one was mailto:help@example.com. Nothing at @handle or at name@localhost.',
+  );
+
+  assert.deepEqual(
+    [...found].sort(),
+    ['help@example.com', 'ops@example.com', 'priya.shah@example.com', 'sam@example.test'],
+  );
+});
+
+test('a longer address does not vouch for a shorter one inside it', () => {
+  // jane@example.com is a different mailbox from jane@example.com.au, and the
+  // model trimming one into the other is exactly the near-miss that sends a
+  // prospect's email to a stranger.
+  const known = addressesIn('Her address is jane@example.com.au, per the rep.');
+  const read = normaliseDraft({ ...A_DRAFT, to: 'jane@example.com' }, { knownEmails: known });
+  assert.equal(read.draft.to, undefined);
+});
+
+/** The draft frames a streamed turn sent, parsed back out. */
+function draftsIn(sse) {
+  return sse
+    .split('\n\n')
+    .filter((f) => f.startsWith('event: draft\n'))
+    .flatMap((f) => JSON.parse(f.slice(f.indexOf('data: ') + 6)).drafts);
+}
+
+async function turnWith(env, userMessage, input) {
+  const original = globalThis.fetch;
+  globalThis.fetch = anthropicDrafting(input);
+  try {
+    const res = await worker.fetch(
+      new Request('https://x.test/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-Dev-User': REP },
+        body: JSON.stringify({ sessionId: SESSION, messages: [{ role: 'user', content: userMessage }] }),
+      }),
+      env,
+      { waitUntil: (p) => p },
+    );
+    assert.equal(res.status, 200);
+    return draftsIn(await res.text());
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test('the chat route checks the To line against what the rep actually said', async () => {
+  // The link the unit tests above assume: the conversation has to REACH the
+  // tool. Without it every address is dropped, which is safe and useless.
+  const { env } = setup();
+  const input = { ...A_DRAFT, to: 'priya.shah@example.com', group: 'versions', headline: '', hashtags: '', imageBrief: '' };
+
+  const [said] = await turnWith(env, 'Write Priya a first touch. She is priya.shah@example.com.', input);
+  assert.equal(said.to, 'priya.shah@example.com');
+
+  const [guessed] = await turnWith(env, 'Write Priya Shah at Example a first touch.', input);
+  assert.equal(guessed.to, undefined, 'a name and a company are not an address');
 });

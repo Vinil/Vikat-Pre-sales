@@ -247,6 +247,17 @@ test('the prompt says the card previews a post, and that a past refusal was wron
   assert.match(text, /call \\?`draft_outreach\\?` for the posts/, 'the rule has to name the action');
 });
 
+test('the prompt says where an address may come from, and that a guess is not one', async () => {
+  // The check in outreach.js drops an invented address whatever the model
+  // does. Telling it the rule is what stops the check having to fire, and
+  // what stops a rep being told "left off" on every draft.
+  const text = await prompt();
+
+  assert.match(text, /\\?`to\\?`/, 'the rule has to name the field');
+  assert.match(text, /exactly\s+as\s+it\s+is\s+written\s+in\s+this\s+conversation\s+or\s+the\s+account\s+context/);
+  assert.match(text, /Never\s+build\s+one\s+from\s+a\s+name\s+and\s+a\s+domain/);
+});
+
 // --- Prompt caching -------------------------------------------------------
 
 test('the cache breakpoint sits on the part that never changes', async () => {

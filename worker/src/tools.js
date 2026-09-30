@@ -19,7 +19,7 @@
  */
 
 import { deliverLead } from './leadSink.js';
-import { normaliseDraft, CHANNEL_NAMES } from './outreach.js';
+import { normaliseDraft, addressesIn, CHANNEL_NAMES } from './outreach.js';
 import { REFERENCES_KEY, forbiddenNames } from './references.js';
 import { generateImage } from './imageGen.js';
 import { searchCollateral, collateralCount } from './collateral.js';
@@ -226,6 +226,16 @@ export const TOOL_DEFINITIONS = [
           description:
             'What consecutive drafts for one channel are to each other. "versions" means the rep picks ONE — two takes on the same email. "sequence" means they send ALL of them, in order — a campaign, a follow-up chain, three posts across a fortnight. The card says which, so a rep never sends one post of three thinking it was a choice.',
         },
+        // One string, like everything else here: the empty string is "not
+        // known", which is the honest value for most drafts. normaliseDraft()
+        // keeps it only if the address was written in what the model was
+        // given — a format check cannot catch firstname.lastname@company,
+        // which is the guess that actually happens.
+        to: {
+          type: 'string',
+          description:
+            "The recipient's work e-mail, exactly as it appears in this conversation or the account context; empty string when you do not have it. Never guess an address.",
+        },
       },
       // Fully required, like every other tool here: a closed, fully-required
       // schema is what stops the model inventing fields, and an optional
@@ -233,7 +243,7 @@ export const TOOL_DEFINITIONS = [
       // on a hunch that a fifth required argument had caused a malformed tool
       // call — a hunch with nothing behind it but timing. The defence against
       // malformation is normaliseDraft(), which strips it whatever the cause.
-      required: ['channel', 'subject', 'body', 'label', 'group', 'headline', 'hashtags', 'imageBrief'],
+      required: ['channel', 'subject', 'body', 'label', 'group', 'headline', 'hashtags', 'imageBrief', 'to'],
     },
   },
   {
@@ -346,6 +356,39 @@ function normaliseProspect(input) {
   return out;
 }
 
+/**
+ * The text the model was given this turn, for the To-line check.
+ *
+ * The conversation the rep sent — their messages and the assistant's earlier
+ * replies — plus any account or context block the worker put into the prompt
+ * for this turn (`contextText`; a page that embeds the assistant can supply
+ * the account it is open on, contacts included). An address in any of these
+ * was handed to the model rather than made up by it.
+ *
+ * Deliberately NOT included:
+ *   - What the model is writing this turn. An address it produced before
+ *     calling the tool would vouch for itself.
+ *   - The <current_user> line. It names the rep, address and all, on every
+ *     turn — and the rep is who a draft is FROM. A model that puts that
+ *     address on the To line has mixed the two up.
+ *   - The knowledge base. It holds Vikat's own addresses, and none of them is
+ *     a prospect.
+ */
+function conversationText(ctx) {
+  const messages = Array.isArray(ctx?.messages) ? ctx.messages : [];
+  const said = messages.map((m) => {
+    if (typeof m?.content === 'string') return m.content;
+    // Content blocks, should a caller ever pass them. Only the text: a tool
+    // result is not something the rep said.
+    if (Array.isArray(m?.content)) {
+      return m.content.map((b) => (b && b.type === 'text' ? String(b.text || '') : '')).join('\n');
+    }
+    return '';
+  });
+  if (typeof ctx?.contextText === 'string') said.push(ctx.contextText);
+  return said.join('\n');
+}
+
 /** Drop nulls and blanks so records and notifications stay readable. */
 function compact(obj) {
   return Object.fromEntries(
@@ -360,7 +403,10 @@ function compact(obj) {
  * rep's conversation continues rather than dying mid-answer.
  *
  * @param {{ name: string, input: object }} call
- * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object }} ctx
+ * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object, messages?: Array<{role: string, content: string}>, contextText?: string }} ctx
+ *        `messages` is the conversation as the rep sent it and `contextText`
+ *        any account block injected into this turn's prompt. Only
+ *        draft_outreach reads them, to check a To line against.
  * @returns {Promise<{ content: string, isError?: boolean, retryable?: boolean, effect?: object }>}
  */
 export async function runTool(call, ctx) {
@@ -479,7 +525,12 @@ export async function runTool(call, ctx) {
           console.error('[tools] references unavailable:', err?.message || err);
         }
 
-        const read = normaliseDraft(call.input, { forbidden });
+        // What the To line is checked against: every address written in what
+        // the model was GIVEN, never in what it wrote this turn. See
+        // conversationText() for what that includes and what it leaves out.
+        const knownEmails = addressesIn(conversationText(ctx));
+
+        const read = normaliseDraft(call.input, { forbidden, knownEmails });
         if (!read.ok) {
           return {
             content: `That draft could not be used: ${read.error} Write the message itself and call the tool again.`,

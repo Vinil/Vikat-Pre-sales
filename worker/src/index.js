@@ -736,9 +736,13 @@ async function handleChat(request, env, ctx, cfg, cors, user, isAdmin = false) {
             toolCalls.push({ name: block.name, input: block.input });
             send('tool', { name: block.name });
 
+            // `messages`, not `convo`: the conversation as the rep sent it.
+            // convo also carries what the model wrote THIS turn, and the To
+            // line on a draft is checked against what the model was given —
+            // an address it wrote itself a moment ago would vouch for itself.
             const result = await runTool(
               { name: block.name, input: block.input },
-              { sessionId, user, storage, env, cfg, fonts: loadFonts() },
+              { sessionId, user, storage, env, cfg, fonts: loadFonts(), messages },
             );
 
             results.push({

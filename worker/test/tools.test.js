@@ -615,3 +615,82 @@ test('an email result does not claim a feed preview', async () => {
   assert.ok(!res.isError, res.content);
   assert.doesNotMatch(res.content, /LinkedIn feed/);
 });
+
+// --- draft_outreach: who it is for ----------------------------------------
+
+const DRAFT_INPUT = {
+  channel: 'email',
+  subject: 'Your GitLab is on the exploited list',
+  label: 'Opener',
+  group: 'versions',
+  headline: '',
+  body: 'Vikat reads what your SIEM already produces. Twenty minutes on Thursday?',
+  hashtags: '',
+  imageBrief: '',
+};
+
+test('draft_outreach can say who a draft is for, in one flat required string', () => {
+  // One property, not an object: see create_document for what nesting did to
+  // every request. And required like the rest, with the empty string standing
+  // for "not known" — an optional property is where a model improvises.
+  const tool = TOOL_DEFINITIONS.find((t) => t.name === 'draft_outreach');
+  const to = tool.input_schema.properties.to;
+
+  assert.ok(to, 'draft_outreach needs a to property');
+  assert.equal(to.type, 'string');
+  assert.ok(tool.input_schema.required.includes('to'));
+  assert.match(to.description, /Never guess an address/);
+  assert.match(to.description, /empty string when you do not have it/);
+});
+
+test('the To line survives only when the conversation said it', async () => {
+  // The executor is the only place that can see both the tool call and the
+  // conversation it came out of, so it is the one that has to hand the
+  // conversation to the check.
+  const messages = [
+    { role: 'user', content: 'Draft a first touch to Priya Shah, priya.shah@example.com.' },
+    { role: 'assistant', content: 'Which trigger should it lead with?' },
+    { role: 'user', content: 'The GitLab listing.' },
+  ];
+
+  const kept = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'priya.shah@example.com' } },
+    { ...ctx(), messages },
+  );
+  assert.ok(!kept.isError, kept.content);
+  assert.equal(kept.effect.drafts[0].to, 'priya.shah@example.com');
+
+  const guessed = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'p.shah@example.com' } },
+    { ...ctx(), messages },
+  );
+  assert.equal(guessed.effect.drafts[0].to, undefined);
+  assert.match(guessed.content, /p\.shah@example\.com was not in the conversation/, 'and the model is told to pass it on');
+});
+
+test('an account block the worker injected counts as the conversation', async () => {
+  // A page embedding the assistant can put the account it is open on into the
+  // prompt — the contacts included. Those are addresses the model was given
+  // as surely as ones the rep typed.
+  const res = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'sam.lee@example.test' } },
+    {
+      ...ctx(),
+      messages: [{ role: 'user', content: 'Write the CISO a first touch.' }],
+      contextText: '<account>Contacts: Sam Lee, CISO, sam.lee@example.test</account>',
+    },
+  );
+
+  assert.equal(res.effect.drafts[0].to, 'sam.lee@example.test');
+});
+
+test("the rep's own address is not a recipient the conversation gave", async () => {
+  // The prompt names the rep, address and all, on every turn. That is who the
+  // draft is FROM; a model that puts it on the To line has mixed the two up.
+  const res = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: REP.email } },
+    { ...ctx(), messages: [{ role: 'user', content: 'Write the CISO a first touch.' }] },
+  );
+
+  assert.equal(res.effect.drafts[0].to, undefined);
+});
