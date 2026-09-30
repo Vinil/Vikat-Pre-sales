@@ -85,6 +85,16 @@ function json(body, status, headers = {}) {
 // --- Validation -----------------------------------------------------------
 
 const TAG_RE = /<[^>]*>/g;
+// An address in angle brackets, which is not a tag: "Priya Shah
+// <priya.shah@example.com>" is how Outlook, Teams and most address books copy
+// a contact, so it is the commonest way a rep hands one over. TAG_RE alone
+// deleted it, and the model — and the To-line check, which reads the same
+// text — was given "Priya Shah" and no address. Freed from its brackets
+// before tags are stripped, so the brackets are all that goes.
+//
+// Only a bare address: nothing with a space, a quote, an = or a / inside, so
+// a real tag carrying an address in an attribute is still a tag.
+const BRACKETED_ADDRESS_RE = /<((?:mailto:)?[^\s<>@"'=/]+@[^\s<>@"'=/]+)>/gi;
 // C0 controls except \t \n \r, plus DEL. Strips terminal escapes and the
 // zero-width tricks used to smuggle instructions past a human reviewer.
 const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
@@ -94,6 +104,7 @@ const RUN_OF_SPACES_RE = /[ \t]{2,}/g;
 /** Strip markup, control characters and invisible formatting from prospect input. */
 function sanitize(text) {
   return String(text)
+    .replace(BRACKETED_ADDRESS_RE, ' $1 ')
     .replace(TAG_RE, ' ')
     .replace(CONTROL_RE, '')
     .replace(INVISIBLE_RE, '')

@@ -941,6 +941,22 @@ test('the chat route checks the To line against what the rep actually said', asy
   assert.equal(guessed.to, undefined, 'a name and a company are not an address');
 });
 
+test('an address pasted from Outlook as "Name <address>" reaches the To line', async () => {
+  // The chat route strips markup before anything else sees the message, and
+  // an address in angle brackets looks like a tag to a tag stripper. That is
+  // the form Outlook and Teams copy a contact in, so it is the commonest way
+  // a rep hands one over.
+  const { env } = setup();
+  const input = { ...A_DRAFT, to: 'priya.shah@example.com', group: 'versions', headline: '', hashtags: '', imageBrief: '' };
+
+  const [pasted] = await turnWith(
+    env,
+    'Follow up on this one. From: Priya Shah <priya.shah@example.com> Sent: Monday',
+    input,
+  );
+  assert.equal(pasted.to, 'priya.shah@example.com');
+});
+
 // --- a Teams message -------------------------------------------------------
 
 test('a Teams message is a channel of its own, with no subject line', () => {
