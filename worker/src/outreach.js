@@ -176,8 +176,26 @@ const PLAIN_ADDRESS = /^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/;
  * carries one as a parameter. The trailing full stop of the sentence is
  * trimmed afterwards rather than excluded here, because a dot inside the
  * domain is part of the address and one at the end is not.
+ *
+ * And the way an address is decorated in running text, none of which is part
+ * of it: curly quotes out of an Outlook signature, an ellipsis, a markdown
+ * table's pipes, and after the domain the ** and ~~ of bold and strikethrough
+ * and the apostrophe of "jane@example.com's inbox". Read as part of the
+ * address, "**jane@example.com**" was known and jane@example.com was not, and
+ * the rep was told the address on their screen "is not one you gave".
+ *
+ * An apostrophe BETWEEN letters of the local part is kept, curly or not:
+ * sean.o'brien@example.com is one mailbox, and cut at the apostrophe it was
+ * never kept on a card — while brien@example.com, somebody else's, was
+ * vouched for by a conversation that never named it. A curly one there is
+ * the autocorrect of a straight one, and is read as one (see addressesIn).
+ *
+ * A * or ~ before the local part is stripped afterwards rather than excluded
+ * here, for the same reason as the full stop: both are legal INSIDE a local
+ * part, and excluding them would cut a*b@example.com down to someone else's.
  */
-const ADDRESS_IN_TEXT = /[^\s@<>,;:()[\]{}"'`?&=/#]+@[^\s@<>,;:()[\]{}"'`?&=/#]+/g;
+const ADDRESS_IN_TEXT =
+  /(?:[^\s@<>,;:()[\]{}"'`?&=/#|“”‘’«»…]|(?<=\w)['’](?=\w))+@[^\s@<>,;:()[\]{}"'`?&=/#|“”‘’«»…*~]+/g;
 
 /**
  * Every address written in some text, lower-cased.
@@ -191,7 +209,12 @@ const ADDRESS_IN_TEXT = /[^\s@<>,;:()[\]{}"'`?&=/#]+@[^\s@<>,;:()[\]{}"'`?&=/#]+
 export function addressesIn(text) {
   const found = new Set();
   for (const run of String(text == null ? '' : text).match(ADDRESS_IN_TEXT) || []) {
-    const address = run.replace(/[.!?]+$/, '').toLowerCase();
+    const address = run
+      .replace(/^[*~]+/, '')
+      .replace(/[.!?]+$/, '')
+      // Only ever between two letters of the local part by now; see above.
+      .replace(/’/g, "'")
+      .toLowerCase();
     if (PLAIN_ADDRESS.test(address)) found.add(address);
   }
   return found;

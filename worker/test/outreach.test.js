@@ -910,6 +910,43 @@ test('addresses are read out of prose the way people actually write them', () =>
   );
 });
 
+test('an address in bold, in curly quotes or before a possessive is still that address', () => {
+  // How people and models actually write one down: bold as a key fact, curly
+  // quotes out of an Outlook signature, "her inbox", a sentence trailing off.
+  // The decoration is not part of the address — read as if it were, the rep
+  // is told a real address on their screen "is not one you gave".
+  for (const text of [
+    'Email: **jane@example.com**',
+    'Her address is “jane@example.com”.',
+    'Try ‘jane@example.com’ first.',
+    'That goes to jane@example.com’s inbox.',
+    "That goes to jane@example.com's inbox.",
+    'Write to jane@example.com…',
+    'Old one: ~~jane@example.com~~',
+    '|Jane|jane@example.com|CISO|',
+    '*jane@example.com*',
+  ]) {
+    assert.deepEqual([...addressesIn(text)], ['jane@example.com'], text);
+
+    const read = normaliseDraft({ ...A_DRAFT, to: 'jane@example.com' }, { knownEmails: addressesIn(text) });
+    assert.equal(read.draft.to, 'jane@example.com', text);
+  }
+});
+
+test("an apostrophe inside an address is part of it, and does not cut it in two", () => {
+  // sean.o'brien@example.com is one mailbox. Split at the apostrophe it is
+  // never kept on a To line — and brien@example.com, a different person's
+  // mailbox, is vouched for by a conversation that never named it.
+  for (const text of ["Sean is sean.o'brien@example.com.", 'Sean is sean.o’brien@example.com.']) {
+    const found = addressesIn(text);
+    assert.deepEqual([...found], ["sean.o'brien@example.com"], text);
+    assert.ok(!found.has('brien@example.com'), text);
+
+    const read = normaliseDraft({ ...A_DRAFT, to: "sean.o'brien@example.com" }, { knownEmails: found });
+    assert.equal(read.draft.to, "sean.o'brien@example.com", text);
+  }
+});
+
 test('a longer address does not vouch for a shorter one inside it', () => {
   // jane@example.com is a different mailbox from jane@example.com.au, and the
   // model trimming one into the other is exactly the near-miss that sends a
