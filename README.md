@@ -429,9 +429,10 @@ Drafts arrive as cards: email, Teams message, LinkedIn connection note, InMail
 and post. An email card opens Outlook (`mailto:` and Outlook on the web), and a
 Teams card opens a Teams chat with the message in the compose box — both
 addressed to the recipient when the draft carries one. The model may only put
-an address on a draft that is written in the conversation (or in an account
-block the embedding worker injects); anything else is taken off before the rep
-sees it.
+an address on a draft that the rep wrote in the conversation (or that an
+account block the embedding worker injects gives); anything else — a guess,
+or an address from the assistant's own earlier reply — is taken off before
+the rep sees it, and the warning does not repeat it.
 
 The assistant itself has **no mail permission, on purpose**. Its Graph app is
 app-only, for SharePoint, and app-only `Mail.ReadWrite` would reach every

@@ -809,12 +809,25 @@ test('an address the conversation never contained is left off, and the rep is to
 
   assert.equal(read.draft.to, undefined, 'an invented address must never reach the card');
   assert.ok(
-    read.warnings.some((w) =>
-      /The address priya\.shah@example\.com was not in the conversation, so it was left off\. Check who this goes to\./.test(w),
+    read.warnings.includes(
+      'The address on this draft is not one you gave, so it was left off. Check who this goes to.',
     ),
     read.warnings.join(' | '),
   );
   assert.match(read.draft.body, /Twenty minutes/, 'the draft itself survives');
+});
+
+test('a warning about a To line never quotes the address back', () => {
+  // The warning is relayed to the rep in the assistant's reply, and that
+  // reply is resent as history next turn. A guess quoted in it is a guess on
+  // screen for the rep to copy — and, while replies counted as known text,
+  // it came back next turn as an address the conversation had "given".
+  for (const to of ['priya.shah@example.com', 'Priya Shah <priya.shah@example.com>']) {
+    const read = normaliseDraft({ ...A_DRAFT, to }, { knownEmails: [] });
+    assert.equal(read.draft.to, undefined, to);
+    assert.ok(read.warnings.some((w) => /left off/.test(w)), `${to}: ${read.warnings.join(' | ')}`);
+    assert.ok(!read.warnings.some((w) => /priya/i.test(w)), `${to}: ${read.warnings.join(' | ')}`);
+  }
 });
 
 test('with nothing to check it against, no address is trusted', () => {
@@ -974,5 +987,5 @@ test('a Teams message keeps a To line the conversation gave, and only that', () 
     { knownEmails: [] },
   );
   assert.equal(guessed.draft.to, undefined);
-  assert.ok(guessed.warnings.some((w) => /was not in the conversation/.test(w)), guessed.warnings.join(' | '));
+  assert.ok(guessed.warnings.some((w) => /not one you gave/.test(w)), guessed.warnings.join(' | '));
 });

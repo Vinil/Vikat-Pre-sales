@@ -665,7 +665,11 @@ test('the To line survives only when the conversation said it', async () => {
     { ...ctx(), messages },
   );
   assert.equal(guessed.effect.drafts[0].to, undefined);
-  assert.match(guessed.content, /p\.shah@example\.com was not in the conversation/, 'and the model is told to pass it on');
+  assert.match(
+    guessed.content,
+    /The address on this draft is not one you gave, so it was left off/,
+    'and the model is told to pass it on',
+  );
 });
 
 test('an account block the worker injected counts as the conversation', async () => {
@@ -690,6 +694,59 @@ test("the rep's own address is not a recipient the conversation gave", async () 
   const res = await runTool(
     { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: REP.email } },
     { ...ctx(), messages: [{ role: 'user', content: 'Write the CISO a first touch.' }] },
+  );
+
+  assert.equal(res.effect.drafts[0].to, undefined);
+});
+
+test('a guess that was dropped on one turn is still a guess on the next', async () => {
+  // The way round the check. Turn one drops the invented address and tells
+  // the model to pass that on; the model's reply goes back into the history
+  // the widget resends, so if the assistant's own words counted, turn two
+  // would find the guess in them and put it on the card with no warning.
+  const input = { ...DRAFT_INPUT, to: 'priya.shah@acme.example' };
+  const asked = { role: 'user', content: 'Write Priya Shah at Acme (acme.example) a first touch.' };
+
+  const first = await runTool({ name: 'draft_outreach', input }, { ...ctx(), messages: [asked] });
+  assert.equal(first.effect.drafts[0].to, undefined);
+  assert.doesNotMatch(
+    first.content,
+    /priya\.shah@acme\.example/,
+    'the model is not handed the guess to repeat to the rep',
+  );
+
+  // Even if it repeats it anyway, from the `to` it sent.
+  const second = await runTool(
+    { name: 'draft_outreach', input },
+    {
+      ...ctx(),
+      messages: [
+        asked,
+        {
+          role: 'assistant',
+          content: 'Built it on the GitLab listing. The address priya.shah@acme.example was not in the conversation, so it was left off.',
+        },
+        { role: 'user', content: 'Make it shorter.' },
+      ],
+    },
+  );
+  assert.equal(second.effect.drafts[0].to, undefined, 'a guess repeated is still a guess');
+});
+
+test("an address the assistant wrote in an earlier reply is not one the rep gave", async () => {
+  // "Her address is probably first.last@…" is the model's guess in a
+  // sentence. Nothing it wrote vouches for anything; only the rep and the
+  // account block the page injects can.
+  const res = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'priya.shah@acme.example' } },
+    {
+      ...ctx(),
+      messages: [
+        { role: 'user', content: 'Who runs security at Acme?' },
+        { role: 'assistant', content: 'Priya Shah. Her address is probably priya.shah@acme.example.' },
+        { role: 'user', content: 'Draft her a first touch.' },
+      ],
+    },
   );
 
   assert.equal(res.effect.drafts[0].to, undefined);

@@ -254,8 +254,11 @@ test('the prompt says where an address may come from, and that a guess is not on
   const text = await prompt();
 
   assert.match(text, /\\?`to\\?`/, 'the rule has to name the field');
-  assert.match(text, /exactly\s+as\s+it\s+is\s+written\s+in\s+this\s+conversation\s+or\s+the\s+account\s+context/);
+  assert.match(text, /exactly\s+as\s+the\s+rep\s+wrote\s+it\s+in\s+this\s+conversation\s+or\s+as\s+the\s+account\s+context\s+gives\s+it/);
   assert.match(text, /Never\s+build\s+one\s+from\s+a\s+name\s+and\s+a\s+domain/);
+  // The check does not count the assistant's own replies, so the model has to
+  // know that, or it spends a draft on an address it found last turn.
+  assert.match(text, /An\s+address\s+from\s+one\s+of\s+your\s+own\s+replies\s+does\s+not\s+count/);
 });
 
 test('the prompt says what a Teams message is for', async () => {

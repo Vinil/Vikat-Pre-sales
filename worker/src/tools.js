@@ -234,7 +234,7 @@ export const TOOL_DEFINITIONS = [
         to: {
           type: 'string',
           description:
-            "The recipient's work e-mail, exactly as it appears in this conversation or the account context; empty string when you do not have it. Never guess an address.",
+            "The recipient's work e-mail, exactly as the rep wrote it in this conversation or as the account context gives it; empty string when you do not have it. Never guess an address.",
         },
       },
       // Fully required, like every other tool here: a closed, fully-required
@@ -357,26 +357,32 @@ function normaliseProspect(input) {
 }
 
 /**
- * The text the model was given this turn, for the To-line check.
+ * The text the model was GIVEN, for the To-line check.
  *
- * The conversation the rep sent — their messages and the assistant's earlier
- * replies — plus any account or context block the worker put into the prompt
- * for this turn (`contextText`; a page that embeds the assistant can supply
- * the account it is open on, contacts included). An address in any of these
- * was handed to the model rather than made up by it.
+ * The rep's own messages, plus any account or context block the worker put
+ * into the prompt for this turn (`contextText`; a page that embeds the
+ * assistant can supply the account it is open on, contacts included). An
+ * address in either was handed to the model rather than made up by it.
  *
  * Deliberately NOT included:
- *   - What the model is writing this turn. An address it produced before
- *     calling the tool would vouch for itself.
+ *   - Anything the assistant wrote, this turn or any earlier one. Its earlier
+ *     replies come back in the history the widget resends, and they are the
+ *     model's words: "her address is probably first.last@…" is a guess in a
+ *     sentence, and a To-line warning relayed to the rep repeats the dropped
+ *     guess in the model's own reply. Counting replies let one turn's guess
+ *     vouch for itself on the next — dropped on "write Priya a first touch",
+ *     kept without a word on "make it shorter". The cost is an address the
+ *     assistant FOUND, on the web, last turn: the rep has to say it back
+ *     before it goes on a card, which is also the moment they check it.
  *   - The <current_user> line. It names the rep, address and all, on every
  *     turn — and the rep is who a draft is FROM. A model that puts that
  *     address on the To line has mixed the two up.
  *   - The knowledge base. It holds Vikat's own addresses, and none of them is
  *     a prospect.
  */
-function conversationText(ctx) {
+function givenText(ctx) {
   const messages = Array.isArray(ctx?.messages) ? ctx.messages : [];
-  const said = messages.map((m) => {
+  const said = messages.filter((m) => m?.role === 'user').map((m) => {
     if (typeof m?.content === 'string') return m.content;
     // Content blocks, should a caller ever pass them. Only the text: a tool
     // result is not something the rep said.
@@ -406,7 +412,8 @@ function compact(obj) {
  * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object, messages?: Array<{role: string, content: string}>, contextText?: string }} ctx
  *        `messages` is the conversation as the rep sent it and `contextText`
  *        any account block injected into this turn's prompt. Only
- *        draft_outreach reads them, to check a To line against.
+ *        draft_outreach reads them, to check a To line against — and only the
+ *        rep's messages among them (see givenText).
  * @returns {Promise<{ content: string, isError?: boolean, retryable?: boolean, effect?: object }>}
  */
 export async function runTool(call, ctx) {
@@ -526,9 +533,9 @@ export async function runTool(call, ctx) {
         }
 
         // What the To line is checked against: every address written in what
-        // the model was GIVEN, never in what it wrote this turn. See
-        // conversationText() for what that includes and what it leaves out.
-        const knownEmails = addressesIn(conversationText(ctx));
+        // the model was GIVEN, never in anything it wrote. See givenText()
+        // for what that includes and what it leaves out.
+        const knownEmails = addressesIn(givenText(ctx));
 
         const read = normaliseDraft(call.input, { forbidden, knownEmails });
         if (!read.ok) {

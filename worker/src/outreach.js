@@ -199,7 +199,8 @@ export function addressesIn(text) {
  * website, which looks exactly like knowledge and is a guess. So a format
  * check proves nothing on its own. What proves the model did not make it up
  * is that the address was already WRITTEN somewhere it was given: the rep's
- * messages, or an account block the embedding page put into the prompt.
+ * messages, or an account block the embedding page put into the prompt. Not
+ * the assistant's own earlier replies — see givenText() in tools.js.
  *
  * Literal, not fuzzy. jane@example.com is a different mailbox from
  * jane@example.com.au, and a model trimming one into the other is exactly the
@@ -218,20 +219,22 @@ function readRecipient(value, knownEmails) {
     .slice(0, 320);
   if (!raw) return {};
 
-  // Quoted back to the rep in a warning, so it is capped: a To line that came
-  // back as a paragraph is not worth relaying whole.
-  const shown = raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
-
+  // Neither warning quotes the address. A warning is relayed to the rep in
+  // the assistant's reply, so quoting it puts the guess on screen for the rep
+  // to copy into Outlook by hand — the one thing dropping it was for. And the
+  // reply is resent as history next turn: while replies counted as given
+  // text, the quoted guess came back as an address the conversation had
+  // "given", and the second draft carried it with no warning at all.
   const to = raw.toLowerCase();
   if (!PLAIN_ADDRESS.test(to)) {
     return {
-      warning: `The To line "${shown}" is not one plain e-mail address, so it was left off. Check who this goes to.`,
+      warning: 'The To line on this draft is not one plain e-mail address, so it was left off. Check who this goes to.',
     };
   }
 
   const known = new Set([...(knownEmails || [])].map((a) => String(a).toLowerCase()));
   if (!known.has(to)) {
-    return { warning: `The address ${shown} was not in the conversation, so it was left off. Check who this goes to.` };
+    return { warning: 'The address on this draft is not one you gave, so it was left off. Check who this goes to.' };
   }
 
   return { to };
@@ -257,8 +260,8 @@ function clean(value, max) {
  *
  * @param {object} input  The tool call's arguments.
  * @param {{ forbidden?: string[], knownEmails?: Iterable<string> }} [options]
- *        `knownEmails` is every address written in what the model was given
- *        this turn (see addressesIn). Absent means none: a caller that forgets
+ *        `knownEmails` is every address the rep or the account block gave
+ *        (see addressesIn). Absent means none: a caller that forgets
  *        to pass the conversation gets no To line, never an unchecked one.
  * @returns {{ ok: true, draft: object, warnings: string[] } | { ok: false, error: string }}
  */
