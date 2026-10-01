@@ -7,10 +7,10 @@
  * draft is a THING, so it travels as one: subject and body as separate fields,
  * rendered as a card with its own copy buttons.
  *
- * Email and LinkedIn share this rather than getting a tool each. They are the
- * same act — a short piece of writing aimed at one person, built from a real
- * trigger — and the differences are length and whether there is a subject
- * line. Two tools would have been two schemas to keep in step, and the schema
+ * Email, LinkedIn and Teams share this rather than getting a tool each. They
+ * are the same act — a short piece of writing aimed at one person, built from
+ * a real trigger — and the differences are length and whether there is a
+ * subject line. Two tools would have been two schemas to keep in step, and the schema
  * budget is not free: "Schema is too complex" is a REQUEST-level 400 that once
  * killed every conversation, including ones that never touched a tool.
  */
@@ -28,6 +28,9 @@ export const CHANNELS = {
     // says otherwise.
     bodyChars: 2200,
     subjectChars: 160,
+    // Carries a To line: the card opens Outlook addressed to the person. See
+    // readRecipient() for what an address has to prove before it is kept.
+    to: true,
   },
   linkedin_note: {
     label: 'LinkedIn connection note',
@@ -63,6 +66,31 @@ export const CHANNELS = {
     headline: true,
     hashtags: true,
     image: true,
+  },
+  teams_message: {
+    // A chat to someone the rep already works with, or who is on Teams: a
+    // partner, a customer on a shared channel, a colleague being asked for an
+    // intro. No subject, because nobody reads one on a chat.
+    label: 'Teams message',
+    subject: false,
+    // ADVISORY, not Teams'. Teams' own ceiling on a chat message is far higher
+    // than this — "Limits and specifications for Microsoft Teams" gives chat
+    // size as approximately 100 KB per post — so enforcing 2000 hard would
+    // cut a message at a number no platform applies, the mistake the InMail
+    // ceiling above is careful not to make.
+    // This is about what still reads as a chat: past a screenful it is an
+    // email in the wrong window. It also happens to be about where the card's
+    // "Open in Teams" link stops fitting in a URL.
+    bodyChars: 2000,
+    // The card opens a chat with this person, the text already in the box.
+    to: true,
+    // The reader knows who is writing. A chat arrives under the rep's own
+    // name, in a tool the two of them already share, and it goes to a
+    // colleague, a partner or a customer who knows us. The "who is writing"
+    // check in normaliseDraft() is for a stranger's inbox; run on a chat it
+    // told the rep, on every draft, that a colleague "has never heard of
+    // Vikat" — and the model put a pitch into the next revision.
+    knowsSender: true,
   },
 };
 
@@ -129,6 +157,119 @@ const looksMalformed = (value) => {
   return TOOL_MARKUP.test(String(value == null ? '' : value));
 };
 
+/**
+ * One plain address, and nothing a mail client could read as a second one.
+ *
+ * No display name, no list, no separator: "Priya <p@x.com>", "a@x.com, b@x.com"
+ * and "a@x.com;b@x.com" are each something Outlook parses into more people
+ * than the rep looked at. A To line is not the place to be generous about
+ * format, because the cost of a wrong one is an email in a stranger's inbox.
+ */
+const PLAIN_ADDRESS = /^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/;
+
+/**
+ * Address-shaped runs in running text.
+ *
+ * Narrower than PLAIN_ADDRESS on purpose, because this reads prose rather
+ * than a field: brackets, quotes and colons end an address in a sentence
+ * ("(p@x.com)", "mailto:p@x.com"), and so do the ?, & and / of a URL that
+ * carries one as a parameter. The trailing full stop of the sentence is
+ * trimmed afterwards rather than excluded here, because a dot inside the
+ * domain is part of the address and one at the end is not.
+ *
+ * And the way an address is decorated in running text, none of which is part
+ * of it: curly quotes out of an Outlook signature, an ellipsis, a markdown
+ * table's pipes, and after the domain the ** and ~~ of bold and strikethrough
+ * and the apostrophe of "jane@example.com's inbox". Read as part of the
+ * address, "**jane@example.com**" was known and jane@example.com was not, and
+ * the rep was told the address on their screen "is not one you gave".
+ *
+ * An apostrophe BETWEEN letters of the local part is kept, curly or not:
+ * sean.o'brien@example.com is one mailbox, and cut at the apostrophe it was
+ * never kept on a card — while brien@example.com, somebody else's, was
+ * vouched for by a conversation that never named it. A curly one there is
+ * the autocorrect of a straight one, and is read as one (see addressesIn).
+ *
+ * A * or ~ before the local part is stripped afterwards rather than excluded
+ * here, for the same reason as the full stop: both are legal INSIDE a local
+ * part, and excluding them would cut a*b@example.com down to someone else's.
+ */
+const ADDRESS_IN_TEXT =
+  /(?:[^\s@<>,;:()[\]{}"'`?&=/#|“”‘’«»…]|(?<=\w)['’](?=\w))+@[^\s@<>,;:()[\]{}"'`?&=/#|“”‘’«»…*~]+/g;
+
+/**
+ * Every address written in some text, lower-cased.
+ *
+ * What the To line is checked against. An address is kept on a draft only if
+ * it is one of these — see readRecipient().
+ *
+ * @param {string} text
+ * @returns {Set<string>}
+ */
+export function addressesIn(text) {
+  const found = new Set();
+  for (const run of String(text == null ? '' : text).match(ADDRESS_IN_TEXT) || []) {
+    const address = run
+      .replace(/^[*~]+/, '')
+      .replace(/[.!?]+$/, '')
+      // Only ever between two letters of the local part by now; see above.
+      .replace(/’/g, "'")
+      .toLowerCase();
+    if (PLAIN_ADDRESS.test(address)) found.add(address);
+  }
+  return found;
+}
+
+/**
+ * The To line, if it has earned its place on the card.
+ *
+ * Every other field on a draft is read before it is sent. The address is
+ * glanced at. And the likeliest wrong address is not a malformed one — it is
+ * firstname.lastname at the company's domain, assembled from a name and a
+ * website, which looks exactly like knowledge and is a guess. So a format
+ * check proves nothing on its own. What proves the model did not make it up
+ * is that the address was already WRITTEN somewhere it was given: the rep's
+ * messages, or an account block the embedding page put into the prompt. Not
+ * the assistant's own earlier replies — see givenText() in tools.js.
+ *
+ * Literal, not fuzzy. jane@example.com is a different mailbox from
+ * jane@example.com.au, and a model trimming one into the other is exactly the
+ * near-miss that sends a prospect's email to someone else.
+ *
+ * @returns {{ to?: string, warning?: string }}
+ */
+function readRecipient(value, knownEmails) {
+  // Not clean(): that rewrites dashes for prose, and an address is not prose.
+  // Markup is still stripped, so a To line that came back as tool framing is
+  // reported as not-an-address rather than quoted back as markup.
+  const raw = String(value == null ? '' : value)
+    .replace(TOOL_MARKUP, ' ')
+    .trim()
+    .replace(/^mailto:/i, '')
+    .slice(0, 320);
+  if (!raw) return {};
+
+  // Neither warning quotes the address. A warning is relayed to the rep in
+  // the assistant's reply, so quoting it puts the guess on screen for the rep
+  // to copy into Outlook by hand — the one thing dropping it was for. And the
+  // reply is resent as history next turn: while replies counted as given
+  // text, the quoted guess came back as an address the conversation had
+  // "given", and the second draft carried it with no warning at all.
+  const to = raw.toLowerCase();
+  if (!PLAIN_ADDRESS.test(to)) {
+    return {
+      warning: 'The To line on this draft is not one plain e-mail address, so it was left off. Check who this goes to.',
+    };
+  }
+
+  const known = new Set([...(knownEmails || [])].map((a) => String(a).toLowerCase()));
+  if (!known.has(to)) {
+    return { warning: 'The address on this draft is not one you gave, so it was left off. Check who this goes to.' };
+  }
+
+  return { to };
+}
+
 function clean(value, max) {
   return (
     noDashes(String(value == null ? '' : value).replace(TOOL_MARKUP, ' '))
@@ -147,9 +288,14 @@ function clean(value, max) {
  * document specs are: the alternative is a rep pasting a 400-character
  * connection note into LinkedIn and finding out there that it will not send.
  *
+ * @param {object} input  The tool call's arguments.
+ * @param {{ forbidden?: string[], knownEmails?: Iterable<string> }} [options]
+ *        `knownEmails` is every address the rep or the account block gave
+ *        (see addressesIn). Absent means none: a caller that forgets
+ *        to pass the conversation gets no To line, never an unchecked one.
  * @returns {{ ok: true, draft: object, warnings: string[] } | { ok: false, error: string }}
  */
-export function normaliseDraft(input = {}, { forbidden = [] } = {}) {
+export function normaliseDraft(input = {}, { forbidden = [], knownEmails = [] } = {}) {
   const channel = CHANNELS[input.channel] ? input.channel : 'email';
   const spec = CHANNELS[channel];
   const warnings = [];
@@ -188,6 +334,15 @@ export function normaliseDraft(input = {}, { forbidden = [] } = {}) {
     // The second mistake is recoverable in the next turn; the first is not.
     group: input.group === 'sequence' ? 'sequence' : 'versions',
   };
+
+  // Only where a link can use it. LinkedIn has no URL that pre-fills a message
+  // to a person, so an address on a LinkedIn draft would be carried for
+  // nothing — and checked, and warned about, for nothing.
+  if (spec.to) {
+    const recipient = readRecipient(input.to, knownEmails);
+    if (recipient.to) draft.to = recipient.to;
+    if (recipient.warning) warnings.push(recipient.warning);
+  }
 
   if (spec.subject) {
     const subject = clean(input.subject, spec.subjectChars);
@@ -253,20 +408,25 @@ export function normaliseDraft(input = {}, { forbidden = [] } = {}) {
   // A document does not have this problem: the logo is on the cover and the
   // question is answered before a word is read. An email has no cover, which
   // is why this lives here and not in checkArticulation.
-  const sentences = whole.split(/(?<=[.!?])\s+/).filter((x) => x.trim());
-  const introducedAt = sentences.findIndex((x) => /\bVikat(?:\.AI)?\b/i.test(x));
+  //
+  // Not on a channel whose reader already knows the sender (a Teams chat;
+  // see CHANNELS). There is no stranger there to answer.
+  if (!spec.knowsSender) {
+    const sentences = whole.split(/(?<=[.!?])\s+/).filter((x) => x.trim());
+    const introducedAt = sentences.findIndex((x) => /\bVikat(?:\.AI)?\b/i.test(x));
 
-  if (introducedAt === -1) {
-    warnings.push(
-      'Nothing here says who is writing. The reader has never heard of Vikat: one plain sentence, ' +
-        'early, saying what we do — before the analysis, not after it.',
-    );
-  } else if (introducedAt > 2) {
-    warnings.push(
-      `Vikat is not named until sentence ${introducedAt + 1}. The reader has never heard of us and ` +
-        'spends everything before that wondering who is writing. Say it in the first two or three ' +
-        'sentences, plainly, then make the argument.',
-    );
+    if (introducedAt === -1) {
+      warnings.push(
+        'Nothing here says who is writing. The reader has never heard of Vikat: one plain sentence, ' +
+          'early, saying what we do — before the analysis, not after it.',
+      );
+    } else if (introducedAt > 2) {
+      warnings.push(
+        `Vikat is not named until sentence ${introducedAt + 1}. The reader has never heard of us and ` +
+          'spends everything before that wondering who is writing. Say it in the first two or three ' +
+          'sentences, plainly, then make the argument.',
+      );
+    }
   }
 
   // A customer we may not name, in the thing a rep sends soonest and edits

@@ -247,6 +247,30 @@ test('the prompt says the card previews a post, and that a past refusal was wron
   assert.match(text, /call \\?`draft_outreach\\?` for the posts/, 'the rule has to name the action');
 });
 
+test('the prompt says where an address may come from, and that a guess is not one', async () => {
+  // The check in outreach.js drops an invented address whatever the model
+  // does. Telling it the rule is what stops the check having to fire, and
+  // what stops a rep being told "left off" on every draft.
+  const text = await prompt();
+
+  assert.match(text, /\\?`to\\?`/, 'the rule has to name the field');
+  assert.match(text, /exactly\s+as\s+the\s+rep\s+wrote\s+it\s+in\s+this\s+conversation\s+or\s+as\s+the\s+account\s+context\s+gives\s+it/);
+  assert.match(text, /Never\s+build\s+one\s+from\s+a\s+name\s+and\s+a\s+domain/);
+  // The check does not count the assistant's own replies, so the model has to
+  // know that, or it spends a draft on an address it found last turn.
+  assert.match(text, /An\s+address\s+from\s+one\s+of\s+your\s+own\s+replies\s+does\s+not\s+count/);
+});
+
+test('the prompt says what a Teams message is for', async () => {
+  // Otherwise it is an email with the subject cut off, which is the one thing
+  // a chat to a colleague must not read like.
+  const text = await prompt();
+
+  assert.match(text, /\\?`teams_message\\?`/);
+  assert.match(text, /someone\s+the\s+rep\s+already\s+works\s+with\s+or\s+who\s+uses\s+Teams/);
+  assert.match(text, /short,\s+conversational,\s+no\s+subject/);
+});
+
 // --- Prompt caching -------------------------------------------------------
 
 test('the cache breakpoint sits on the part that never changes', async () => {

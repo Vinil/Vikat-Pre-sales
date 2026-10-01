@@ -13,6 +13,10 @@
  *           data-mount="#assistant"      <!-- required when mode=inline -->
  *           defer></script>
  *
+ * Optional, from the embedding page: window.VikatChatHost.saveEmailDraft, which
+ * puts "Save to Outlook Drafts" on email cards. See hostSaver() below and the
+ * README section "Embedding: saving drafts in the rep's mailbox".
+ *
  * AUDIENCE: authenticated Vikat employees. The backend refuses anonymous
  * requests, so a 401 here means "your SSO session lapsed", not "sign up".
  */
@@ -620,15 +624,185 @@
   function mailLinks(draft) {
     var subject = encodeURIComponent(draft.subject || '');
     var body = encodeURIComponent(draft.body);
+    var to = linkAddress(addressOf(draft));
     var out = [];
 
-    var mailto = 'mailto:?subject=' + subject + '&body=' + body;
+    var mailto = 'mailto:' + to + '?subject=' + subject + '&body=' + body;
     if (mailto.length <= 1800) out.push({ label: 'Open in Outlook', href: mailto, primary: true });
 
-    var web = 'https://outlook.office.com/mail/deeplink/compose?subject=' + subject + '&body=' + body;
+    var web =
+      'https://outlook.office.com/mail/deeplink/compose?' +
+      (to ? 'to=' + to + '&' : '') +
+      'subject=' + subject + '&body=' + body;
     if (web.length <= 6000) out.push({ label: 'Outlook on the web', href: web });
 
     return out;
+  }
+
+  /**
+   * A Teams chat with the recipient, the message already in the compose box.
+   *
+   * Microsoft's documented "start a new chat" deep link:
+   * teams.microsoft.com/l/chat/0/0?users=<address>&message=<text>. It opens
+   * the Teams client, or Teams on the web, on a chat with that person —
+   * the existing one if there is one — with the text typed in. Nothing is
+   * sent: the rep reads it and presses Send, which is the point.
+   *
+   * Null without an address, because a chat link naming nobody opens Teams on
+   * nothing and the rep finds that out after the click. And null past the
+   * same kind of ceiling mailto: has, for the same reason: somewhere between
+   * the browser and the client a long link is cut SILENTLY, and the rep sends
+   * half a message believing it was whole.
+   */
+  function teamsLink(draft) {
+    var to = linkAddress(addressOf(draft));
+    if (!to) return null;
+    var href = 'https://teams.microsoft.com/l/chat/0/0?users=' + to + '&message=' + encodeURIComponent(draft.body);
+    return href.length <= 2000 ? href : null;
+  }
+
+  /**
+   * The embedding page's way into the rep's own mailbox, if it has one.
+   *
+   * The assistant itself has no mail permission and must not be given one.
+   * Its Graph app is app-only, for SharePoint, and app-only Mail.ReadWrite is
+   * not "this rep's mail" — it is every mailbox in the tenant, for anyone who
+   * gets the Worker to ask. A page that embeds the assistant and already acts
+   * AS the rep (the sales portal signs reps in with Microsoft) can save a
+   * draft with the rep's own delegated permission instead, so the offer comes
+   * from there:
+   *
+   *   window.VikatChatHost = {
+   *     saveEmailDraft: async ({ to, subject, body }) =>
+   *       ({ ok: true | false, message: 'text for the rep', webLink: 'https://…' }),
+   *   };
+   *
+   * Set before or after this script loads; it is looked up when a card is
+   * drawn and again on the click. Absent — the assistant's own deployment —
+   * and the card is exactly what it was.
+   */
+  function hostSaver() {
+    var host = window.VikatChatHost;
+    return host && typeof host.saveEmailDraft === 'function' ? host : null;
+  }
+
+  /** A link the rep can be sent to: https, or nothing. */
+  function httpsOnly(url) {
+    try {
+      var u = new URL(String(url));
+      return u.protocol === 'https:' ? u.href : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
+   * "Save to Outlook Drafts", and the line that says how it went.
+   *
+   * One save per click, and never two: the button is disabled before the
+   * host is called, so a double click is one draft in the rep's mailbox
+   * rather than two they find later. A save that worked stays disabled —
+   * saving again is a duplicate — and one that did not can be tried again.
+   *
+   * Whatever the host answers is shown as TEXT. A throw, a rejection or an
+   * answer that is not an object all read the same to a rep, so they all say
+   * the same thing.
+   */
+  function saveToDrafts(draft) {
+    var button = el('button', 'vk-copy vk-draft-mail vk-draft-mail-main vk-draft-save', 'Save to Outlook Drafts');
+    button.type = 'button';
+
+    // In the card from the start, hidden, so a click does not shuffle the
+    // buttons beside it to make room.
+    var status = el('span', 'vk-draft-note vk-draft-saved');
+    status.setAttribute('role', 'status');
+    status.hidden = true;
+
+    var busy = false;
+    var opened = null;
+
+    var settle = function (text, link, done) {
+      status.textContent = text;
+      status.hidden = false;
+      if (link) {
+        opened = el('a', 'vk-copy vk-draft-mail vk-draft-saved-link', 'Open the draft');
+        opened.href = link;
+        opened.target = '_blank';
+        opened.rel = 'noopener noreferrer';
+        status.parentNode.insertBefore(opened, status.nextSibling);
+      }
+      if (!done) {
+        busy = false;
+        button.disabled = false;
+      }
+    };
+
+    button.addEventListener('click', function () {
+      if (busy) return;
+      busy = true;
+      button.disabled = true;
+      if (opened) {
+        opened.remove();
+        opened = null;
+      }
+      status.textContent = 'Saving…';
+      status.hidden = false;
+
+      Promise.resolve()
+        .then(function () {
+          var host = hostSaver();
+          if (!host) throw new Error('the page no longer offers saveEmailDraft');
+          return host.saveEmailDraft({ to: addressOf(draft), subject: draft.subject || '', body: draft.body });
+        })
+        .then(function (answer) {
+          if (!answer || typeof answer !== 'object') throw new Error('saveEmailDraft answered ' + String(answer));
+          var ok = answer.ok === true;
+          var said = typeof answer.message === 'string' ? answer.message.trim() : '';
+          settle(
+            said || (ok ? 'Saved to your Outlook Drafts.' : 'Could not save the draft.'),
+            // A way to a draft that does not exist is not one.
+            ok ? httpsOnly(answer.webLink) : '',
+            ok,
+          );
+        })
+        .catch(function (err) {
+          console.error('[vikat-chat] saving the draft to Outlook failed:', err);
+          settle('Could not save the draft.', '', false);
+        });
+    });
+
+    return { button: button, status: status };
+  }
+
+  /** The channels a To line means anything on. Kept in step with CHANNELS[*].to on the server. */
+  var ADDRESSED = { email: true, teams_message: true };
+
+  /**
+   * One plain address — the same test the server applies before it keeps one.
+   *
+   * Applied again here because a card is not only drawn from a live turn: a
+   * reopened conversation replays whatever drafts were stored, written by
+   * whatever build stored them. An address that could carry a second
+   * recipient or a parameter of its own does not get as far as a link.
+   */
+  var PLAIN_ADDRESS = /^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/;
+
+  /** The draft's recipient, if it has one this card should use. Otherwise ''. */
+  function addressOf(draft) {
+    var to = draft && ADDRESSED[draft.channel] && typeof draft.to === 'string' ? draft.to : '';
+    return PLAIN_ADDRESS.test(to) ? to : '';
+  }
+
+  /**
+   * An address, fit to go into a link.
+   *
+   * Encoded like any other value, so a ? or & inside it stays inside it — with
+   * the one exception of the @, which is left literal because that is how
+   * RFC 6068 and Microsoft's own deep-link examples write it, and a query
+   * string allows it.
+   */
+  function linkAddress(to) {
+    return to ? encodeURIComponent(to).replace(/%40/g, '@') : '';
   }
 
   /** One variant: the rows, the actions, the count. */
@@ -703,6 +877,17 @@
   function draftPane(draft) {
     var pane = el('div', 'vk-draft-pane');
 
+    // First, where a mail client puts it. Copyable for the rep who sends from
+    // somewhere the buttons below do not reach.
+    var to = addressOf(draft);
+    if (to) {
+      var toRow = el('div', 'vk-draft-row');
+      toRow.appendChild(el('div', 'vk-draft-k', 'To'));
+      toRow.appendChild(el('div', 'vk-draft-v', to));
+      toRow.appendChild(copyButton('Copy', to));
+      pane.appendChild(toRow);
+    }
+
     if (draft.headline) {
       var headRow = el('div', 'vk-draft-row');
       headRow.appendChild(el('div', 'vk-draft-k', 'Headline'));
@@ -764,21 +949,56 @@
       foot.appendChild(copyButton('Copy whole post', wholePost(draft), true));
     }
 
-    // Email only. There is no URL that pre-fills a LinkedIn message or an
-    // InMail the way mailto: does, so that channel gets Copy and nothing that
-    // pretends to be more — a button opening an empty compose window is worse
-    // than no button, because the rep finds out after the click.
+    // Email and Teams only. There is no URL that pre-fills a LinkedIn message
+    // or an InMail the way mailto: does, so that channel gets Copy and nothing
+    // that pretends to be more — a button opening an empty compose window is
+    // worse than no button, because the rep finds out after the click.
     if (draft.channel === 'email') {
+      // Saving lands the draft in the rep's own Drafts folder with nothing to
+      // paste, so where a page offers it, it leads and the links step back.
+      var saver = hostSaver() ? saveToDrafts(draft) : null;
+      if (saver) foot.appendChild(saver.button);
+
       var links = mailLinks(draft);
       links.forEach(function (link) {
-        var open = el('a', 'vk-copy vk-draft-mail' + (link.primary ? ' vk-draft-mail-main' : ''), link.label);
+        var main = link.primary && !saver;
+        var open = el('a', 'vk-copy vk-draft-mail' + (main ? ' vk-draft-mail-main' : ''), link.label);
         open.href = link.href;
         open.target = '_blank';
         open.rel = 'noopener noreferrer';
         foot.appendChild(open);
       });
       if (!links.length) {
-        foot.appendChild(el('span', 'vk-draft-note', 'Too long to open in a mail client — copy it.'));
+        foot.appendChild(
+          el(
+            'span',
+            'vk-draft-note',
+            saver ? 'Too long to open in a mail client — save it or copy it.' : 'Too long to open in a mail client — copy it.',
+          ),
+        );
+      }
+
+      if (saver) foot.appendChild(saver.status);
+    }
+
+    // Teams does have a link that fills in a message for a person, so this
+    // channel gets one — but only with somebody to send it to.
+    if (draft.channel === 'teams_message') {
+      var chat = teamsLink(draft);
+      if (chat) {
+        var openChat = el('a', 'vk-copy vk-draft-mail vk-draft-mail-main vk-draft-teams', 'Open in Teams');
+        openChat.href = chat;
+        openChat.target = '_blank';
+        openChat.rel = 'noopener noreferrer';
+        foot.appendChild(openChat);
+      } else {
+        foot.appendChild(
+          el(
+            'span',
+            'vk-draft-note',
+            addressOf(draft) ? 'Too long to open in Teams — copy it.' : 'Add who this is for to open it in Teams.',
+          ),
+        );
       }
     }
 

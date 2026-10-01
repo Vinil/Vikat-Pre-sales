@@ -68,7 +68,7 @@ test('a tool is strict unless its handler validates the input itself', () => {
   // now owes.
   //
   // draft_outreach is exempt for the budget reason too. It carries a
-  // four-value enum, and every enum value is an alternative the constrained
+  // five-value enum, and every enum value is an alternative the constrained
   // grammar has to admit — the multiplier that took production down.
   const VALIDATES_ITS_OWN_INPUT = new Set(['create_document', 'log_prospect', 'draft_outreach']);
 
@@ -614,4 +614,173 @@ test('an email result does not claim a feed preview', async () => {
 
   assert.ok(!res.isError, res.content);
   assert.doesNotMatch(res.content, /LinkedIn feed/);
+});
+
+// --- draft_outreach: who it is for ----------------------------------------
+
+const DRAFT_INPUT = {
+  channel: 'email',
+  subject: 'Your GitLab is on the exploited list',
+  label: 'Opener',
+  group: 'versions',
+  headline: '',
+  body: 'Vikat reads what your SIEM already produces. Twenty minutes on Thursday?',
+  hashtags: '',
+  imageBrief: '',
+};
+
+test('draft_outreach can say who a draft is for, in one flat required string', () => {
+  // One property, not an object: see create_document for what nesting did to
+  // every request. And required like the rest, with the empty string standing
+  // for "not known" — an optional property is where a model improvises.
+  const tool = TOOL_DEFINITIONS.find((t) => t.name === 'draft_outreach');
+  const to = tool.input_schema.properties.to;
+
+  assert.ok(to, 'draft_outreach needs a to property');
+  assert.equal(to.type, 'string');
+  assert.ok(tool.input_schema.required.includes('to'));
+  assert.match(to.description, /Never guess an address/);
+  assert.match(to.description, /empty string when you do not have it/);
+});
+
+test('the To line survives only when the conversation said it', async () => {
+  // The executor is the only place that can see both the tool call and the
+  // conversation it came out of, so it is the one that has to hand the
+  // conversation to the check.
+  const messages = [
+    { role: 'user', content: 'Draft a first touch to Priya Shah, priya.shah@example.com.' },
+    { role: 'assistant', content: 'Which trigger should it lead with?' },
+    { role: 'user', content: 'The GitLab listing.' },
+  ];
+
+  const kept = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'priya.shah@example.com' } },
+    { ...ctx(), messages },
+  );
+  assert.ok(!kept.isError, kept.content);
+  assert.equal(kept.effect.drafts[0].to, 'priya.shah@example.com');
+
+  const guessed = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'p.shah@example.com' } },
+    { ...ctx(), messages },
+  );
+  assert.equal(guessed.effect.drafts[0].to, undefined);
+  assert.match(
+    guessed.content,
+    /The address on this draft is not one you gave, so it was left off/,
+    'and the model is told to pass it on',
+  );
+});
+
+test('an account block the worker injected counts as the conversation', async () => {
+  // A page embedding the assistant can put the account it is open on into the
+  // prompt — the contacts included. Those are addresses the model was given
+  // as surely as ones the rep typed.
+  const res = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'sam.lee@example.test' } },
+    {
+      ...ctx(),
+      messages: [{ role: 'user', content: 'Write the CISO a first touch.' }],
+      contextText: '<account>Contacts: Sam Lee, CISO, sam.lee@example.test</account>',
+    },
+  );
+
+  assert.equal(res.effect.drafts[0].to, 'sam.lee@example.test');
+});
+
+test("the rep's own address is not a recipient the conversation gave", async () => {
+  // The prompt names the rep, address and all, on every turn. That is who the
+  // draft is FROM; a model that puts it on the To line has mixed the two up.
+  const res = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: REP.email } },
+    { ...ctx(), messages: [{ role: 'user', content: 'Write the CISO a first touch.' }] },
+  );
+
+  assert.equal(res.effect.drafts[0].to, undefined);
+});
+
+test('a guess that was dropped on one turn is still a guess on the next', async () => {
+  // The way round the check. Turn one drops the invented address and tells
+  // the model to pass that on; the model's reply goes back into the history
+  // the widget resends, so if the assistant's own words counted, turn two
+  // would find the guess in them and put it on the card with no warning.
+  const input = { ...DRAFT_INPUT, to: 'priya.shah@acme.example' };
+  const asked = { role: 'user', content: 'Write Priya Shah at Acme (acme.example) a first touch.' };
+
+  const first = await runTool({ name: 'draft_outreach', input }, { ...ctx(), messages: [asked] });
+  assert.equal(first.effect.drafts[0].to, undefined);
+  assert.doesNotMatch(
+    first.content,
+    /priya\.shah@acme\.example/,
+    'the model is not handed the guess to repeat to the rep',
+  );
+
+  // Even if it repeats it anyway, from the `to` it sent.
+  const second = await runTool(
+    { name: 'draft_outreach', input },
+    {
+      ...ctx(),
+      messages: [
+        asked,
+        {
+          role: 'assistant',
+          content: 'Built it on the GitLab listing. The address priya.shah@acme.example was not in the conversation, so it was left off.',
+        },
+        { role: 'user', content: 'Make it shorter.' },
+      ],
+    },
+  );
+  assert.equal(second.effect.drafts[0].to, undefined, 'a guess repeated is still a guess');
+});
+
+test("an address the assistant wrote in an earlier reply is not one the rep gave", async () => {
+  // "Her address is probably first.last@…" is the model's guess in a
+  // sentence. Nothing it wrote vouches for anything; only the rep and the
+  // account block the page injects can.
+  const res = await runTool(
+    { name: 'draft_outreach', input: { ...DRAFT_INPUT, to: 'priya.shah@acme.example' } },
+    {
+      ...ctx(),
+      messages: [
+        { role: 'user', content: 'Who runs security at Acme?' },
+        { role: 'assistant', content: 'Priya Shah. Her address is probably priya.shah@acme.example.' },
+        { role: 'user', content: 'Draft her a first touch.' },
+      ],
+    },
+  );
+
+  assert.equal(res.effect.drafts[0].to, undefined);
+});
+
+// --- draft_outreach: a Teams message --------------------------------------
+
+test('the model can ask for a Teams message, and is told what one is', () => {
+  const tool = TOOL_DEFINITIONS.find((t) => t.name === 'draft_outreach');
+  const channel = tool.input_schema.properties.channel;
+
+  assert.ok(channel.enum.includes('teams_message'), channel.enum.join(', '));
+  assert.match(channel.description, /teams_message/);
+  assert.match(tool.description, /Teams/);
+});
+
+test('a Teams result says the card opens a chat and does not send it', async () => {
+  // The model cannot see the card. Told only "a Teams message", it tells the
+  // rep the message went — and the rep finds out otherwise when nobody
+  // replies.
+  const input = { ...DRAFT_INPUT, channel: 'teams_message', subject: '', body: 'Hi Priya, Vikat here. Ten minutes this week?' };
+  const messages = [{ role: 'user', content: 'Teams Priya at priya.shah@example.com.' }];
+
+  const addressed = await runTool(
+    { name: 'draft_outreach', input: { ...input, to: 'priya.shah@example.com' } },
+    { ...ctx(), messages },
+  );
+  assert.ok(!addressed.isError, addressed.content);
+  assert.equal(addressed.effect.drafts[0].to, 'priya.shah@example.com');
+  assert.match(addressed.content, /the rep presses Send/);
+
+  const unaddressed = await runTool(
+    { name: 'draft_outreach', input: { ...input, to: '' } },
+    { ...ctx(), messages },
+  );
+  assert.match(unaddressed.content, /copy it but not open it in Teams/);
 });

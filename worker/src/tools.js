@@ -19,7 +19,7 @@
  */
 
 import { deliverLead } from './leadSink.js';
-import { normaliseDraft, CHANNEL_NAMES } from './outreach.js';
+import { normaliseDraft, addressesIn, CHANNEL_NAMES } from './outreach.js';
 import { REFERENCES_KEY, forbiddenNames } from './references.js';
 import { generateImage } from './imageGen.js';
 import { searchCollateral, collateralCount } from './collateral.js';
@@ -176,7 +176,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'draft_outreach',
     description:
-      "Write an email or a LinkedIn draft the rep can copy and send. Call it whenever a rep asks for outreach, a follow-up, a connection note, an InMail, a sequence, or LinkedIn content — one call per draft, and call it several times in one turn for a sequence or a campaign. The draft is shown as a card with its own copy buttons, so write ONLY the message: no 'here is a draft', no commentary, no placeholder like [name] unless the rep genuinely has not said who it is for. Every claim in it must come from the knowledge base or from what the rep or your research established, and anything drawn from the web must be true to its source — a rep will send this to a real person under their own name.",
+      "Write an email, a Teams message or a LinkedIn draft the rep can copy and send. Call it whenever a rep asks for outreach, a follow-up, a connection note, an InMail, a Teams message, a sequence, or LinkedIn content — one call per draft, and call it several times in one turn for a sequence or a campaign. The draft is shown as a card with its own copy buttons, so write ONLY the message: no 'here is a draft', no commentary, no placeholder like [name] unless the rep genuinely has not said who it is for. Every claim in it must come from the knowledge base or from what the rep or your research established, and anything drawn from the web must be true to its source — a rep will send this to a real person under their own name.",
     // Flat, and not strict. See create_document below for why nesting and
     // `strict` are both avoided: the schema budget is a request-level limit,
     // and normaliseDraft() validates and trims everything regardless.
@@ -188,7 +188,7 @@ export const TOOL_DEFINITIONS = [
           type: 'string',
           enum: CHANNEL_NAMES,
           description:
-            'Where this is going. linkedin_note is a connection request and is HARD LIMITED to 300 characters by LinkedIn itself; linkedin_post is public content, not a message to one person.',
+            'Where this is going. linkedin_note is a connection request and is HARD LIMITED to 300 characters by LinkedIn itself; linkedin_post is public content, not a message to one person; teams_message is a Teams chat message to someone the rep already works with or who uses Teams: short, conversational, no subject.',
         },
         subject: {
           type: 'string',
@@ -226,6 +226,16 @@ export const TOOL_DEFINITIONS = [
           description:
             'What consecutive drafts for one channel are to each other. "versions" means the rep picks ONE — two takes on the same email. "sequence" means they send ALL of them, in order — a campaign, a follow-up chain, three posts across a fortnight. The card says which, so a rep never sends one post of three thinking it was a choice.',
         },
+        // One string, like everything else here: the empty string is "not
+        // known", which is the honest value for most drafts. normaliseDraft()
+        // keeps it only if the address was written in what the model was
+        // given — a format check cannot catch firstname.lastname@company,
+        // which is the guess that actually happens.
+        to: {
+          type: 'string',
+          description:
+            "The recipient's work e-mail, exactly as the rep wrote it in this conversation or as the account context gives it; empty string when you do not have it. Never guess an address.",
+        },
       },
       // Fully required, like every other tool here: a closed, fully-required
       // schema is what stops the model inventing fields, and an optional
@@ -233,7 +243,7 @@ export const TOOL_DEFINITIONS = [
       // on a hunch that a fifth required argument had caused a malformed tool
       // call — a hunch with nothing behind it but timing. The defence against
       // malformation is normaliseDraft(), which strips it whatever the cause.
-      required: ['channel', 'subject', 'body', 'label', 'group', 'headline', 'hashtags', 'imageBrief'],
+      required: ['channel', 'subject', 'body', 'label', 'group', 'headline', 'hashtags', 'imageBrief', 'to'],
     },
   },
   {
@@ -346,6 +356,45 @@ function normaliseProspect(input) {
   return out;
 }
 
+/**
+ * The text the model was GIVEN, for the To-line check.
+ *
+ * The rep's own messages, plus any account or context block the worker put
+ * into the prompt for this turn (`contextText`; a page that embeds the
+ * assistant can supply the account it is open on, contacts included). An
+ * address in either was handed to the model rather than made up by it.
+ *
+ * Deliberately NOT included:
+ *   - Anything the assistant wrote, this turn or any earlier one. Its earlier
+ *     replies come back in the history the widget resends, and they are the
+ *     model's words: "her address is probably first.last@…" is a guess in a
+ *     sentence, and a To-line warning relayed to the rep repeats the dropped
+ *     guess in the model's own reply. Counting replies let one turn's guess
+ *     vouch for itself on the next — dropped on "write Priya a first touch",
+ *     kept without a word on "make it shorter". The cost is an address the
+ *     assistant FOUND, on the web, last turn: the rep has to say it back
+ *     before it goes on a card, which is also the moment they check it.
+ *   - The <current_user> line. It names the rep, address and all, on every
+ *     turn — and the rep is who a draft is FROM. A model that puts that
+ *     address on the To line has mixed the two up.
+ *   - The knowledge base. It holds Vikat's own addresses, and none of them is
+ *     a prospect.
+ */
+function givenText(ctx) {
+  const messages = Array.isArray(ctx?.messages) ? ctx.messages : [];
+  const said = messages.filter((m) => m?.role === 'user').map((m) => {
+    if (typeof m?.content === 'string') return m.content;
+    // Content blocks, should a caller ever pass them. Only the text: a tool
+    // result is not something the rep said.
+    if (Array.isArray(m?.content)) {
+      return m.content.map((b) => (b && b.type === 'text' ? String(b.text || '') : '')).join('\n');
+    }
+    return '';
+  });
+  if (typeof ctx?.contextText === 'string') said.push(ctx.contextText);
+  return said.join('\n');
+}
+
 /** Drop nulls and blanks so records and notifications stay readable. */
 function compact(obj) {
   return Object.fromEntries(
@@ -360,7 +409,11 @@ function compact(obj) {
  * rep's conversation continues rather than dying mid-answer.
  *
  * @param {{ name: string, input: object }} call
- * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object }} ctx
+ * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object, messages?: Array<{role: string, content: string}>, contextText?: string }} ctx
+ *        `messages` is the conversation as the rep sent it and `contextText`
+ *        any account block injected into this turn's prompt. Only
+ *        draft_outreach reads them, to check a To line against — and only the
+ *        rep's messages among them (see givenText).
  * @returns {Promise<{ content: string, isError?: boolean, retryable?: boolean, effect?: object }>}
  */
 export async function runTool(call, ctx) {
@@ -479,7 +532,12 @@ export async function runTool(call, ctx) {
           console.error('[tools] references unavailable:', err?.message || err);
         }
 
-        const read = normaliseDraft(call.input, { forbidden });
+        // What the To line is checked against: every address written in what
+        // the model was GIVEN, never in anything it wrote. See givenText()
+        // for what that includes and what it leaves out.
+        const knownEmails = addressesIn(givenText(ctx));
+
+        const read = normaliseDraft(call.input, { forbidden, knownEmails });
         if (!read.ok) {
           return {
             content: `That draft could not be used: ${read.error} Write the message itself and call the tool again.`,
@@ -517,10 +575,19 @@ export async function runTool(call, ctx) {
         // assistant was "a text assistant" with "no ability to render a visual
         // UI" — while the preview sat on screen. The model cannot see the card,
         // so it has to be told what the card is every time it makes one.
+        //
+        // A Teams message has the opposite risk. Told only "a Teams message",
+        // the model tells the rep it went — and the rep finds out otherwise
+        // when nobody replies. The card opens a chat with the text typed in;
+        // sending is the rep's click, and it has to say so.
         const shown =
           draft.channel === 'linkedin_post'
             ? ' The card lays the post out as the LinkedIn feed shows it, with the "see more" fold marked, the banner, and each part copyable on its own. That IS the preview: do not tell the rep you cannot show them how it will look.'
-            : '';
+            : draft.channel === 'teams_message'
+              ? draft.to
+                ? ` The card opens a Teams chat with ${draft.to} with this text in the compose box. Nothing is sent: the rep presses Send.`
+                : ' It has no address, so the card can copy it but not open it in Teams. Nothing is sent.'
+              : '';
 
         return {
           content:

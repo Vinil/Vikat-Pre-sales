@@ -23,6 +23,26 @@ test('sanitize strips HTML tags', () => {
   assert.equal(sanitize('<img src=x onerror=y>'), '');
 });
 
+test('sanitize keeps an address written the way Outlook and Teams copy one', () => {
+  // "Priya Shah <priya.shah@example.com>" is how a contact comes out of
+  // Outlook, Teams and most address books. Stripped as a tag, the rep hands
+  // over an address and the model is given only a name.
+  assert.equal(
+    sanitize('From: Priya Shah <priya.shah@example.com>'),
+    'From: Priya Shah priya.shah@example.com',
+  );
+  assert.equal(
+    sanitize('To: Sam Lee <sam@example.test>; Jo Park <jo.park@example.test>'),
+    'To: Sam Lee sam@example.test ; Jo Park jo.park@example.test',
+  );
+  assert.equal(sanitize('<mailto:help@example.com>'), 'mailto:help@example.com');
+
+  // Only a bare address is let out of its brackets. A tag with an address in
+  // an attribute is still a tag.
+  assert.equal(sanitize('<a href="mailto:x@example.com">write</a> in'), 'write in');
+  assert.equal(sanitize('<img src=x@example.com onerror=y>'), '');
+});
+
 test('sanitize strips control characters but keeps newlines and tabs', () => {
   const withNulls = `a${String.fromCharCode(0)}b${String.fromCharCode(27)}[31mc`;
   assert.equal(sanitize(withNulls), 'ab[31mc');

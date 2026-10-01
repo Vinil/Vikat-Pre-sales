@@ -1783,6 +1783,353 @@ test('the mail link cannot carry anything but a mailto', async () => {
   await page.close();
 });
 
+// --- addressed to someone --------------------------------------------------
+
+const ADDRESSED = { ...DRAFT, to: 'priya.shah@example.com' };
+
+test('an addressed email opens in Outlook already addressed', async () => {
+  // The rep should not be retyping an address the conversation already had.
+  // The @ stays literal, the way RFC 6068 and Microsoft's own examples write
+  // it; everything else in the address is encoded like any other value.
+  const page = await withDraft(ADDRESSED);
+
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  assert.equal(hrefs.length, 2, hrefs.join(' | '));
+  assert.ok(hrefs[0].startsWith('mailto:priya.shah@example.com?subject='), hrefs[0].slice(0, 60));
+  assert.ok(
+    hrefs[1].startsWith('https://outlook.office.com/mail/deeplink/compose?to=priya.shah@example.com&subject='),
+    hrefs[1].slice(0, 90),
+  );
+  for (const href of hrefs) {
+    assert.ok(href.includes(encodeURIComponent('Worth fifteen minutes?')), 'and the body still survives');
+  }
+
+  await page.close();
+});
+
+test('the recipient is on the card, first, with its own Copy', async () => {
+  // Where an email client puts it, and copyable for the rep who is sending
+  // from somewhere else.
+  const page = await withDraft(ADDRESSED);
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.equal(keys[0], 'To', keys.join(' | '));
+  assert.equal(await page.textContent('.vk-draft-row:first-child .vk-draft-v'), 'priya.shah@example.com');
+
+  await page.click('.vk-draft-row:first-child .vk-copy');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__copied[0]), 'priya.shah@example.com');
+
+  await page.close();
+});
+
+test('an email with nobody on it opens as it always did', async () => {
+  const page = await withDraft({ ...DRAFT, to: '' });
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.ok(!keys.includes('To'), keys.join(' | '));
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  assert.ok(hrefs[0].startsWith('mailto:?subject='), hrefs[0].slice(0, 40));
+  assert.ok(hrefs[1].startsWith('https://outlook.office.com/mail/deeplink/compose?subject='), hrefs[1].slice(0, 70));
+
+  await page.close();
+});
+
+test('an address cannot bring recipients or parameters of its own', async () => {
+  // The server only keeps a plain address it found in the conversation, but a
+  // card also draws from stored conversations, written by whatever build
+  // stored them. So the card checks again, and encodes what it keeps.
+  for (const to of ['Priya <priya@example.com>', 'priya@example.com,boss@example.com', 'priya@example.com?bcc=boss@example.com']) {
+    const page = await withDraft({ ...DRAFT, to });
+    const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+    assert.ok(!keys.includes('To'), `${to}: ${keys.join(' | ')}`);
+    const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+    assert.ok(hrefs[0].startsWith('mailto:?subject='), `${to}: ${hrefs[0].slice(0, 60)}`);
+    await page.close();
+  }
+
+  // One @, so it is shaped like an address — and its ? and = stay inside it.
+  const page = await withDraft({ ...DRAFT, to: 'priya@example.com?cc=x' });
+  const hrefs = await page.$$eval('.vk-draft-mail', (n) => n.map((a) => a.getAttribute('href')));
+  for (const href of hrefs) {
+    assert.ok(!/[?&]cc=/.test(href), `a parameter got out of the address: ${href.slice(0, 80)}`);
+  }
+  await page.close();
+});
+
+test('a LinkedIn draft shows no To line even if one arrives', async () => {
+  // There is nothing on LinkedIn for an address to fill in.
+  const page = await withDraft({
+    channel: 'linkedin_message',
+    channelLabel: 'LinkedIn InMail',
+    label: '',
+    subject: 'A subject',
+    body: 'A body.',
+    to: 'priya@example.com',
+  });
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.ok(!keys.includes('To'), keys.join(' | '));
+  await page.close();
+});
+
+// --- a Teams message -------------------------------------------------------
+
+const TEAMS = {
+  channel: 'teams_message',
+  channelLabel: 'Teams message',
+  label: '',
+  body: 'Hi Priya, Vikat here & glad to help.\n\nFree for ten minutes? #gitlab 100%',
+  to: 'priya.shah@example.com',
+};
+
+test('a Teams message opens a chat to the person, with the text in the box', async () => {
+  // Microsoft's documented "start a new chat" deep link. It opens Teams on a
+  // chat with that person and the message typed in — and the rep still
+  // presses Send, which is the point.
+  const page = await withDraft(TEAMS);
+
+  const links = await page.$$eval('.vk-draft-teams', (n) =>
+    n.map((a) => ({ label: a.textContent, href: a.getAttribute('href'), target: a.target, rel: a.rel })),
+  );
+  assert.equal(links.length, 1);
+  assert.equal(links[0].label, 'Open in Teams');
+  assert.equal(
+    links[0].href,
+    'https://teams.microsoft.com/l/chat/0/0?users=priya.shah@example.com&message=' + encodeURIComponent(TEAMS.body),
+  );
+  assert.equal(links[0].target, '_blank');
+  assert.match(links[0].rel, /noopener/);
+
+  await page.close();
+});
+
+test('a Teams message is not an email and has no subject', async () => {
+  const page = await withDraft(TEAMS);
+
+  const keys = await page.$$eval('.vk-draft-k', (n) => n.map((k) => k.textContent));
+  assert.deepEqual(keys, ['To', 'Message']);
+  const hrefs = await page.$$eval('.vk-draft a[href]', (n) => n.map((a) => a.getAttribute('href')));
+  assert.ok(!hrefs.some((h) => /^mailto:|outlook\.office\.com/.test(h)), hrefs.join(' | '));
+  assert.equal(await page.textContent('.vk-draft-ch'), 'Teams message');
+
+  await page.close();
+});
+
+test('a Teams message with nobody on it can be copied, and says why there is no button', async () => {
+  // A chat link with no one in it opens Teams on nothing. The rep finds that
+  // out after the click, which is worse than no button.
+  const page = await withDraft({ ...TEAMS, to: '' });
+
+  assert.equal(await page.$$eval('.vk-draft-teams', (n) => n.length), 0);
+  assert.equal(await page.textContent('.vk-draft-note'), 'Add who this is for to open it in Teams.');
+
+  await page.click('.vk-draft-body .vk-copy');
+  await page.waitForFunction(() => window.__copied.length === 1, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__copied[0]), TEAMS.body);
+
+  await page.close();
+});
+
+test('a Teams message too long for a link gets Copy, not a truncated chat', async () => {
+  // Like mailto:, a long link is cut SILENTLY somewhere between the browser
+  // and the client, and the rep sends half a message.
+  const page = await withDraft({ ...TEAMS, body: 'x'.repeat(1990) });
+
+  assert.equal(await page.$$eval('.vk-draft-teams', (n) => n.length), 0);
+  assert.match(await page.textContent('.vk-draft-note'), /Too long/);
+  assert.equal(await page.$$eval('.vk-draft-body .vk-copy', (n) => n.length), 1);
+
+  await page.close();
+});
+
+// --- saving into the rep's own Drafts --------------------------------------
+//
+// The agent has no mail permission and must not get one: its Graph app is
+// app-only for SharePoint, and app-only Mail.ReadWrite reaches every mailbox
+// in the tenant. A page that embeds the assistant and already acts as the rep
+// can offer it instead, through window.VikatChatHost.saveEmailDraft.
+
+/**
+ * A widget page whose host can save drafts.
+ *
+ * `answer` is what the hook resolves with, or 'throw' for a hook that throws.
+ * Every call is recorded in window.__saved, and the hook waits `delay` ms so a
+ * test can click again while the first save is still in flight.
+ */
+async function withHost(answer, { draft = ADDRESSED, delay = 0 } = {}) {
+  const page = await widgetPage();
+  await page.evaluate(
+    ({ answer, delay }) => {
+      window.__saved = [];
+      window.VikatChatHost = {
+        saveEmailDraft(args) {
+          window.__saved.push(args);
+          return new Promise((resolve, reject) =>
+            setTimeout(() => (answer === 'throw' ? reject(new Error('Graph said no')) : resolve(answer)), delay),
+          );
+        },
+      };
+    },
+    { answer, delay },
+  );
+  await page.evaluate((d) => window.VikatChatInternals.addDraft(d), draft);
+  await page.waitForSelector('.vk-draft');
+  return page;
+}
+
+const SAVED = {
+  ok: true,
+  message: 'Saved to your Drafts folder in Outlook.',
+  webLink: 'https://outlook.office.com/mail/drafts/id/AAMkADraft',
+};
+
+test('without a host that can save, an email card is what it always was', async () => {
+  // The CEO's own deployment has no such page around it. Nothing may change.
+  const page = await withDraft(ADDRESSED);
+  assert.equal(await page.$$eval('.vk-draft-save', (n) => n.length), 0);
+
+  const main = await page.$$eval('.vk-draft-mail-main', (n) => n.map((a) => a.textContent));
+  assert.deepEqual(main, ['Open in Outlook'], 'the desktop link still leads');
+  await page.close();
+});
+
+test('a host that can save gets Save to Outlook Drafts, as the lead action', async () => {
+  const page = await withHost(SAVED);
+
+  const save = await page.$$eval('.vk-draft-save', (n) =>
+    n.map((b) => ({ text: b.textContent, main: b.classList.contains('vk-draft-mail-main'), tag: b.tagName })),
+  );
+  assert.deepEqual(save, [{ text: 'Save to Outlook Drafts', main: true, tag: 'BUTTON' }]);
+
+  // One lead action, not two: the links step back beside it.
+  const main = await page.$$eval('.vk-draft-mail-main', (n) => n.map((a) => a.textContent));
+  assert.deepEqual(main, ['Save to Outlook Drafts']);
+  assert.equal(await page.$$eval('a.vk-draft-mail', (n) => n.length), 2, 'and both links are still there');
+
+  await page.close();
+});
+
+test('saving hands the host exactly what is on the card', async () => {
+  const page = await withHost(SAVED);
+
+  await page.click('.vk-draft-save');
+  await page.waitForFunction(() => window.__saved.length === 1, null, { timeout: 5000 });
+  assert.deepEqual(await page.evaluate(() => window.__saved[0]), {
+    to: ADDRESSED.to,
+    subject: ADDRESSED.subject,
+    body: ADDRESSED.body,
+  });
+
+  await page.close();
+});
+
+test('a draft with nobody on it is saved with an empty To', async () => {
+  // The rep fills it in in Outlook. The host is never handed a guess.
+  const page = await withHost(SAVED, { draft: DRAFT });
+
+  await page.click('.vk-draft-save');
+  await page.waitForFunction(() => window.__saved.length === 1, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__saved[0].to), '');
+
+  await page.close();
+});
+
+test('a double click saves once', async () => {
+  // Two clicks are two drafts in the rep's mailbox, and the second is the one
+  // they do not notice until a colleague asks why there are two.
+  const page = await withHost(SAVED, { delay: 300 });
+
+  await page.dblclick('.vk-draft-save');
+  await page.click('.vk-draft-save', { force: true }).catch(() => {});
+  assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), true, 'it waits, visibly');
+
+  await page.waitForSelector('.vk-draft-saved:not([hidden])', { timeout: 5000 });
+  await page.waitForFunction(() => /Drafts folder/.test(document.querySelector('.vk-draft-saved').textContent), null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__saved.length), 1);
+
+  await page.close();
+});
+
+test("the host's answer is shown on the card, with the way to the draft", async () => {
+  const page = await withHost(SAVED);
+
+  await page.click('.vk-draft-save');
+  await page.waitForSelector('.vk-draft-saved-link', { timeout: 5000 });
+
+  assert.equal(await page.textContent('.vk-draft-saved'), SAVED.message);
+  const link = await page.$eval('.vk-draft-saved-link', (a) => ({
+    text: a.textContent,
+    href: a.getAttribute('href'),
+    target: a.target,
+    rel: a.rel,
+  }));
+  assert.equal(link.text, 'Open the draft');
+  assert.equal(link.href, SAVED.webLink);
+  assert.equal(link.target, '_blank');
+  assert.match(link.rel, /noopener/);
+
+  // Saved is saved. A second click would be a second draft.
+  assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), true);
+
+  await page.close();
+});
+
+test('only an https link to the draft is ever shown', async () => {
+  // The link comes from the host page, which is ours — but it becomes an
+  // href a rep clicks, and a javascript: one would run in this page.
+  for (const webLink of ['javascript:alert(1)', 'http://outlook.office.com/x', 'not a url']) {
+    const page = await withHost({ ...SAVED, webLink });
+    await page.click('.vk-draft-save');
+    await page.waitForFunction(() => /Drafts folder/.test(document.querySelector('.vk-draft-saved').textContent), null, { timeout: 5000 });
+    assert.equal(await page.$$eval('.vk-draft-saved-link', (n) => n.length), 0, webLink);
+    await page.close();
+  }
+});
+
+test('a save that failed says so, and can be tried again', async () => {
+  const page = await withHost({ ok: false, message: 'Outlook is not connected for your account.' });
+
+  await page.click('.vk-draft-save');
+  await page.waitForFunction(() => /not connected/.test(document.querySelector('.vk-draft-saved').textContent), null, { timeout: 5000 });
+  assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), false);
+  assert.equal(await page.$$eval('.vk-draft-saved-link', (n) => n.length), 0);
+
+  await page.close();
+});
+
+test('a hook that throws, or answers nonsense, is reported as not saved', async () => {
+  for (const answer of ['throw', 'yes', null]) {
+    const page = await withHost(answer);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+
+    await page.click('.vk-draft-save');
+    await page.waitForFunction(() => document.querySelector('.vk-draft-saved')?.textContent === 'Could not save the draft.', null, { timeout: 5000 });
+    assert.equal(await page.$eval('.vk-draft-save', (b) => b.disabled), false, `${answer}: it can be tried again`);
+    assert.deepEqual(errors, [], `${answer}: the card must not take the page down`);
+    await page.close();
+  }
+});
+
+test('a draft too long for a link can still be saved, and is not told to copy', async () => {
+  const page = await withHost(SAVED, { draft: { ...ADDRESSED, body: 'x'.repeat(7000) } });
+
+  assert.equal(await page.$$eval('.vk-draft-save', (n) => n.length), 1);
+  assert.equal(await page.$$eval('a.vk-draft-mail', (n) => n.length), 0);
+  assert.match(await page.textContent('.vk-draft-note'), /save it or copy it/);
+
+  await page.close();
+});
+
+test('only an email is offered to Drafts', async () => {
+  // Outlook Drafts holds email. A Teams message there would be a mail with no
+  // subject, addressed to someone who was meant to get a chat.
+  const page = await withHost(SAVED, { draft: TEAMS });
+  assert.equal(await page.$$eval('.vk-draft-save', (n) => n.length), 0);
+  await page.close();
+});
+
 // --- a campaign is not a choice --------------------------------------------
 
 const CAMPAIGN = [1, 2, 3].map((n) => ({
