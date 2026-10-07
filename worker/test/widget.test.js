@@ -2130,6 +2130,152 @@ test('only an email is offered to Drafts', async () => {
   await page.close();
 });
 
+// --- sending from the rep's own mailbox -------------------------------------
+//
+// The same reasoning as saving: the agent has no mail permission, so a page
+// that acts as the rep may offer to send instead, through
+// window.VikatChatHost.sendEmail. The confirm is the page's — it knows whose
+// address it is and what sending from there means — so the card only asks.
+
+/**
+ * A widget page whose host can send, and save too unless `save` is false.
+ *
+ * `answer` is what sendEmail resolves with, or 'throw' for one that throws.
+ * Every call is recorded in window.__sent, and the hook waits `delay` ms so a
+ * test can click again while the first send is still in flight.
+ */
+async function withSender(answer, { draft = ADDRESSED, delay = 0, save = true } = {}) {
+  const page = await widgetPage();
+  await page.evaluate(
+    ({ answer, delay, save, saved }) => {
+      window.__sent = [];
+      window.VikatChatHost = {
+        sendEmail(args) {
+          window.__sent.push(args);
+          return new Promise((resolve, reject) =>
+            setTimeout(() => (answer === 'throw' ? reject(new Error('Graph said no')) : resolve(answer)), delay),
+          );
+        },
+      };
+      if (save) window.VikatChatHost.saveEmailDraft = () => Promise.resolve(saved);
+    },
+    { answer, delay, save, saved: SAVED },
+  );
+  await page.evaluate((d) => window.VikatChatInternals.addDraft(d), draft);
+  await page.waitForSelector('.vk-draft');
+  return page;
+}
+
+const SENT = { ok: true, message: 'Sent to Priya Shah. It is in your Outlook Sent Items.' };
+
+test('without sendEmail, or without anyone to send to, an email card has no Send', async () => {
+  // The CEO's own deployment has no such page, and the portal without the hook
+  // only saves. A card with no To has nobody to send to: the rep addresses it
+  // in Outlook, from Drafts or a link.
+  for (const page of [await withDraft(ADDRESSED), await withHost(SAVED), await withSender(SENT, { draft: DRAFT })]) {
+    assert.equal(await page.$$eval('.vk-draft-send', (n) => n.length), 0);
+    await page.close();
+  }
+});
+
+test('a host that can send gets Send, behind Save to Outlook Drafts', async () => {
+  const page = await withSender(SENT);
+
+  const send = await page.$$eval('.vk-draft-send', (n) =>
+    n.map((b) => ({ text: b.textContent, main: b.classList.contains('vk-draft-mail-main'), tag: b.tagName })),
+  );
+  assert.deepEqual(send, [{ text: 'Send', main: false, tag: 'BUTTON' }]);
+
+  // Saving still leads; Send sits after it and before the links.
+  const order = await page.$$eval('.vk-draft-foot > *', (n) => n.map((e) => e.textContent));
+  assert.ok(order.indexOf('Save to Outlook Drafts') < order.indexOf('Send'), order.join(' | '));
+  assert.ok(order.indexOf('Send') < order.indexOf('Open in Outlook'), order.join(' | '));
+  assert.deepEqual(await page.$$eval('.vk-draft-mail-main', (n) => n.map((a) => a.textContent)), ['Save to Outlook Drafts']);
+  await page.close();
+
+  // Without a save, the Outlook link keeps the lead. Sending is never it.
+  const alone = await withSender(SENT, { save: false });
+  assert.equal(await alone.$$eval('.vk-draft-send', (n) => n.length), 1);
+  assert.deepEqual(await alone.$$eval('.vk-draft-mail-main', (n) => n.map((a) => a.textContent)), ['Open in Outlook']);
+  await alone.close();
+});
+
+test('sending hands the host exactly what is on the card', async () => {
+  const page = await withSender(SENT);
+
+  await page.click('.vk-draft-send');
+  await page.waitForFunction(() => window.__sent.length === 1, null, { timeout: 5000 });
+  assert.deepEqual(await page.evaluate(() => window.__sent[0]), {
+    to: ADDRESSED.to,
+    subject: ADDRESSED.subject,
+    body: ADDRESSED.body,
+  });
+
+  await page.close();
+});
+
+test('a double click sends once', async () => {
+  // Two clicks would be two e-mails in the prospect's inbox. The page asks
+  // first, but a second click must not even get that far.
+  const page = await withSender(SENT, { delay: 300 });
+
+  await page.dblclick('.vk-draft-send');
+  await page.click('.vk-draft-send', { force: true }).catch(() => {});
+  assert.equal(await page.$eval('.vk-draft-send', (b) => b.disabled), true, 'it waits, visibly');
+
+  await page.waitForFunction(() => /Sent Items/.test(document.querySelector('.vk-draft-sent').textContent), null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.__sent.length), 1);
+
+  await page.close();
+});
+
+test("the host's answer is shown on the card, and a sent email stays sent", async () => {
+  const page = await withSender(SENT);
+
+  await page.click('.vk-draft-send');
+  await page.waitForFunction(() => !document.querySelector('.vk-draft-sent').hidden && !/…$/.test(document.querySelector('.vk-draft-sent').textContent), null, { timeout: 5000 });
+
+  assert.equal(await page.textContent('.vk-draft-sent'), SENT.message);
+  assert.equal(await page.getAttribute('.vk-draft-sent', 'role'), 'status');
+  // Sent is sent. A second click would be a second e-mail.
+  assert.equal(await page.$eval('.vk-draft-send', (b) => b.disabled), true);
+  // And saving has its own line, untouched.
+  assert.equal(await page.$eval('.vk-draft-saved', (s) => s.hidden), true);
+
+  await page.close();
+});
+
+test('a send that did not go says so, and can be tried again', async () => {
+  const page = await withSender({ ok: false, message: 'Not sent.' });
+
+  await page.click('.vk-draft-send');
+  await page.waitForFunction(() => document.querySelector('.vk-draft-sent').textContent === 'Not sent.', null, { timeout: 5000 });
+  assert.equal(await page.$eval('.vk-draft-send', (b) => b.disabled), false);
+
+  await page.close();
+});
+
+test('a send hook that throws, or answers nonsense, is reported as not sent', async () => {
+  for (const answer of ['throw', 'yes', null]) {
+    const page = await withSender(answer);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+
+    await page.click('.vk-draft-send');
+    await page.waitForFunction(() => document.querySelector('.vk-draft-sent')?.textContent === 'Could not send the e-mail.', null, { timeout: 5000 });
+    assert.equal(await page.$eval('.vk-draft-send', (b) => b.disabled), false, `${answer}: it can be tried again`);
+    assert.deepEqual(errors, [], `${answer}: the card must not take the page down`);
+    await page.close();
+  }
+});
+
+test('only an email is offered to send', async () => {
+  // A Teams message with a To is still a chat, opened in Teams.
+  const page = await withSender(SENT, { draft: TEAMS });
+  assert.equal(await page.$$eval('.vk-draft-send', (n) => n.length), 0);
+  await page.close();
+});
+
 // --- a campaign is not a choice --------------------------------------------
 
 const CAMPAIGN = [1, 2, 3].map((n) => ({

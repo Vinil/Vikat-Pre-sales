@@ -14,8 +14,10 @@
  *           defer></script>
  *
  * Optional, from the embedding page: window.VikatChatHost.saveEmailDraft, which
- * puts "Save to Outlook Drafts" on email cards. See hostSaver() below and the
- * README section "Embedding: saving drafts in the rep's mailbox".
+ * puts "Save to Outlook Drafts" on email cards, and .sendEmail, which puts Send
+ * on the ones with a recipient. See hostSaver() and hostSender() below and the
+ * README sections "Embedding: saving drafts in the rep's mailbox" and
+ * "Embedding: sending from the rep's mailbox".
  *
  * AUDIENCE: authenticated Vikat employees. The backend refuses anonymous
  * requests, so a 401 here means "your SSO session lapsed", not "sign up".
@@ -686,6 +688,25 @@
     return host && typeof host.saveEmailDraft === 'function' ? host : null;
   }
 
+  /**
+   * The embedding page's way to send the email from the rep's own mailbox, if
+   * it has one. Same reasoning as hostSaver(): the permission is the page's,
+   * delegated by the rep, never the assistant's.
+   *
+   *   window.VikatChatHost = {
+   *     sendEmail: async ({ to, subject, body }) =>
+   *       ({ ok: true | false, message: 'text for the rep' }),
+   *   };
+   *
+   * The page asks the rep before anything goes — it knows whose address it
+   * is, and what sending from there means — so the card does not ask twice.
+   * Absent, and there is no Send.
+   */
+  function hostSender() {
+    var host = window.VikatChatHost;
+    return host && typeof host.sendEmail === 'function' ? host : null;
+  }
+
   /** A link the rep can be sent to: https, or nothing. */
   function httpsOnly(url) {
     try {
@@ -768,6 +789,66 @@
         .catch(function (err) {
           console.error('[vikat-chat] saving the draft to Outlook failed:', err);
           settle('Could not save the draft.', '', false);
+        });
+    });
+
+    return { button: button, status: status };
+  }
+
+  /**
+   * Send, and the line that says how it went.
+   *
+   * Built like saveToDrafts, for the same reasons and more: a second click
+   * there is a duplicate draft the rep can delete, and here it is a second
+   * email in the prospect's inbox. So the button is disabled before the host
+   * is called, one that went stays disabled, and one that did not can be
+   * tried again. Never the lead action — the rep should have read the email
+   * before this is the button they reach for.
+   *
+   * Whatever the host answers is shown as TEXT, and a throw, a rejection or
+   * an answer that is not an object all say the same thing.
+   */
+  function sendFromHost(draft) {
+    var button = el('button', 'vk-copy vk-draft-mail vk-draft-send', 'Send');
+    button.type = 'button';
+
+    var status = el('span', 'vk-draft-note vk-draft-sent');
+    status.setAttribute('role', 'status');
+    status.hidden = true;
+
+    var busy = false;
+
+    var settle = function (text, done) {
+      status.textContent = text;
+      status.hidden = false;
+      if (!done) {
+        busy = false;
+        button.disabled = false;
+      }
+    };
+
+    button.addEventListener('click', function () {
+      if (busy) return;
+      busy = true;
+      button.disabled = true;
+      status.textContent = 'Sending…';
+      status.hidden = false;
+
+      Promise.resolve()
+        .then(function () {
+          var host = hostSender();
+          if (!host) throw new Error('the page no longer offers sendEmail');
+          return host.sendEmail({ to: addressOf(draft), subject: draft.subject || '', body: draft.body });
+        })
+        .then(function (answer) {
+          if (!answer || typeof answer !== 'object') throw new Error('sendEmail answered ' + String(answer));
+          var ok = answer.ok === true;
+          var said = typeof answer.message === 'string' ? answer.message.trim() : '';
+          settle(said || (ok ? 'Sent from your Outlook.' : 'Could not send the e-mail.'), ok);
+        })
+        .catch(function (err) {
+          console.error('[vikat-chat] sending the email failed:', err);
+          settle('Could not send the e-mail.', false);
         });
     });
 
@@ -959,6 +1040,11 @@
       var saver = hostSaver() ? saveToDrafts(draft) : null;
       if (saver) foot.appendChild(saver.button);
 
+      // Sending needs somebody to send to; without a To the rep addresses it
+      // in Outlook, from Drafts or a link.
+      var sender = hostSender() && addressOf(draft) ? sendFromHost(draft) : null;
+      if (sender) foot.appendChild(sender.button);
+
       var links = mailLinks(draft);
       links.forEach(function (link) {
         var main = link.primary && !saver;
@@ -979,6 +1065,7 @@
       }
 
       if (saver) foot.appendChild(saver.status);
+      if (sender) foot.appendChild(sender.status);
     }
 
     // Teams does have a link that fills in a message for a person, so this
