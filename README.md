@@ -458,6 +458,34 @@ shows the message and lets the rep try again; a throw, a rejection or an answer
 that is not an object shows "Could not save the draft." Without the hook — this
 repository's own deployment — the card is unchanged.
 
+## Embedding: sending from the rep's mailbox
+
+The same page can also offer to send, for the same reason: the permission is
+the rep's own, delegated to the page, never the assistant's.
+
+```js
+window.VikatChatHost = {
+  async saveEmailDraft({ to, subject, body }) { /* as above */ },
+  async sendEmail({ to, subject, body }) {
+    // ask the rep first — window.confirm with the address, say — then send
+    // with the rep's own delegated token
+    return { ok: true, message: 'Sent. It is in your Outlook Sent Items.' };
+  },
+};
+```
+
+When `sendEmail` is a function **and the card has a recipient**, the email
+card gets **Send**, after Save to Outlook Drafts and never the lead action. A
+card with no `to` has nobody to send to and gets no Send. The widget does not
+ask "are you sure?": the page does, before it sends, because it knows whose
+address it is and what sending from there means. The button is disabled from
+the click until the promise settles, so a double click calls the hook once,
+and one that went stays disabled — a second click would be a second email.
+`message` is shown on the card as text; `ok: false` shows it and lets the rep
+try again (a page whose confirm was declined answers that way too). A throw, a
+rejection or an answer that is not an object shows "Could not send the
+e-mail." Without the hook the card has no Send.
+
 ---
 
 ## Admin panel

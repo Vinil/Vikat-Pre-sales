@@ -779,12 +779,15 @@
 /* Saving into the rep's own Drafts, through the page around the assistant.
    A button rather than a link — nothing is opened — so it borrows the link
    look and adds a waiting state: disabled from the click until the page
-   answers, and for good once the draft exists. */
-.vk-draft-save[disabled] {
+   answers, and for good once the draft exists. Send, the same way and for
+   the same reason: for good once the email has gone. */
+.vk-draft-save[disabled],
+.vk-draft-send[disabled] {
   opacity: 0.6;
   cursor: default;
 }
-.vk-draft-save[disabled]:hover { background: none; }
+.vk-draft-save[disabled]:hover,
+.vk-draft-send[disabled]:hover { background: none; }
 
 /* Why there is no button: a mail client truncates a long URL silently, and a
    half-written email with no warning is worse than a copy. */
