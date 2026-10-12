@@ -1,6 +1,0 @@
-node_modules/
-.env
-# Meeting transcripts, audio and bookmarks. Client-confidential and this
-# repository is public: nothing under sessions/ is ever committed.
-sessions/*
-!sessions/.gitkeep

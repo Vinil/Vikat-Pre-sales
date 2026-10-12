@@ -26,7 +26,6 @@ jobs:
         run: |
           npm --prefix scripts install --no-audit --no-fund
           npm --prefix worker install --no-audit --no-fund
-          npm --prefix live-meeting-insights ci --no-audit --no-fund
 
       # Build the Worker the way the deploy does.
       #
@@ -59,9 +58,3 @@ jobs:
       # call them out so a failure here is legible in the checks list.
       - name: Guards
         run: npm --prefix worker run check:abstractions
-
-      - name: Live meeting insights
-        working-directory: live-meeting-insights
-        run: |
-          npm run typecheck
-          npm test
