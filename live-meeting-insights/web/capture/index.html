@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meeting Capture</title>
+  <link rel="stylesheet" href="../shared/styles.css" />
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content: space-between">
+    <h1>Meeting capture</h1>
+    <span id="rec" class="rec">Recording and transcribing</span>
+  </div>
+
+  <div class="card">
+    <h2>Sources</h2>
+    <label for="clientSource">Client audio (the other side of the call)</label>
+    <select id="clientSource">
+      <option value="device">Audio device: BlackHole or similar (any app: Teams, Zoom, Meet, Webex)</option>
+      <option value="tab">Browser tab: a meeting open in this Chrome window</option>
+      <option value="mic-only">None: in-person meeting, microphone only</option>
+    </select>
+    <div id="clientDeviceRow">
+      <label for="clientDevice">Client audio device</label>
+      <select id="clientDevice"></select>
+    </div>
+    <label for="micDevice">Your microphone</label>
+    <select id="micDevice"></select>
+    <p class="small muted" id="deviceHint"></p>
+    <button id="unlockDevices" type="button" hidden>Show device names</button>
+  </div>
+
+  <div class="card">
+    <label class="consent">
+      <input type="checkbox" id="consent" />
+      <span>Everyone in this meeting knows it is being transcribed, and has agreed to it.</span>
+    </label>
+    <div class="row" style="margin-top: 12px">
+      <button id="start" class="primary" disabled>Start</button>
+      <button id="stop" disabled>Stop</button>
+      <span id="conn" class="pill">Not connected</span>
+    </div>
+    <p id="err" class="error small" hidden></p>
+  </div>
+
+  <div class="card">
+    <h2>Levels</h2>
+    <div class="meter"><span>Client</span><div class="bar"><div class="fill" id="lvl-client"></div></div><span class="db" id="db-client">-</span></div>
+    <div class="meter"><span>Me</span><div class="bar"><div class="fill" id="lvl-me"></div></div><span class="db" id="db-me">-</span></div>
+    <p class="small muted" id="stats">Idle.</p>
+  </div>
+
+  <p class="small muted">Use headphones, so your microphone does not pick up the client's voice from the speakers.
+    The insights panel is at <a href="../insights/">/insights/</a>. Keep it off any screen you share.</p>
+</main>
+<script type="module" src="./capture.js"></script>
+</body>
+</html>

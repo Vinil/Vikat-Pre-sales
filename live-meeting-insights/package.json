@@ -1,0 +1,25 @@
+{
+  "name": "live-meeting-insights",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private, real-time insights from your own client meetings. Local only.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "tsx src/server/index.ts",
+    "dev": "tsx watch src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "session:list": "tsx src/scripts/sessions.ts list",
+    "session:delete": "tsx src/scripts/sessions.ts delete"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

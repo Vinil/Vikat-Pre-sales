@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Meeting Insights</title>
+  <link rel="stylesheet" href="../shared/styles.css" />
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content: space-between">
+    <h1>Insights</h1>
+    <span id="conn" class="pill">Connecting</span>
+  </div>
+
+  <div class="card">
+    <h2>Now</h2>
+    <div class="headline muted" id="headline">Waiting for a meeting to start.</div>
+  </div>
+
+  <div class="card">
+    <h2>Audio received by the server</h2>
+    <div class="meter"><span>Client</span><div class="bar"><div class="fill" id="lvl-client"></div></div><span class="db" id="db-client">-</span></div>
+    <div class="meter"><span>Me</span><div class="bar"><div class="fill" id="lvl-me"></div></div><span class="db" id="db-me">-</span></div>
+    <p class="small muted mono" id="session">No session.</p>
+  </div>
+
+  <div class="card">
+    <h2>Transcript</h2>
+    <p class="small muted">Live transcript arrives in milestone 2.</p>
+  </div>
+</main>
+<script type="module" src="./insights.js"></script>
+</body>
+</html>
