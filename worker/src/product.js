@@ -26,6 +26,33 @@
  */
 
 /**
+ * The product, tidied, or null when there is no product to speak of.
+ *
+ * A product with no name is not one. Every sentence written for a product
+ * names it, and with a blank name they read "the rep is selling ." and "Use
+ * the name .": worse than saying nothing, so a blank name means what no
+ * product means. The page that sends a product should never send that, and
+ * this is where it does not matter whether it did.
+ *
+ * Every entry point (the prompt, the deck brand, the outreach check) passes
+ * what it was given through here first, so the rest of the code can take a
+ * product's name and definition as they are: trimmed strings, the name never
+ * empty, the definition possibly so.
+ *
+ * @param {unknown} product
+ * @returns {Product|null}
+ */
+export function productOf(product) {
+  if (!product || typeof product !== 'object') return null;
+
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const name = text(product.name);
+  if (!name) return null;
+
+  return { key: text(product.key), name, definition: text(product.definition), line: text(product.line) };
+}
+
+/**
  * Is this conversation on the security line, where everything written so far
  * already applies?
  *
@@ -35,10 +62,11 @@
  * slide is the failure this exists to stop, and the only other line there is
  * today is Engineering.
  *
- * @param {Product|null|undefined} product
+ * @param {unknown} product
  */
 export function sellsSecurity(product) {
-  return !product || product.line === 'security';
+  const p = productOf(product);
+  return !p || p.line === 'security';
 }
 
 /**
@@ -51,10 +79,14 @@ export function sellsSecurity(product) {
  * claim and which part is the list, so the cut is the writer's own rather
  * than a paraphrase of it. Empty when there is no definition to cut.
  *
+ * Whatever the claim already ended in goes before the full stop does: "Ship
+ * faster!" would otherwise go on the cover as "Ship faster!.", and the house
+ * copy check flags a deck for the exclamation point.
+ *
  * @param {string|null|undefined} definition
  * @returns {string}
  */
 export function definitionHeadline(definition) {
-  const head = String(definition || '').split(':')[0].trim().replace(/[\s.]+$/, '');
+  const head = String(definition || '').split(':')[0].trim().replace(/[\s.!?…]+$/, '');
   return head ? `${head}.` : '';
 }

@@ -19,7 +19,7 @@
 import disclosure from './knowledge/disclosure.json' with { type: 'json' };
 import { ARTICULATION_BLOCK } from './articulation.js';
 import { EXEC_OUTREACH_BLOCK } from './execOutreach.js';
-import { sellsSecurity } from './product.js';
+import { productOf, sellsSecurity } from './product.js';
 
 /** The invariant part of the prompt. Must not interpolate per-request values. */
 /**
@@ -432,8 +432,7 @@ const asSentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
 const HOUSE = (product) => {
   if (sellsSecurity(product)) return HOUSE_RULES;
 
-  const name = String(product.name || '').trim();
-  const definition = String(product.definition || '').trim();
+  const { name, definition } = product;
 
   return swap(HOUSE_RULES, [
     [
@@ -640,7 +639,7 @@ system tags in your reply.`;
 const APP = (cfg, product) => {
   if (sellsSecurity(product)) return APP_RULES(cfg);
 
-  const name = String(product.name || '').trim();
+  const { name } = product;
 
   return swap(APP_RULES(cfg), [
     [
@@ -744,8 +743,7 @@ not put internal or system tags in your reply.`;
 function companyLine(product) {
   if (!product) return 'an enterprise agentic AI security and data platform company.';
 
-  const name = String(product.name || '').trim();
-  const definition = String(product.definition || '').trim();
+  const { name, definition } = product;
   const selling = definition
     ? `In this conversation the rep is selling ${name}: ${asSentence(definition)}`
     : `In this conversation the rep is selling ${name}.`;
@@ -917,8 +915,10 @@ export function systemParts(
   sessionContext = {},
   { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on', product = null } = {},
 ) {
+  // Tidied once, here: a product with no name is no product, and everything
+  // below takes the name and definition as trimmed strings (see productOf).
   const stable = [
-    persona(cfg, toolsAvailable, webAvailable && toolsAvailable, product),
+    persona(cfg, toolsAvailable, webAvailable && toolsAvailable, productOf(product)),
     knowledgeBlock,
   ].join('\n\n');
 

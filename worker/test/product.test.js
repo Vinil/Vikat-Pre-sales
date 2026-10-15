@@ -29,6 +29,7 @@ import { renderPptx } from '../src/documents/pptx.js';
 import { normaliseSpec } from '../src/documents/spec.js';
 import { loadFonts } from '../src/documents/fonts.js';
 import { checkExecOutreach } from '../src/execOutreach.js';
+import { definitionHeadline } from '../src/product.js';
 import { runTool } from '../src/tools.js';
 import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
@@ -366,4 +367,52 @@ test('create_document builds for the product in the tool context', async () => {
   const none = await build(undefined);
   assert.ok(none.words.includes(WORDMARK_TAG));
   assert.match(none.result.content, /not a line this company uses/);
+});
+
+// --- What does not count as a product ----------------------------------------
+
+test('a product with no name is no product', () => {
+  // Every sentence written for a product names it. With a blank name they
+  // read "the rep is selling ." and "Use the name .", so a blank name means
+  // what no product means: the prompt, the deck and the check as they were.
+  const line = 'Vikat is the company behind Vikat Engineering.';
+  for (const blank of [
+    { ...ENGINEERING, name: '' },
+    { ...ENGINEERING, name: '   ' },
+    { ...ENGINEERING, name: undefined },
+    { ...ENGINEERING, name: 42 },
+  ]) {
+    const label = JSON.stringify(blank.name);
+    assert.equal(withTools(blank), fixture('prompt-55d72a5-tools.txt'), `tools, name ${label}`);
+    assert.equal(withoutTools(blank), fixture('prompt-55d72a5-no-tools.txt'), `no tools, name ${label}`);
+    assert.deepEqual(brandFor(blank), brandFor(null), `brand, name ${label}`);
+    assert.deepEqual(deck(blank), deck(null), `deck, name ${label}`);
+    assert.deepEqual(
+      checkExecOutreach(outreach(line), { product: blank }),
+      checkExecOutreach(outreach(line)),
+      `outreach, name ${label}`,
+    );
+  }
+});
+
+// --- The headline ----------------------------------------------------------
+
+test('a headline ends in one full stop, whatever it ended in', () => {
+  // "Ship faster!." on a cover is the writer's line with a typo added, and the
+  // house copy check then flags the deck for the exclamation point.
+  for (const [definition, headline] of [
+    ['Ship faster!: QA automation and DevOps', 'Ship faster.'],
+    ['Ship faster?', 'Ship faster.'],
+    ['Ship faster…: QA automation', 'Ship faster.'],
+    ['Ship faster!?. : QA automation', 'Ship faster.'],
+    ['Ship faster', 'Ship faster.'],
+    ['Engineering capacity from Vikat for software companies and digital teams: product development', ENGINEERING_HEADLINE],
+    ['', ''],
+    [' ! ', ''],
+  ]) {
+    assert.equal(definitionHeadline(definition), headline, JSON.stringify(definition));
+  }
+
+  const cover = textOf(slides(deck({ ...ENGINEERING, definition: 'Ship faster!' }))[0]);
+  assert.ok(cover.includes('Ship faster.') && !cover.includes('!'), cover);
 });

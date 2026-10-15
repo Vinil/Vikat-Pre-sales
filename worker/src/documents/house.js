@@ -18,7 +18,7 @@
  * checked from the XML, and what cannot is said plainly rather than implied.
  */
 
-import { sellsSecurity, definitionHeadline } from '../product.js';
+import { productOf, sellsSecurity, definitionHeadline } from '../product.js';
 
 // --- §4.1 Colour ----------------------------------------------------------
 
@@ -293,7 +293,9 @@ export const ENGINEERING_TAG = 'VIKAT  ENGINEERING';
  *             whoWeAre: { eyebrow: string, title: string, points: string[] } }}
  */
 export function brandFor(product) {
-  if (sellsSecurity(product)) {
+  // A product with no name is no product (productOf), and gets today's deck.
+  const p = productOf(product);
+  if (sellsSecurity(p)) {
     return {
       tag: WORDMARK_TAG,
       positioningLine: POSITIONING_LINE,
@@ -305,7 +307,7 @@ export function brandFor(product) {
 
   return {
     tag: ENGINEERING_TAG,
-    positioningLine: definitionHeadline(product.definition) || null,
+    positioningLine: definitionHeadline(p.definition) || null,
     deckTagline: null,
     suite: false,
     whoWeAre: { ...WHO_WE_ARE, points: WHO_WE_ARE.points.filter((p) => p !== INTO_THE_GRAPH) },

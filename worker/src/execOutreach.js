@@ -23,7 +23,7 @@
  * reading it.
  */
 
-import { sellsSecurity, definitionHeadline } from './product.js';
+import { productOf, sellsSecurity, definitionHeadline } from './product.js';
 
 /**
  * What the model is told, so that most of the checks below never fire.
@@ -294,7 +294,7 @@ function inProductWords(sentence, product) {
 /** What to say instead, for the product the document is about. */
 function realLinesFor(product) {
   if (!product) return REAL_LINES;
-  const name = String(product.name || '').trim();
+  const { name } = product;
   const headline = definitionHeadline(product.definition);
   if (sellsSecurity(product)) return `${REAL_LINES}, or name ${name}`;
   return headline ? `"${headline}" (the ${name} definition), or name ${name}` : `the name ${name}`;
@@ -569,19 +569,21 @@ export function checkExecOutreach(spec, opts = {}) {
     }
   }
 
-  // A self-description nobody approved.
+  // A self-description nobody approved. A product with no name is no product
+  // (productOf): it sanctions nothing, and there is no name to point at.
+  const product = productOf(opts.product);
   const described = SELF_DESCRIPTION.exec(text);
   const sentence = described ? text.slice(described.index).split(/(?<=[.!?])\s|\n/)[0] : '';
   if (
     customerFacing &&
     described &&
     !SANCTIONED_SELF.some((re) => re.test(described[1])) &&
-    !inProductWords(sentence, opts.product)
+    !inProductWords(sentence, product)
   ) {
     problems.push(
       `"Vikat is ${described[1].trim()}" is not a line this company uses anywhere. Saying who we are ` +
         'is the one sentence that has to be the same every time, and it has been different in every ' +
-        `document. Use ${realLinesFor(opts.product)}.`,
+        `document. Use ${realLinesFor(product)}.`,
     );
   }
 
