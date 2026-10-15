@@ -603,6 +603,11 @@ works if the front end is ever hosted separately.
 - Open `/admin.html` as a non-admin. It must refuse.
 - As an admin, add an approved knowledge entry and confirm the assistant uses
   it on the next message without a redeploy.
+- Open Positioning and Customer proof in the admin panel. Text saved before
+  line breaks were kept is stored on one line, and saving it again cannot bring
+  them back: put them back by hand, every `Never print:` at the start of its
+  own line, and save. Until then Customer proof says a `Never print:` does not
+  start its own line, and the assistant gets none of the proof.
 - Open the Collateral tab. Documents must list with summaries, search must
   filter them, and a link must open the file in SharePoint.
 - Ask the chat for a deck on a topic you know is in SharePoint. It must return

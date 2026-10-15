@@ -765,6 +765,73 @@ test('the "Never print" rule still works after a save', async () => {
   }
 });
 
+test('customer proof saved before the lines were kept is withheld, and the panel says why', async () => {
+  // Saving it again cannot repair it: the line breaks are already gone, and
+  // nothing can tell where "Reiter" ends and "Problem" begins. Until a person
+  // puts them back, every chat would still hand the model the name — so the
+  // block is withheld, and the panel says what to do about it.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const flat = 'Who: the world’s largest berry producerNever print: Reiter Affiliated, ReiterProblem: slow auditsOutcome: 40% faster';
+  await storage.saveSetting(REFERENCES_KEY, { content: flat }, ADMIN.email);
+
+  assert.equal(referencesBlock(await storage.getSetting(REFERENCES_KEY)), '', 'the protected name reached the model');
+
+  const read = await (await call('/admin/references', 'GET', ctx)).json();
+  assert.equal(read.content, flat, 'what is stored is shown as it is, to be fixed');
+  assert.match(read.warning, /"Never print:"/);
+  assert.match(read.warning, /own line/);
+
+  // Saved again as it is: still withheld, and the save says so instead of "Saved."
+  const again = await (await call('/admin/references', 'PUT', ctx, { content: flat })).json();
+  assert.equal(again.note, again.warning);
+  assert.match(again.warning, /"Never print:"/);
+
+  // With the lines back, the proof is used again and the warning is gone.
+  const fixed = await (
+    await call('/admin/references', 'PUT', ctx, {
+      content: 'Who: the world’s largest berry producer\nNever print: Reiter Affiliated, Reiter\nProblem: slow audits\nOutcome: 40% faster',
+    })
+  ).json();
+  assert.equal(fixed.warning, undefined);
+  assert.match(fixed.note, /^Saved\./);
+  assert.equal((await (await call('/admin/references', 'GET', ctx)).json()).warning, undefined);
+  const block = referencesBlock(await storage.getSetting(REFERENCES_KEY));
+  assert.match(block, /Problem: slow audits/);
+  assert.doesNotMatch(block, /Reiter/);
+});
+
+test('a "Never print:" the rule cannot read withholds the proof, wherever it is on its line', () => {
+  // The rule reads a "Never print:" that starts its own line, and only that.
+  // One written after other words, or as a bullet, is still in the text the
+  // model would get — with the name on it.
+  for (const content of [
+    'Who: the world’s largest berry producer. Never print: Reiter\nOutcome: 40% faster',
+    'Who: the world’s largest berry producer\n- Never print: Reiter\nOutcome: 40% faster',
+    'Who: the world’s largest berry producer\nOutcome: 40% faster   never print: Reiter',
+  ]) {
+    assert.equal(referencesBlock({ content }), '', JSON.stringify(content));
+  }
+
+  // At the start of a line, after spaces or not, it is read and stripped as before.
+  const block = referencesBlock({ content: 'Who: the world’s largest berry producer\n   Never print: Reiter\nOutcome: 40% faster' });
+  assert.match(block, /Outcome: 40% faster/);
+  assert.doesNotMatch(block, /Reiter/);
+});
+
+test('the references panel shows the warning it is sent', () => {
+  // Withheld proof with nothing on the panel to say so is proof that quietly
+  // stopped being used.
+  const js = fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget/vikat-admin.js'),
+    'utf8',
+  );
+  const show = js.slice(js.indexOf('function showReferences'), js.indexOf('function loadReferences'));
+  assert.match(show, /\$\('#ref-status'\)\.textContent = r\.warning \|\| ''/);
+  assert.match(js, /toast\(r\.note \|\| 'Saved\.', Boolean\(r\.warning\)\)/, 'a save that is still withheld is not a plain "Saved."');
+});
+
 test('multi-line text loses control characters and tags, and keeps a < that is not one', async () => {
   const { cfg, storage } = setup();
   const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };

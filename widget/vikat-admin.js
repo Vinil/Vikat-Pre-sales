@@ -424,6 +424,10 @@
       ? 'Last saved ' + fmtDate(r.updatedAt) + (r.updatedBy ? ' by ' + r.updatedBy : '') + '.'
       : 'Nothing saved yet — outreach names no customers.';
 
+    // Beside the buttons, and for as long as it is true: proof the assistant
+    // is not getting looks exactly like proof it is, unless something says so.
+    $('#ref-status').textContent = r.warning || '';
+
     refCount();
   }
 
@@ -439,7 +443,7 @@
 
     api('/admin/references', { method: 'PUT', body: { content: $('#ref-content').value } })
       .then(function (r) {
-        toast(r.note || 'Saved.');
+        toast(r.note || 'Saved.', Boolean(r.warning));
         showReferences(r);
       })
       .catch(function () {})

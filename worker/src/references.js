@@ -67,6 +67,36 @@ export const REFERENCES_MAX_CHARS = 8000;
 const NEVER_PRINT = /^\s*never print\s*:\s*(.+)$/gim;
 
 /**
+ * A "Never print:" the rule above cannot read: one with other words before it
+ * on its line, a bullet included.
+ *
+ * Most of these were not written that way. Until the admin panel kept line
+ * breaks, every save of customer proof deleted them, so a record saved then
+ * reads "producerNever print: Reiter Affiliated, ReiterProblem: …" — one line,
+ * with the rule's anchor nowhere near the name. Saving it again cannot repair
+ * it: nothing can tell where the names end. Only a person can, by putting the
+ * lines back.
+ */
+const UNREAD_NEVER_PRINT = /\S[^\S\n]*never print\s*:/i;
+
+/**
+ * Whether the saved proof holds a "Never print:" the rule cannot read, so that
+ * its names would reach the model. While it does, referencesBlock() withholds
+ * the whole block, and the admin panel says why.
+ *
+ * @param {{content?: string}|null} saved
+ */
+export function hasUnreadNeverPrint(saved) {
+  return UNREAD_NEVER_PRINT.test(String(saved?.content || '').replace(NEVER_PRINT, ''));
+}
+
+/** What the panel says while that is so. */
+export const UNREAD_NEVER_PRINT_WARNING =
+  'A "Never print:" here does not start its own line, so the name on it would reach the assistant. ' +
+  'Until every "Never print:" starts its own line, the assistant gets none of this customer proof. ' +
+  'Text saved before line breaks were kept lost them: put them back and save.';
+
+/**
  * Names that must not appear in anything a customer reads.
  *
  * @param {{content?: string}|null} saved
@@ -116,6 +146,11 @@ export function referencesBlock(saved) {
   // model would hand it the name the line exists to protect.
   const content = String(saved?.content || '').replace(NEVER_PRINT, '').trim();
   if (!content) return '';
+
+  // And one that could not be stripped withholds the lot. No proof in a chat
+  // is the safe default this file already falls back to; a protected name in
+  // one is the failure it exists to prevent.
+  if (hasUnreadNeverPrint(saved)) return '';
 
   return [
     '<references authority="verbatim">',
