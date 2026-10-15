@@ -444,6 +444,26 @@ function coverSlide(spec, meta, fonts) {
   );
 }
 
+/** How wide the cover sets its positioning line. */
+const COVER_LINE_WIDTH = CONTENT_WIDTH * 0.8;
+
+/**
+ * The most lines a positioning line may take, at the cover's width.
+ *
+ * The instruction set's line takes one. Another product's is its definition's
+ * headline, and a definition with no colon in it is all headline, up to the
+ * 600 characters the portal allows. That is a paragraph. Under the longest
+ * title and subtitle the spec allows, the cover has room for three lines
+ * above the wave and a fourth runs into it, so three is the limit (a test
+ * holds that worst case). On the narrower close the same words take up to
+ * four lines, and grow up into the room the tagline leaves (see closeLine).
+ *
+ * Past three, the line goes on neither slide. A cover without its line is a
+ * shorter cover; one with a paragraph over its artwork is a broken one, and
+ * nothing here may write a shorter line in its place.
+ */
+const POSITIONING_LINES = 3;
+
 /**
  * The cover's positioning line and tagline, set as one line in two voices.
  *
@@ -471,7 +491,7 @@ function coverLine(y, fonts) {
   ].filter(Boolean);
   if (!runs.length) return '';
 
-  const width = CONTENT_WIDTH * 0.8;
+  const width = COVER_LINE_WIDTH;
   const h = Math.max(0.34, heightOf(runs.map((r) => r.text).join(''), fonts.body, SIZE.coverSub, width, 1.3));
   return inlineText({ x: M.left, y, w: width, h }, runs);
 }
@@ -1195,7 +1215,7 @@ function contentSlide(spec, section, meta, pageLabel, fonts) {
  * own more often than any other and the four things it must carry are the
  * four things nobody puts back by hand.
  */
-function closingSlide(spec, meta) {
+function closingSlide(spec, meta, fonts) {
   const shapes = [
     rect({ x: 0, y: 0, w: SLIDE.widthIn, h: SLIDE.heightIn }, gradientFill()),
     wordmark(M.left, 1.3, true),
@@ -1207,11 +1227,7 @@ function closingSlide(spec, meta) {
         ])
       : '',
 
-    brand.positioningLine
-      ? text({ x: M.left, y: 3.62, w: CONTENT_WIDTH * 0.62, h: 0.5 }, [
-          { text: brand.positioningLine, role: 'body', size: SIZE.coverSub, lineHeight: 1.4, color: ON_NAVY.body },
-        ])
-      : '',
+    closeLine(fonts),
 
     text({ x: M.left, y: 4.34, w: CONTENT_WIDTH * 0.7, h: 0.4 }, [
       { text: meta.preparedBy, role: 'body', size: SIZE.body, lineHeight: 1.4, color: ON_NAVY.body },
@@ -1230,6 +1246,32 @@ function closingSlide(spec, meta) {
   ];
 
   return slideXml(shapes.join(''), bg(COLOR.deepNavy));
+}
+
+/**
+ * The close's positioning line.
+ *
+ * Its box was sized for the instruction set's line, which is one line, and for
+ * that line it is still the box it was: 0.5 high, at 3.62. Another product's
+ * line is its definition's headline, up to four lines here (POSITIONING_LINES
+ * is counted at the wider cover), and a fixed box let it run over "prepared
+ * by" and the disclaimer while the box itself sat neatly inside the slide.
+ *
+ * So the box is measured, keeps its bottom edge, and grows UP, into the room
+ * the tagline would have: a deck that has a tagline carries the instruction
+ * set's one line, which never grows, and on a deck without one nothing else is
+ * there. Growing down instead moves the disclaimer block into the wave and the
+ * footer within two extra lines; growing up moves nothing else at all.
+ */
+function closeLine(fonts) {
+  if (!brand.positioningLine) return '';
+
+  const width = CONTENT_WIDTH * 0.62;
+  const bottom = 3.62 + 0.5;
+  const h = Math.max(0.5, heightOf(brand.positioningLine, fonts.body, SIZE.coverSub, width, 1.4));
+  return text({ x: M.left, y: bottom - h, w: width, h }, [
+    { text: brand.positioningLine, role: 'body', size: SIZE.coverSub, lineHeight: 1.4, color: ON_NAVY.body },
+  ]);
 }
 
 /**
@@ -1302,6 +1344,16 @@ export function renderPptx(spec, meta, fonts) {
   comp.resetIds();
   brand = brandFor(meta.product);
 
+  // A positioning line is a line: past POSITIONING_LINES it is a paragraph,
+  // and goes on neither the cover nor the close. The instruction set's is one
+  // line and never reaches this.
+  if (
+    brand.positioningLine &&
+    wrap(brand.positioningLine, fonts.body, SIZE.coverSub, COVER_LINE_WIDTH * 72).length > POSITIONING_LINES
+  ) {
+    brand = { ...brand, positioningLine: null };
+  }
+
   const date = meta.isoDate.slice(0, 10);
   const year = Number(date.slice(0, 4));
   const context = { date, year, preparedBy: meta.preparedBy };
@@ -1326,7 +1378,7 @@ export function renderPptx(spec, meta, fonts) {
       return carriesModeledFigure(sectionText(s)) ? withDataNote(built) : built;
     }),
     ...(wantsWhoWeAre ? [whoWeAreSlide(spec, context, `${total - 1} / ${total}`, fonts)] : []),
-    closingSlide(spec, context),
+    closingSlide(spec, context, fonts),
   ];
 
   /** @type {Record<string, Uint8Array>} */

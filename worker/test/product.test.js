@@ -28,6 +28,7 @@ import {
 import { renderPptx } from '../src/documents/pptx.js';
 import { normaliseSpec } from '../src/documents/spec.js';
 import { loadFonts } from '../src/documents/fonts.js';
+import { wrap } from '../src/documents/measure.js';
 import { checkExecOutreach } from '../src/execOutreach.js';
 import { definitionHeadline } from '../src/product.js';
 import { runTool } from '../src/tools.js';
@@ -229,13 +230,14 @@ const DECK = [
   'From the team’s own sprint reports.',
 ].join('\n');
 
-function deck(product) {
+function deck(product, spec = {}) {
   const parsed = normaliseSpec({
     format: 'pptx',
     title: 'Release faster at Northwind',
     audience: 'Northwind',
     disclosure: 'internal_only',
     content: DECK,
+    ...spec,
   });
   assert.equal(parsed.ok, true, parsed.error);
   return renderPptx(
@@ -415,4 +417,155 @@ test('a headline ends in one full stop, whatever it ended in', () => {
 
   const cover = textOf(slides(deck({ ...ENGINEERING, definition: 'Ship faster!' }))[0]);
   assert.ok(cover.includes('Ship faster.') && !cover.includes('!'), cover);
+});
+
+// --- The cover and the close, whatever the headline ---------------------------
+//
+// The instruction set's line is one line, and both slides were laid out for
+// it. Another product's line is its definition's headline: the text before the
+// first colon, which is the whole definition when there is no colon, up to the
+// 600 characters the portal allows.
+//
+// inspectPptx cannot see this go wrong. A one-line box at a fixed height sits
+// inside the slide and overlaps nothing; it is the TEXT in it that runs over
+// "prepared by" and the disclaimer. So these measure the words against the
+// box as well as the boxes against each other.
+
+/** A definition with no colon in it, so all of it is the headline: about 340 characters. */
+const NO_COLON_LONG =
+  'Engineering capacity from Vikat for software companies and digital teams, covering product ' +
+  'development, QA automation, DevOps and cloud, and AI and agentic-AI engineering, delivered as ' +
+  'projects or as dedicated teams that work inside the customer’s own sprint cadence, tooling and code ' +
+  'review, with named engineers and a delivery lead reporting weekly.';
+
+/** The longest title and subtitle the spec takes, which push the cover line furthest down. */
+const CROWDED = {
+  title: 'Northwind ships every two weeks and spends most of each sprint waiting on regression tests',
+  subtitle:
+    'Most of the release cycle is spent waiting on a regression run that nobody owns and nobody can ' +
+    'shorten without help from outside the team, sprint after sprint.',
+};
+
+/** Where the footer row starts (the disclosure line). It is laid out on its own and is not checked here. */
+const FOOTER_TOP = 6.9;
+
+/**
+ * The boxes on a slide, in inches: each text box and picture above the
+ * footer, and the artwork (the wave) as one box around all of its bars.
+ */
+function layoutOf(xml) {
+  const boxes = [];
+  let art = null;
+  for (const [shape] of xml.matchAll(/<p:(sp|pic)>[\s\S]*?<\/p:\1>/g)) {
+    const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(shape);
+    const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(shape);
+    if (!off || !ext) continue;
+    const [x, y, w, h] = [off[1], off[2], ext[1], ext[2]].map((n) => Number(n) / 914400);
+    const words = textOf(shape);
+    const picture = shape.startsWith('<p:pic>');
+
+    if (w >= 13 && h >= 7) continue; // the ground
+    if (!words && !picture) {
+      const [left, top] = art ? [Math.min(art.x, x), Math.min(art.y, y)] : [x, y];
+      const [right, bottom] = art ? [Math.max(art.x + art.w, x + w), Math.max(art.y + art.h, y + h)] : [x + w, y + h];
+      art = { x: left, y: top, w: right - left, h: bottom - top };
+      continue;
+    }
+    if (y >= FOOTER_TOP) continue;
+
+    const size = /sz="(\d+)"/.exec(shape);
+    const spacing = /<a:spcPct val="(\d+)"\/>/.exec(shape);
+    boxes.push({
+      words: words || 'the lockup',
+      picture,
+      x, y, w, h,
+      size: size ? Number(size[1]) / 100 : 0,
+      lineHeight: spacing ? Number(spacing[1]) / 100000 : 0,
+    });
+  }
+  return { boxes, art };
+}
+
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * No box runs into another, into the wave or into the footer.
+ *
+ * On the cover the lockup is left out of the pairs: the eyebrow is set inside
+ * the clear space its picture box carries, on every deck, product or none.
+ */
+function assertApart(xml, label, { lockup = true } = {}) {
+  const { boxes, art } = layoutOf(xml);
+  const checked = boxes.filter((b) => lockup || !b.picture);
+  for (const [i, a] of checked.entries()) {
+    for (const b of checked.slice(i + 1)) {
+      assert.ok(!overlap(a, b), `${label}: "${a.words.slice(0, 30)}" runs into "${b.words.slice(0, 30)}"`);
+    }
+    if (art) assert.ok(!overlap(a, art), `${label}: "${a.words.slice(0, 30)}" runs into the wave`);
+    assert.ok(a.y + a.h <= FOOTER_TOP, `${label}: "${a.words.slice(0, 30)}" runs into the footer`);
+  }
+}
+
+/** The box that carries this line, checked to be tall enough for it: the words, not just the box. */
+function lineBox(xml, line, label) {
+  const box = layoutOf(xml).boxes.find((b) => b.words === line);
+  if (!box) return null;
+  const body = loadFonts().metrics.body;
+  const lines = wrap(line, body, box.size, box.w * 72).length;
+  const needs = (lines * box.size * box.lineHeight * body.naturalLineHeight) / 72;
+  assert.ok(needs <= box.h + 0.005, `${label}: ${lines} line(s) need ${needs.toFixed(2)}in, the box is ${box.h.toFixed(2)}in`);
+  return box;
+}
+
+test('the cover and the close keep the line inside its box and apart, however long the headline', () => {
+  for (const [label, definition] of [
+    ['the Engineering definition', ENGINEERING.definition],
+    ['no colon, about 200 characters', ENGINEERING.definition.replace(':', ',')],
+    ['no colon, about 340 characters', NO_COLON_LONG],
+    ['no colon, 600 characters', `${NO_COLON_LONG} ${NO_COLON_LONG}`.slice(0, 600)],
+    ['an empty definition', ''],
+  ]) {
+    const headline = definitionHeadline(definition);
+    for (const spec of [{}, CROWDED]) {
+      const built = slides(deck({ ...ENGINEERING, definition }, spec));
+      const [cover, close] = [built[0], built.at(-1)];
+      const where = `${label}${spec.title ? ', crowded cover' : ''}`;
+
+      assertApart(cover, `cover, ${where}`, { lockup: false });
+      assertApart(close, `close, ${where}`);
+
+      // Set whole or not at all, and on both slides or neither.
+      const onCover = Boolean(headline && lineBox(cover, headline, `cover, ${where}`));
+      const onClose = Boolean(headline && lineBox(close, headline, `close, ${where}`));
+      assert.equal(onCover, onClose, `${where}: on the cover ${onCover}, on the close ${onClose}`);
+    }
+  }
+});
+
+test('a headline that fits is set, and the close grows it into the room the tagline leaves', () => {
+  // The two that fit the cover. The one with no colon is three lines of the
+  // narrower close, which the close's one-line box never held.
+  for (const definition of [ENGINEERING.definition, ENGINEERING.definition.replace(':', ',')]) {
+    const headline = definitionHeadline(definition);
+    for (const spec of [{}, CROWDED]) {
+      const built = slides(deck({ ...ENGINEERING, definition }, spec));
+      const close = built.at(-1);
+      const line = lineBox(close, headline, 'close');
+      assert.ok(line, `the close has no line for ${JSON.stringify(definition.slice(0, 40))}`);
+      assert.ok(lineBox(built[0], headline, 'cover'), 'and the cover has it too');
+
+      // Its foot is where the one-line box's foot always was, so "prepared by"
+      // and the disclaimer block under it have not moved.
+      assert.ok(Math.abs(line.y + line.h - 4.12) < 0.01, `the line ends at ${line.y + line.h}`);
+      const by = layoutOf(close).boxes.find((b) => b.words === 'rep@vikat.ai');
+      assert.ok(Math.abs(by.y - 4.34) < 0.01, `"prepared by" moved to ${by.y}`);
+    }
+  }
+});
+
+test('a headline too long for a cover goes on neither the cover nor the close', () => {
+  const definition = `${NO_COLON_LONG} ${NO_COLON_LONG}`.slice(0, 600);
+  const built = slides(deck({ ...ENGINEERING, definition }));
+  assert.ok(!built.map(textOf).join(' ').includes(definition.slice(0, 60)), 'a paragraph was set as a cover line');
+  assert.ok(textOf(built.at(-1)).includes('VIKAT  ENGINEERING'), 'the close is still the close');
 });
