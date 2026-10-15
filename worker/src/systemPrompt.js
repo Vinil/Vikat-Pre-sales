@@ -775,6 +775,28 @@ function companyLine(product) {
 }
 
 /**
+ * What the positioning statement is, in a conversation about a product off
+ * the security line.
+ *
+ * The statement is one setting for the whole company (positioning.js), and the
+ * paragraph above this says it wins and to lead with it whenever Vikat is
+ * explained. Written for the security line, as it has been until now, that
+ * would have an Engineering conversation open with CyberSec, whatever the
+ * opening of the persona says. Written for every product, it holds a part
+ * about this one, and that is the part to lead with.
+ *
+ * On the security line, and with no product, there is nothing to add: the
+ * statement and the conversation are about the same thing.
+ *
+ * @param {import('./product.js').Product|null|undefined} product
+ */
+function positioningScope(product) {
+  if (sellsSecurity(product)) return '';
+  const { name } = product;
+  return `\n\nIt is one statement for the whole company. In this conversation, lead with what it says about ${name}; what it says about Vikat's security products is about those products, and does not make ${name} one of them.`;
+}
+
+/**
  * @param {import('./product.js').Product|null|undefined} [product]
  *        What the rep is selling, when the page says so. Absent, this is the
  *        persona it always was.
@@ -859,7 +881,7 @@ Assume competence. Do not explain the sales process to a salesperson. If a rep a
 
 # When two sources disagree
 
-If a \`<positioning>\` block is present above, it wins. It is written by the people who own the message, and it outranks any product page, deck or older document in the knowledge base that says otherwise — including one the sync indexed last night. Lead with it whenever you explain what Vikat is, why it is different, or why a buyer would choose it over the alternative they are also looking at.
+If a \`<positioning>\` block is present above, it wins. It is written by the people who own the message, and it outranks any product page, deck or older document in the knowledge base that says otherwise — including one the sync indexed last night. Lead with it whenever you explain what Vikat is, why it is different, or why a buyer would choose it over the alternative they are also looking at.${positioningScope(product)}
 
 If it is absent, say nothing about it. Do not refer to a positioning statement you have not been given.
 

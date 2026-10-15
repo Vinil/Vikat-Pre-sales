@@ -222,6 +222,23 @@ test('an Engineering conversation without tools still names the product', () => 
   assert.doesNotMatch(p, /security and data platform/);
 });
 
+test('in an Engineering conversation the positioning statement does not make Engineering security', () => {
+  // The statement is one setting for the whole company, and the prompt says it
+  // wins and to lead with it "whenever you explain what Vikat is". Saved as a
+  // security statement, that sentence alone would have an Engineering chat
+  // open with CyberSec, whatever the persona says above it.
+  const disagree = (p) => section(p, '# When two sources disagree', 'If it is absent');
+  for (const build of [withTools, withoutTools]) {
+    const eng = disagree(build(ENGINEERING));
+    assert.match(eng, /It is one statement for the whole company\. In this conversation, lead with what it says about Vikat Engineering;/);
+    assert.match(eng, /what it says about Vikat's security products is about those products, and does not make Vikat Engineering one of them\./);
+    assert.ok(eng.startsWith(disagree(build(null)).trimEnd()), 'the rule itself is as it was, with this after it');
+
+    // On the security line the statement and the product are the same line.
+    assert.equal(disagree(build(SECSEMANTIC)), disagree(build(null)));
+  }
+});
+
 // --- A security product ------------------------------------------------------
 
 test('a SecSemantic persona names it, and everything after the opening is today', () => {
