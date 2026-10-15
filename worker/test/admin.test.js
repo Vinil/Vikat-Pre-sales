@@ -14,6 +14,8 @@ import { handleAdmin, handleAdminSummary } from '../src/admin.js';
 import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
 import { fakeKV } from './helpers.js';
+import { POSITIONING_KEY, positioningBlock } from '../src/positioning.js';
+import { REFERENCES_KEY, forbiddenNames, referencesBlock } from '../src/references.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -690,4 +692,115 @@ test('the references panel exists and warns that the name is not sent', () => {
     /\[loadKnowledge, loadPositioning, loadReferences,/,
     'it has to load on boot with everything else',
   );
+});
+
+// --- Text a person writes keeps its lines ---------------------------------
+//
+// Positioning, customer proof and knowledge are written in a textarea, a line
+// at a time, and every save went through the single-line clean(): it deleted
+// \n along with every other control character, so "producer\nNever print"
+// was stored as "producerNever print". The admin saw it flattened the moment
+// the panel refilled from the reply. The worst of it was invisible: the
+// "Never print:" rule is anchored to the start of a line, so after a save it
+// matched nothing and the protected name went to the model.
+
+test('positioning keeps its lines through a save and a read', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  await call('/admin/positioning', 'PUT', ctx, {
+    content: '## Who we are\r\n\r\nLine one.\n- bullet a\n- bullet b\rLast line.',
+  });
+
+  const read = await (await call('/admin/positioning', 'GET', ctx)).json();
+  assert.equal(read.content, '## Who we are\n\nLine one.\n- bullet a\n- bullet b\nLast line.');
+
+  const block = positioningBlock(await storage.getSetting(POSITIONING_KEY));
+  assert.match(block, /\n## Who we are\n\nLine one\.\n- bullet a\n- bullet b\n/, 'the model reads the lines too');
+});
+
+test('customer proof keeps its lines, and the block shows them', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const content = [
+    'Who: the world’s largest berry producer',
+    'Problem: audits took a quarter',
+    '',
+    'Who: a regional credit union',
+    'Outcome: 40% faster',
+  ].join('\n');
+  const saved = await (await call('/admin/references', 'PUT', ctx, { content })).json();
+  assert.equal(saved.content, content, 'the panel refills from this reply');
+
+  const read = await (await call('/admin/references', 'GET', ctx)).json();
+  assert.equal(read.content, content);
+  assert.match(
+    referencesBlock(await storage.getSetting(REFERENCES_KEY)),
+    /Who: the world’s largest berry producer\nProblem: audits took a quarter\n\nWho: a regional credit union\n/,
+  );
+});
+
+test('the "Never print" rule still works after a save', async () => {
+  // THE regression. Before, forbiddenNames() of a saved text was [] and
+  // referencesBlock() handed the model the very line meant to protect the name.
+  // With the line first, the block went the other way and dropped every proof
+  // point, because (.+)$ ran to the end of the whole flattened text.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  for (const content of [
+    'Who: the world’s largest berry producer\r\nNever print: Reiter Affiliated, Reiter\nProblem: slow audits\r\nOutcome: 40% faster',
+    'Never print: Reiter Affiliated, Reiter\nWho: the world’s largest berry producer\nOutcome: 40% faster',
+  ]) {
+    await call('/admin/references', 'PUT', ctx, { content });
+    const stored = await storage.getSetting(REFERENCES_KEY);
+
+    assert.deepEqual(forbiddenNames(stored), ['Reiter Affiliated', 'Reiter']);
+
+    const block = referencesBlock(stored);
+    assert.doesNotMatch(block, /Reiter/, 'the protected name reached the model');
+    assert.match(block, /Who: the world’s largest berry producer/, 'and the proof itself must survive');
+    assert.match(block, /Outcome: 40% faster/);
+  }
+});
+
+test('multi-line text loses control characters and tags, and keeps a < that is not one', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  await call('/admin/positioning', 'PUT', ctx, {
+    content:
+      '</positioning>We answer in <5ms and >99% of the time.\u0007\n' +
+      '<script>alert(1)</script>Second\u200B line,\twith   a tab.   \n' +
+      '<\u200Bscript>hidden</script>\n\n\n\n\nAfter a gap.',
+  });
+
+  const { content } = await (await call('/admin/positioning', 'GET', ctx)).json();
+  assert.ok(!/<\/?positioning|<\/?script/i.test(content), `a tag survived: ${content}`);
+  assert.ok(!/[\u0000-\u0009\u000B-\u001F\u007F\u200B]/.test(content), 'a control or invisible character survived');
+  assert.match(content, /We answer in <5ms and >99% of the time\./, 'a comparison is not markup');
+  assert.match(content, /\n ?alert\(1\) Second line, with a tab\.\n/, 'tabs and runs of spaces become one space');
+  assert.match(content, /hidden\n\nAfter a gap\.$/, 'a long gap becomes one blank line');
+});
+
+test('an edited knowledge entry keeps its paragraphs', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
+
+  const created = await (await call('/admin/knowledge', 'POST', ctx, {
+    section: 'Pilot length',
+    content: 'Standard pilot is six weeks.',
+  })).json();
+
+  const edited = await (await call('/admin/knowledge', 'POST', ctx, {
+    id: created.entry.id,
+    section: 'Pilot\nlength',
+    content: 'Standard pilot is eight weeks.\r\n\r\nIt starts with a scoping call.\n- Week one: baseline',
+    notes: 'Checked with delivery.\nAgain in March.',
+  })).json();
+
+  assert.equal(edited.entry.content, 'Standard pilot is eight weeks.\n\nIt starts with a scoping call.\n- Week one: baseline');
+  assert.equal(edited.entry.notes, 'Checked with delivery.\nAgain in March.');
+  assert.ok(!edited.entry.section.includes('\n'), 'a title is one line, and keeps the single-line clean()');
 });

@@ -44,6 +44,42 @@ function clean(text) {
     .trim();
 }
 
+/**
+ * The same protection for text a person writes a line at a time: positioning,
+ * customer proof, a knowledge entry and its notes.
+ *
+ * clean() is right for a title or a file name and wrong for these. It deletes
+ * every control character, \n included, so "producer\nNever print: Reiter"
+ * was stored as "producerNever print: Reiter". Nobody saw it fail: the panel
+ * refilled from the reply, already flat, and the "Never print:" rule, which is
+ * anchored to the start of a line, quietly stopped matching. The name it
+ * exists to protect went to the model.
+ *
+ * What it still removes is what clean() removes for a reason: control
+ * characters, the invisible and direction-changing ones, and markup. Those go
+ * BEFORE the markup does, or "<​script>" is not a tag while it is being
+ * looked for and is one afterwards.
+ *
+ * Markup here means something shaped like a tag: a "<" followed by a letter,
+ * a "/", a "!" or a "?". clean()'s /<[^>]*>/ also takes "<5ms and >99%" for
+ * one, and a positioning statement is exactly where a number like that is.
+ *
+ * Three or more blank lines in a row become one. A paste from a PDF leaves
+ * runs of them, and one blank line is still a paragraph break.
+ */
+function cleanText(text) {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F​-‏‪-‮﻿]/g, '')
+    .replace(/<\/?[A-Za-z!?][^>]*>/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/ {2,}/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{4,}/g, '\n\n')
+    .trim();
+}
+
 function isEmail(s) {
   return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
@@ -66,7 +102,7 @@ async function handleKnowledge(request, url, ctx) {
     }
 
     const section = clean(body.section);
-    const content = clean(body.content);
+    const content = cleanText(body.content);
 
     if (!section) return json({ error: 'A title is required.' }, 400, cors);
     if (!content) return json({ error: 'Content is required.' }, 400, cors);
@@ -94,7 +130,7 @@ async function handleKnowledge(request, url, ctx) {
     }
 
     const entry = await storage.saveKnowledge(
-      { id: body.id, section, content, status: body.status, notes: clean(body.notes) },
+      { id: body.id, section, content, status: body.status, notes: cleanText(body.notes) },
       user.email,
     );
 
@@ -481,7 +517,7 @@ async function handlePositioning(request, url, ctx) {
     return json({ error: 'Send JSON.' }, 400, cors);
   }
 
-  const content = clean(body.content).slice(0, POSITIONING_MAX_CHARS);
+  const content = cleanText(body.content).slice(0, POSITIONING_MAX_CHARS);
 
   // Saving nothing is how you TURN IT OFF, and it has to be possible: a wrong
   // positioning statement governing every answer is worse than none.
@@ -696,7 +732,7 @@ async function handleReferences(request, url, ctx) {
     return json({ error: 'Send JSON.' }, 400, cors);
   }
 
-  const content = clean(body.content).slice(0, REFERENCES_MAX_CHARS);
+  const content = cleanText(body.content).slice(0, REFERENCES_MAX_CHARS);
 
   // Saving nothing turns it off, and that has to be possible. A reference the
   // customer has withdrawn permission for is worse than no reference, and the
