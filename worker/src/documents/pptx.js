@@ -1361,7 +1361,9 @@ export function renderPptx(spec, meta, fonts) {
   // The suite deep dive is a SecSemantic or DevSemantic slide by definition:
   // the suite name is its headline and its tag. On another product's deck it
   // is a slide about a different product, so it is left out rather than drawn.
-  // The model is told not to write one; this is for when it does anyway.
+  // The model is told not to write one, and createDocument takes out any it
+  // writes anyway before this runs, so the rep is told (withoutForeignSuite).
+  // This is for every other caller.
   const sections = brand.suite ? spec.sections : spec.sections.filter((s) => s.layout !== 'suite');
 
   // §3.4 makes the credentials close a required slide, unless the deck

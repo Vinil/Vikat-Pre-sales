@@ -26,6 +26,7 @@ import {
   brandFor, WORDMARK_TAG, POSITIONING_LINE, DECK_TAGLINE, WHO_WE_ARE,
 } from '../src/documents/house.js';
 import { renderPptx } from '../src/documents/pptx.js';
+import { createDocument } from '../src/documents/index.js';
 import { normaliseSpec } from '../src/documents/spec.js';
 import { loadFonts } from '../src/documents/fonts.js';
 import { wrap } from '../src/documents/measure.js';
@@ -568,4 +569,52 @@ test('a headline too long for a cover goes on neither the cover nor the close', 
   const built = slides(deck({ ...ENGINEERING, definition }));
   assert.ok(!built.map(textOf).join(' ').includes(definition.slice(0, 60)), 'a paragraph was set as a cover line');
   assert.ok(textOf(built.at(-1)).includes('VIKAT  ENGINEERING'), 'the close is still the close');
+});
+
+// --- What the rep is told about the deck ---------------------------------------
+
+test('a suite slide an Engineering deck leaves out is out of the count and the checks, and said', async () => {
+  // The renderer leaves the suite deep dive out of another product's deck.
+  // Everything else read the spec: the result counted the slide, and the
+  // checks reported on words that were never drawn, so the rep could be told
+  // about a slide that is not in the file.
+  const cfg = loadConfig({});
+  const storage = createStorage({ VIKAT_KV: fakeKV() }, cfg);
+  const content = [
+    '## context | Where the release time goes',
+    'Most of the cycle is spent waiting for a test run.',
+    '',
+    '## suite ^ The detail | SecSemantic | Where the kill time goes | Kill time: the Semantic Loop cuts it before first use',
+    '',
+    '## stat | 40 | percent of the sprint spent on regression',
+    'From the team’s own sprint reports.',
+  ].join('\n');
+  const build = (product) =>
+    createDocument(
+      { format: 'pptx', title: 'Release faster at Northwind', audience: 'Northwind', disclosure: 'external_ok', content },
+      {
+        storage,
+        user: { email: 'rep@vikat.ai', name: 'Rep' },
+        env: {},
+        cfg,
+        fonts: loadFonts(),
+        product,
+        isoDate: '2026-10-16T00:00:00.000Z',
+      },
+    );
+
+  const today = await build(null);
+  assert.equal(today.ok, true, today.error);
+  assert.equal(today.sections, 3);
+  assert.match(today.inspection, /"Semantic Loop" is retired/, 'the control: the check reads a drawn suite slide');
+  assert.doesNotMatch(today.inspection, /left out/);
+
+  const engineering = await build(ENGINEERING);
+  assert.equal(engineering.ok, true, engineering.error);
+  assert.equal(engineering.sections, 2, 'the count is what was drawn');
+  assert.doesNotMatch(engineering.inspection, /Semantic Loop/, 'a check read a slide that is not in the file');
+  assert.match(
+    engineering.inspection,
+    /The suite slide "Where the kill time goes" was left out: the suite deep dive belongs to the security line, and this is a Vikat Engineering deck\./,
+  );
 });

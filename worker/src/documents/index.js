@@ -12,6 +12,8 @@
 
 import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS } from './spec.js';
 import { renderPptx } from './pptx.js';
+import { brandFor } from './house.js';
+import { productOf } from '../product.js';
 import { inspectPptx, inspectionSummary } from './inspect.js';
 import { checkGuidelines } from './guidelines.js';
 import { checkArticulation } from '../articulation.js';
@@ -26,6 +28,40 @@ const CONTENT_TYPE = {
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
+
+/**
+ * A deck for another product, without the suite slides it will not draw.
+ *
+ * The suite deep dive is SecSemantic or DevSemantic by definition, and the
+ * renderer leaves it out of a deck that is not on the security line (see
+ * brandFor). Everything after the renderer read the spec, though: the result
+ * counted the slide, and the inspection, the guidelines and the outreach rules
+ * reported on words that were never drawn. The rep could be told about a slide
+ * that is not in the file. So it comes out here, before anything is drawn or
+ * checked, and a note says so, so that the model can tell the rep instead of
+ * describing it.
+ *
+ * A deck only. Only the deck is branded for the product; a pdf or a docx is
+ * built as it always was.
+ *
+ * @returns {{ spec: object, leftOut: string[] }}  `leftOut` is the note, if any.
+ */
+function withoutForeignSuite(spec, product) {
+  if (spec.format !== 'pptx' || brandFor(product).suite) return { spec, leftOut: [] };
+
+  const suite = spec.sections.filter((s) => s.layout === 'suite');
+  if (!suite.length) return { spec, leftOut: [] };
+
+  const titles = suite.map((s) => `"${s.title || s.suite}"`).join(', ');
+  const which = suite.length === 1 ? `The suite slide ${titles} was` : `The suite slides ${titles} were`;
+  return {
+    spec: { ...spec, sections: spec.sections.filter((s) => s.layout !== 'suite') },
+    leftOut: [
+      `${which} left out: the suite deep dive belongs to the security line, and this is a ` +
+        `${productOf(product).name} deck.`,
+    ],
+  };
+}
 
 /**
  * Render, store and deliver.
@@ -48,8 +84,8 @@ export async function createDocument(input, ctx) {
   const parsed = normaliseSpec(input);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
-  const { spec } = parsed;
   const { storage, user, env, cfg, fonts, product = null } = ctx;
+  const { spec, leftOut } = withoutForeignSuite(parsed.spec, product);
   const isoDate = ctx.isoDate || new Date().toISOString();
   const preparedBy = user.name || user.email;
 
@@ -139,7 +175,7 @@ export async function createDocument(input, ctx) {
   const inspection = {
     ...rendered,
     problems: [...rendered.problems, ...brand.problems, ...outreach.problems],
-    notes: [...rendered.notes, ...brand.notes, ...outreach.notes],
+    notes: [...leftOut, ...rendered.notes, ...brand.notes, ...outreach.notes],
   };
 
   const fileName = fileNameFor(spec, isoDate);
