@@ -337,6 +337,27 @@ test('an Engineering "Vikat is" line passes with the product and fails without i
   }
 });
 
+test('a short name or headline counts as a word, not as letters inside one', () => {
+  // "ai" is in "certain", and "lab" in "available". Matched as text, a short
+  // name or headline let any invented line through that happened to spell it.
+  const product = { ...ENGINEERING, name: 'Lab', definition: 'AI: delivery teams' };
+  for (const line of ['Vikat is a certain kind of company.', 'Vikat is the most available partner.']) {
+    assert.equal(selfDescribed(outreach(line), { product }).length, 1, line);
+  }
+
+  // Said as words they still count, and so does a name with a symbol at its
+  // edge, where a plain \b would never match.
+  const plus = { ...ENGINEERING, name: 'C++', definition: '' };
+  for (const [line, named] of [
+    ['Vikat is an AI company.', product],
+    ['Vikat is the company behind Lab.', product],
+    ['Vikat is the company behind C++, for teams.', plus],
+  ]) {
+    assert.equal(selfDescribed(outreach(line), { product: named }).length, 0, line);
+    assert.equal(selfDescribed(outreach(line)).length, 1, `${line} (no product)`);
+  }
+});
+
 test('with a product, an invented line is still refused, and pointed at the product', () => {
   const [hit] = selfDescribed(outreach('Vikat is a security solutions company.'), { product: ENGINEERING });
   assert.ok(hit, 'an invented self-description passed because a product was named');

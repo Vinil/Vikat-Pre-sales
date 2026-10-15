@@ -278,7 +278,9 @@ const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
  * SRE." for a deck about software delivery.
  *
  * Matched on the whole sentence, not the 70 characters the pattern captures:
- * the headline alone can be longer than that.
+ * the headline alone can be longer than that. And matched as words: a name or
+ * headline can be a word or two long, and as bare text "AI" is inside
+ * "certain", which let any invented line through that happened to spell it.
  *
  * @param {string} sentence
  * @param {import('./product.js').Product|null|undefined} product
@@ -288,7 +290,20 @@ function inProductWords(sentence, product) {
   const said = flat(sentence);
   const name = flat(product.name);
   const headline = flat(definitionHeadline(product.definition)).replace(/\.$/, '');
-  return Boolean((name && said.includes(name)) || (headline && said.includes(headline)));
+  return saysWords(said, name) || saysWords(said, headline);
+}
+
+/**
+ * Whether `words` are in `said` with no letter or digit run on at either edge.
+ *
+ * Not \b, which is ASCII-only and needs a word character at the edge itself:
+ * it would never match a name ending in a symbol ("C++"), and it splits
+ * "Vikat Ingeniería" mid-word.
+ */
+function saysWords(said, words) {
+  if (!words) return false;
+  const escaped = words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escaped}(?![\\p{L}\\p{M}\\p{N}])`, 'u').test(said);
 }
 
 /** What to say instead, for the product the document is about. */
