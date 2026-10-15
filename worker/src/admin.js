@@ -57,8 +57,8 @@ function clean(text) {
  *
  * What it still removes is what clean() removes for a reason: control
  * characters, the invisible and direction-changing ones, and markup. Those go
- * BEFORE the markup does, or "<​script>" is not a tag while it is being
- * looked for and is one afterwards.
+ * BEFORE the markup does: a "<" and "script>" with a zero-width space between
+ * them is not a tag while it is being looked for, and is one afterwards.
  *
  * Markup here means something shaped like a tag: a "<" followed by a letter,
  * a "/", a "!" or a "?". clean()'s /<[^>]*>/ also takes "<5ms and >99%" for
@@ -71,7 +71,7 @@ function cleanText(text) {
   return String(text ?? '')
     .replace(/\r\n?/g, '\n')
     .replace(/\t/g, ' ')
-    .replace(/[\u0000-\u0009\u000B-\u001F\u007F​-‏‪-‮﻿]/g, '')
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\uFEFF]/g, '')
     .replace(/<\/?[A-Za-z!?][^>]*>/g, ' ')
     .split('\n')
     .map((line) => line.replace(/ {2,}/g, ' ').trimEnd())

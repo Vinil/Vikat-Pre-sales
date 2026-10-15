@@ -804,3 +804,52 @@ test('an edited knowledge entry keeps its paragraphs', async () => {
   assert.equal(edited.entry.notes, 'Checked with delivery.\nAgain in March.');
   assert.ok(!edited.entry.section.includes('\n'), 'a title is one line, and keeps the single-line clean()');
 });
+
+test('every invisible and direction-changing character goes, one at a time', async () => {
+  // The whole range cleanText() names, rather than the one character the test
+  // above happens to use. A class that lost a member would still pass that one.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const hidden = [
+    '\u200B', '\u200C', '\u200D', '\u200E', '\u200F',
+    '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+    '\uFEFF',
+  ];
+  for (const ch of hidden) {
+    const code = `U+${ch.codePointAt(0).toString(16).toUpperCase()}`;
+    await call('/admin/positioning', 'PUT', ctx, { content: `One${ch} line.\n<${ch}script>x</script>` });
+    const { content } = await (await call('/admin/positioning', 'GET', ctx)).json();
+    assert.ok(!content.includes(ch), `${code} survived`);
+    assert.ok(content.startsWith('One line.\n'), `${code}: ${JSON.stringify(content)}`);
+    assert.doesNotMatch(content, /script/, `${code} hid a tag`);
+  }
+});
+
+test('no source file carries an invisible or direction-changing character', () => {
+  // Written as \u escapes, these say what they are. Typed in raw they are
+  // invisible in an editor and in review, GitHub flags the file as hiding
+  // text, and an editor or formatter that normalises them changes what the
+  // sanitiser removes without any test noticing.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const hidden = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(js|mjs|json|txt)$/.test(entry.name)) files.push(full);
+    }
+  };
+  walk(path.join(here, '..', 'src'));
+  walk(here);
+
+  const found = files.flatMap((file) =>
+    fs
+      .readFileSync(file, 'utf8')
+      .split('\n')
+      .flatMap((line, i) => (hidden.test(line) ? [`${path.relative(path.join(here, '..'), file)}:${i + 1}`] : [])),
+  );
+  assert.deepEqual(found, []);
+});
