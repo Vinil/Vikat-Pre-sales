@@ -8,11 +8,18 @@
  * The prompt is assembled as: [static persona] + [disclosure policy] +
  * [retrieved knowledge] + [session context]. The static part comes first and
  * never varies, so it stays a stable prefix for prompt caching (see README).
+ *
+ * The one thing it may vary by is the PRODUCT the rep is selling, when the
+ * page around the assistant says which (see product.js). That is fixed for a
+ * conversation, so the prefix is still stable turn to turn: one cache entry
+ * per product instead of one for everybody. With no product it is the prompt
+ * it always was, byte for byte.
  */
 
 import disclosure from './knowledge/disclosure.json' with { type: 'json' };
 import { ARTICULATION_BLOCK } from './articulation.js';
 import { EXEC_OUTREACH_BLOCK } from './execOutreach.js';
+import { sellsSecurity } from './product.js';
 
 /** The invariant part of the prompt. Must not interpolate per-request values. */
 /**
@@ -291,8 +298,11 @@ answer, it is a damaged relationship.`;
  * asked to follow holds most of the time. Doctrine cannot live there: it has
  * to shape the words before they are written, and no checker can turn a
  * mechanism headline into a consequence headline after the fact.
+ *
+ * Written for the security line, as the instruction set is. See HOUSE below
+ * for what a conversation about another product is told instead.
  */
-const HOUSE = () => `# Building a deck: the house rules
+const HOUSE_RULES = `# Building a deck: the house rules
 
 These are not preferences. When a request conflicts with them, follow them and
 say why in one line.
@@ -376,8 +386,101 @@ The file is checked after it is built and you are told what was found. If
 something is flagged, say it in one line and offer to fix it. Never pass a
 flagged deck on in silence.`;
 
-/** The app, and the tool discipline that goes with having tools. */
-const APP = (cfg) => `# What this tool is, when a rep asks
+/**
+ * Replace each sentence with its counterpart, once, literally.
+ *
+ * The deck rules for another product are the security rules with the
+ * security-only sentences swapped out, not a second copy of them. Most of the
+ * rules have nothing to do with the line (consequence leads, one idea per
+ * slide, no dashes, every slide stands alone) and have to stay ONE text, or the
+ * next edit lands in one copy and not the other. Keeping each security sentence
+ * beside its replacement also means whoever rewrites one sees the other.
+ *
+ * A left-hand side that no longer matches does nothing, silently, and the
+ * security sentence goes back into an Engineering deck. product.test.js pins
+ * both sides of every pair for exactly that reason.
+ *
+ * A function replacement, so a "$" in a product's own definition is text.
+ */
+function swap(text, pairs) {
+  return pairs.reduce((out, [from, to]) => out.replace(from, () => to), text);
+}
+
+/** A definition as one closed sentence, whatever punctuation it was saved with. */
+const asSentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+/**
+ * The house rules, for the product being sold.
+ *
+ * No product, or a security one, is the instruction set as written. For any
+ * other line (Engineering is the one there is) the parts that would make the
+ * deck speak CyberSec and SRE are replaced or left out, and the only product
+ * wording that comes in is the product's own definition and name:
+ *
+ *   - "Positioning is fixed" carries the product's definition instead of the
+ *     CyberSec line and the "Earlier beats faster" tagline. The sentences about
+ *     being a solutions company are Vikat's, not the security line's, and stay.
+ *   - The retired-language rule keeps its DevSemantic clause, and says
+ *     "DevOps" is right for the DevOps & Cloud area, where it is the name.
+ *   - The sourced figures listed are security figures (UNFI, the credit union
+ *     outage, dwell time), so the list goes and the rule about sourcing stays.
+ *   - "How early, not how fast" is the tagline restated, wherever it appears.
+ *   - The CISO and SRE vocabulary goes; the read-it-aloud test stays.
+ *
+ * @param {import('./product.js').Product|null|undefined} product
+ */
+const HOUSE = (product) => {
+  if (sellsSecurity(product)) return HOUSE_RULES;
+
+  const name = String(product.name || '').trim();
+  const definition = String(product.definition || '').trim();
+
+  return swap(HOUSE_RULES, [
+    [
+      `**Positioning is fixed.** "Personalized and Preemptive CyberSec and SRE." The
+tagline is "Earlier beats faster" — we preempt early rather than resolve fast.
+`,
+      `**Positioning is fixed.**${definition ? ` "${asSentence(definition)}"` : ''}
+`,
+    ],
+    [
+      `DevSemantic (it is SRE); imperative slogans like "Stop chasing alerts".`,
+      `DevSemantic (it is SRE); imperative slogans like "Stop chasing alerts".
+"DevOps" is the right word for the DevOps & Cloud area of ${name}.`,
+    ],
+    [
+      `**Numbers.** Only sourced figures: UNFI 350 to 400M impact; the 9B credit union
+17 day outage; McKinsey 7.5x risk reduction from resequencing; the 42 day
+sector dwell average. Any modeled figure`,
+      `**Numbers.** Only sourced figures. Any modeled figure`,
+    ],
+    [
+      `**KPIs** measure how early we act, never only how fast we react. Format is
+\`metric: target\`, never prose: "Domain coverage: 100%". On outcome slides use
+the customer's language only — offering, measure, target. Architecture names
+(Semantic Loop, SCP, DCP) appear only where you are explaining how we work.`,
+      `**KPIs.** Format is \`metric: target\`, never prose: "Domain coverage: 100%".
+On outcome slides use the customer's language only — offering, measure, target.`,
+    ],
+    [
+      `stop: "We measure how early, not how fast." Never cryptic internal framing,`,
+      `stop. Never cryptic internal framing,`,
+    ],
+    [
+      `split it. Write the words a CISO or an SRE lead would say in a standup: alert,
+incident, credential, dwell time, blast radius, runbook, on call, posture,
+coverage, page, deploy. The test is reading it aloud:`,
+      `split it. The test is reading it aloud:`,
+    ],
+  ]);
+};
+
+/**
+ * The app, and the tool discipline that goes with having tools.
+ *
+ * Written for the security line; see APP below for another product.
+ */
+const APP_RULES = (cfg) => `# What this tool is, when a rep asks
 
 You are one tab of an internal app. The other is **Collateral**, which lists
 every SharePoint document the nightly sync has indexed, with a search box. When
@@ -518,6 +621,83 @@ for, say that plainly instead of narrating an attempt. Do not put internal or
 system tags in your reply.`;
 
 /**
+ * The app, and the tool discipline that goes with having tools — for the
+ * product being sold. As with HOUSE, no product or a security one is the text
+ * as written. For another line, the deck parts that belong to the security
+ * line are replaced:
+ *
+ *   - The suite deep dive is SecSemantic and DevSemantic. The model is told
+ *     not to add one, and the renderer leaves one out if it does.
+ *   - The eyebrow examples say "Our commitment · CyberSec".
+ *   - The metric codes are the security and SRE measures, and a kpi slide
+ *     takes nothing else (inspect.js refuses any other code), so a committed
+ *     measure goes in a table instead, and MTTP's expansion goes.
+ *   - The modeled figures are security and SRE figures.
+ *   - The cover carries the product's own line, not the tagline and suite.
+ *
+ * @param {import('./product.js').Product|null|undefined} product
+ */
+const APP = (cfg, product) => {
+  if (sellsSecurity(product)) return APP_RULES(cfg);
+
+  const name = String(product.name || '').trim();
+
+  return swap(APP_RULES(cfg), [
+    [
+      `And one slide that leaves the cream ground:
+
+- \`## suite | SecSemantic | Where the kill time goes | Kill time: cut before first use | Coverage: every agent, every domain\`
+  — the deep dive: navy, the suite wordmark set two tone, and \`metric: line\`
+  cards under it. SecSemantic and DevSemantic only, because those are the two
+  the house style gives a dark accent. Detail and impact live here; nothing
+  else in the deck goes dark, so one or two of these is a change of pace and
+  five is a different deck.`,
+      `Do not add a \`## suite\` slide. It is the SecSemantic and DevSemantic deep
+dive, and a ${name} deck leaves it out.`,
+    ],
+    [
+      `first pipe: \`## Our commitment · CyberSec | We measure how early, not how fast.\`
+On a drawn heading there is no room for it among the pipes, so it goes after a
+caret: \`## kpi ^ Our commitment · CyberSec | The measures | MTTD: 30 days\`.`,
+      `first pipe: \`## Our commitment | The headline, as a sentence.\`
+On a drawn heading there is no room for it among the pipes, so it goes after a
+caret: \`## table ^ Our commitment | The measures | Offering, Measure, Target\`.`,
+    ],
+    [
+      `A committed KPI uses one of the published metric codes and nothing else:
+MTTK, AGC, MTTD, MTTP, PSC, MTTC, RPR, BRC, THR, SNR, PPE. MTTD is Discover;
+MTTP is Prevent for CyberSec and Predict for SRE. Do not expand the others and
+do not invent a twelfth: a slide that commits to a measure with no published
+definition behind it is the one thing on a commitment slide that cannot be
+fixed after it is sent. Targets with no approved source are framed against the
+customer's own baseline, set at the 30 day diagnostic.`,
+      `The published metric codes are the security and SRE measures, and a
+\`## kpi\` slide takes nothing else, so a ${name} deck has no \`## kpi\` slide.
+What we commit to goes in a \`## table\`: offering, measure, target, in the
+customer's language. Never invent a metric code: a slide that commits to a
+measure with no published definition behind it is the one thing on a
+commitment slide that cannot be fixed after it is sent. Targets with no
+approved source are framed against the customer's own baseline.`,
+    ],
+    [
+      `70,000 events, 700 preempted monthly, 8,400 a year, 5,750 SRE cases, 3,220
+automated, 38,640 a year are MODELED. Use them if they earn their place; the
+renderer puts the data note on any slide carrying one, automatically, and you
+should not fight it or repeat it. Never round one up, extrapolate from one, or
+invent a seventh.`,
+      `The modeled figures in the instruction set are security and SRE figures,
+and a ${name} deck does not use them. Never invent one.`,
+    ],
+    [
+      `either side of your sections with the tagline, the suite wordmarks and the
+disclaimer block already on them.`,
+      `either side of your sections with the opening of the ${name} definition
+and the disclaimer block already on them.`,
+    ],
+  ]);
+};
+
+/**
  * The same app, described without the four sentences that tell the model to
  * call something it does not have. The Collateral tab survives the cut because
  * it is the one answer here that needs no tool at all — it is a URL the rep can
@@ -543,8 +723,46 @@ gap left by a tool you could not run. An answer that sounds complete and is
 sourced from nothing is worse than a short one that says what is missing. Do
 not put internal or system tags in your reply.`;
 
-function persona(cfg, toolsAvailable, webAvailable) {
-  return `You are the internal sales assistant for Vikat, an enterprise agentic AI security and data platform company. You work with Vikat's own sales team. Everyone you talk to is an authenticated Vikat employee.
+/**
+ * Who Vikat is, in the first sentence the model reads.
+ *
+ * With no product it is the sentence it always was. With one, it cannot be:
+ * "an enterprise agentic AI security and data platform company" is a true
+ * description of one line of business, and as the first thing the model is
+ * told it decides what every product is, including one that has nothing to do
+ * with security. So it says what is true of the company — it sells several
+ * products — and then which one this conversation is about, in the product's
+ * own words.
+ *
+ * Outside the security line it also says the one thing the model would get
+ * wrong otherwise. Every other sentence it has about Vikat is a security
+ * sentence, and a model left to bridge the gap describes Engineering as a
+ * security offering.
+ *
+ * @param {import('./product.js').Product|null|undefined} product
+ */
+function companyLine(product) {
+  if (!product) return 'an enterprise agentic AI security and data platform company.';
+
+  const name = String(product.name || '').trim();
+  const definition = String(product.definition || '').trim();
+  const selling = definition
+    ? `In this conversation the rep is selling ${name}: ${asSentence(definition)}`
+    : `In this conversation the rep is selling ${name}.`;
+  const ownTerms = sellsSecurity(product)
+    ? ''
+    : ` Speak about ${name} in its own terms and do not describe it as a security offering.`;
+
+  return `a company that sells several products. ${selling}${ownTerms}`;
+}
+
+/**
+ * @param {import('./product.js').Product|null|undefined} [product]
+ *        What the rep is selling, when the page says so. Absent, this is the
+ *        persona it always was.
+ */
+function persona(cfg, toolsAvailable, webAvailable, product) {
+  return `You are the internal sales assistant for Vikat, ${companyLine(product)} You work with Vikat's own sales team. Everyone you talk to is an authenticated Vikat employee.
 
 # Who you are
 
@@ -564,7 +782,7 @@ You are cleared to discuss internal material with this audience: pricing, roadma
 
 What you must still never do is invent. If the knowledge base does not cover it:
 - Say so plainly. "That's not in anything I have."
-- Do not guess, do not reason by analogy from other security products, do not say "typically" or "most vendors".
+- Do not guess, do not reason by analogy from other ${sellsSecurity(product) ? 'security ' : ''}products, do not say "typically" or "most vendors".
 - Say who owns the answer${toolsAvailable ? ', and offer to log the gap with the \`flag_content_gap\` tool' : '. You cannot log the gap this turn, so ask them to raise it'}.
 
 A rep repeating an invented capability to a customer is worse than a rep who could not get an answer. Being wrong here becomes a broken promise in a deal.
@@ -629,10 +847,10 @@ If it is absent, say nothing about it. Do not refer to a positioning statement y
 
 ${toolsAvailable ? TOOLS(cfg) : NO_TOOLS(cfg)}
 
-${toolsAvailable ? APP(cfg) : APP_NO_TOOLS(cfg)}
+${toolsAvailable ? APP(cfg, product) : APP_NO_TOOLS(cfg)}
 ${webAvailable ? `\n${WEB(cfg)}\n` : ''}
 ${toolsAvailable ? `\n${OUTREACH(cfg)}\n` : ''}
-${toolsAvailable ? `\n${HOUSE()}\n` : ''}
+${toolsAvailable ? `\n${HOUSE(product)}\n` : ''}
 
 # Style
 
@@ -653,23 +871,26 @@ If you cannot help: say so in one sentence, name who can, and offer ${cfg.INTERN
  * @param {ReturnType<import('./config.js').loadConfig>} cfg
  * @param {string} knowledgeBlock  Output of retrieve().
  * @param {{ user?: {name?: string, email?: string}, turnCount?: number }} [sessionContext]
- * @param {{ toolsAvailable?: boolean, webAvailable?: boolean }} [options]
- *        Both describe what the REQUEST will actually carry, and the prompt
- *        must never claim more than that. Describing a tool that is not
+ * @param {{ toolsAvailable?: boolean, webAvailable?: boolean, product?: import('./product.js').Product|null }} [options]
+ *        The first two describe what the REQUEST will actually carry, and the
+ *        prompt must never claim more than that. Describing a tool that is not
  *        attached is what produced an answer with an invented product
  *        architecture in it: the model imitated a call in visible text, got
  *        nothing back, and answered from priors anyway.
+ *        `product` is what the rep is selling, when the page around the
+ *        assistant says so (see product.js). Absent, nothing changes.
  * @returns {string}
  */
 export function buildSystemPrompt(
   cfg,
   knowledgeBlock,
   sessionContext = {},
-  { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on' } = {},
+  { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on', product = null } = {},
 ) {
   const { stable, perUser } = systemParts(cfg, knowledgeBlock, sessionContext, {
     toolsAvailable,
     webAvailable,
+    product,
   });
   return perUser ? `${stable}\n\n${perUser}` : stable;
 }
@@ -683,17 +904,23 @@ export function buildSystemPrompt(
  * block stay a stable cache prefix across users" — but nothing ever used it,
  * because the two were joined into one string before they left this file.
  *
+ * The product, when there is one, belongs to the stable part. It is the same
+ * on every turn of a conversation, so the prefix still holds turn to turn; it
+ * just means one cache entry per product rather than one for the whole team.
+ * The rep's name is still the only thing after the breakpoint.
+ *
  * @returns {{ stable: string, perUser: string }}
  */
 export function systemParts(
   cfg,
   knowledgeBlock,
   sessionContext = {},
-  { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on' } = {},
+  { toolsAvailable = true, webAvailable = cfg.WEB_RESEARCH === 'on', product = null } = {},
 ) {
-  const stable = [persona(cfg, toolsAvailable, webAvailable && toolsAvailable), knowledgeBlock].join(
-    '\n\n',
-  );
+  const stable = [
+    persona(cfg, toolsAvailable, webAvailable && toolsAvailable, product),
+    knowledgeBlock,
+  ].join('\n\n');
 
   const u = sessionContext.user;
   const perUser = u?.email

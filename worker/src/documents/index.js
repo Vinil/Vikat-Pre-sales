@@ -37,6 +37,10 @@ const CONTENT_TYPE = {
  * @param {Record<string, unknown>} ctx.env
  * @param {object} ctx.cfg
  * @param {{ bytes: object, metrics: object }} ctx.fonts
+ * @param {import('../product.js').Product|null} [ctx.product]
+ *        What the rep is selling, when the page around the assistant says so.
+ *        A deck is branded for it, and the outreach check accepts its own
+ *        wording. Absent, both are what they always were.
  * @param {string} [ctx.isoDate]  Fixed in tests; now in production.
  * @returns {Promise<{ ok: false, error: string } | { ok: true, ... }>}
  */
@@ -45,7 +49,7 @@ export async function createDocument(input, ctx) {
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   const { spec } = parsed;
-  const { storage, user, env, cfg, fonts } = ctx;
+  const { storage, user, env, cfg, fonts, product = null } = ctx;
   const isoDate = ctx.isoDate || new Date().toISOString();
   const preparedBy = user.name || user.email;
 
@@ -54,7 +58,7 @@ export async function createDocument(input, ctx) {
       ? await renderPdf(spec, { preparedBy, isoDate }, fonts)
       : spec.format === 'docx'
         ? renderDocx(spec, { preparedBy, isoDate })
-        : renderPptx(spec, { preparedBy, isoDate }, fonts.metrics);
+        : renderPptx(spec, { preparedBy, isoDate, product }, fonts.metrics);
 
   // Look at what was built before handing it over. Reporting, never
   // rewriting: a deck a shade under a threshold is still a deck, and refusing
@@ -91,7 +95,7 @@ export async function createDocument(input, ctx) {
     console.error('[documents] references unavailable:', err?.message || err);
   }
 
-  const outreach = checkExecOutreach({ ...spec, preparedBy }, { forbidden });
+  const outreach = checkExecOutreach({ ...spec, preparedBy }, { forbidden, product });
 
   // How it SOUNDS, which nothing was asking.
   //
