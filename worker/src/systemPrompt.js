@@ -19,7 +19,7 @@
 import disclosure from './knowledge/disclosure.json' with { type: 'json' };
 import { ARTICULATION_BLOCK } from './articulation.js';
 import { EXEC_OUTREACH_BLOCK } from './execOutreach.js';
-import { productOf, sellsSecurity } from './product.js';
+import { productOf, sellsSecurity, definitionHeadline } from './product.js';
 
 /** The invariant part of the prompt. Must not interpolate per-request values. */
 /**
@@ -417,9 +417,14 @@ const asSentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
  * deck speak CyberSec and SRE are replaced or left out, and the only product
  * wording that comes in is the product's own definition and name:
  *
- *   - "Positioning is fixed" carries the product's definition instead of the
- *     CyberSec line and the "Earlier beats faster" tagline. The sentences about
- *     being a solutions company are Vikat's, not the security line's, and stay.
+ *   - "Positioning is fixed" carries the product's headline (its definition up
+ *     to the colon, product.js) instead of the CyberSec line and the "Earlier
+ *     beats faster" tagline. The headline, because that is the line its deck
+ *     carries, as the CyberSec line is the line theirs does; the whole
+ *     definition is in the persona, and quoted here as fixed it would hand the
+ *     model a dash that the house copy check flags in any deck. The sentences
+ *     about being a solutions company are Vikat's, not the security line's,
+ *     and stay.
  *   - The retired-language rule keeps its DevSemantic clause, and says
  *     "DevOps" is right for the DevOps & Cloud area, where it is the name.
  *   - The sourced figures listed are security figures (UNFI, the credit union
@@ -432,14 +437,15 @@ const asSentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
 const HOUSE = (product) => {
   if (sellsSecurity(product)) return HOUSE_RULES;
 
-  const { name, definition } = product;
+  const { name } = product;
+  const headline = definitionHeadline(product.definition);
 
   return swap(HOUSE_RULES, [
     [
       `**Positioning is fixed.** "Personalized and Preemptive CyberSec and SRE." The
 tagline is "Earlier beats faster" — we preempt early rather than resolve fast.
 `,
-      `**Positioning is fixed.**${definition ? ` "${asSentence(definition)}"` : ''}
+      `**Positioning is fixed.**${headline ? ` "${headline}"` : ''}
 `,
     ],
     [
@@ -630,9 +636,16 @@ system tags in your reply.`;
  *   - The eyebrow examples say "Our commitment · CyberSec".
  *   - The metric codes are the security and SRE measures, and a kpi slide
  *     takes nothing else (inspect.js refuses any other code), so a committed
- *     measure goes in a table instead, and MTTP's expansion goes.
+ *     measure goes in a table instead, and MTTP's expansion goes. So does the
+ *     `## kpi` entry in the list of components: an example of a slide, a few
+ *     lines above the rule that says this deck has none, is the example the
+ *     model follows.
  *   - The modeled figures are security and SRE figures.
  *   - The cover carries the product's own line, not the tagline and suite.
+ *
+ * The other component examples (a stat, bars, a chain, a split) are worded
+ * for the security line too. They stay: they show the shape of a slide, not
+ * what to claim, and rewording them would be product copy nobody approved.
  *
  * @param {import('./product.js').Product|null|undefined} product
  */
@@ -642,6 +655,13 @@ const APP = (cfg, product) => {
   const { name } = product;
 
   return swap(APP_RULES(cfg), [
+    [
+      `- \`## kpi | The measures | MTTD: 30 days from baseline | AGC: 100% of agents governed\`
+  — a metric code in a pill, its target beside it. \`metric: target\` and never
+  prose: a target written as a sentence is one nobody can be held to.
+`,
+      '',
+    ],
     [
       `And one slide that leaves the cream ground:
 

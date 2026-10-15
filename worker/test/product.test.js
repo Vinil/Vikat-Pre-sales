@@ -142,11 +142,15 @@ test('an Engineering persona names the product and its definition, and no securi
   assert.doesNotMatch(p, /other security products/);
 });
 
-test('the Engineering house rules carry its definition and none of the CyberSec positioning', () => {
+test('the Engineering house rules carry its headline and none of the CyberSec positioning', () => {
   const p = withTools(ENGINEERING);
   const rules = house(p);
 
-  assert.ok(rules.includes(`**Positioning is fixed.** "${ENGINEERING.definition}"`));
+  // The line its deck carries, as the security rules quote the line theirs
+  // carries. The whole definition is in the persona already; quoted here as
+  // fixed, it handed the model a dash the house copy check flags in any deck.
+  assert.ok(rules.includes(`**Positioning is fixed.** "${ENGINEERING_HEADLINE}"`));
+  assert.ok(!rules.includes(ENGINEERING.definition), 'the whole definition, dash and all');
   assert.doesNotMatch(p, /Personalized and Preemptive CyberSec/);
   assert.doesNotMatch(p, /Earlier beats faster/i);
   assert.doesNotMatch(p, /how early/i, 'the tagline restated is still the tagline');
@@ -186,6 +190,7 @@ test('the Engineering deck rules leave out the suite and the security examples',
 
   assert.doesNotMatch(rules, /MTTP/);
   assert.match(rules, /a Vikat Engineering deck has no `## kpi` slide/);
+  assert.doesNotMatch(rules, /`## kpi [|^]/, 'an example of the slide the same rules say the deck has none of');
 
   assert.doesNotMatch(rules, /5,750 SRE cases/);
   assert.match(rules, /a Vikat Engineering deck does not use them/);
