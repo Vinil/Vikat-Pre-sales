@@ -422,9 +422,10 @@ const asSentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
  *     beats faster" tagline. The headline, because that is the line its deck
  *     carries, as the CyberSec line is the line theirs does; the whole
  *     definition is in the persona, and quoted here as fixed it would hand the
- *     model a dash that the house copy check flags in any deck. The sentences
- *     about being a solutions company are Vikat's, not the security line's,
- *     and stay.
+ *     model a dash that the house copy check flags in any deck. With no
+ *     headline there is nothing to quote, and the lead-in goes with it. The
+ *     sentences about being a solutions company are Vikat's, not the security
+ *     line's, and stay.
  *   - The retired-language rule keeps its DevSemantic clause, and says
  *     "DevOps" is right for the DevOps & Cloud area, where it is the name.
  *   - The sourced figures listed are security figures (UNFI, the credit union
@@ -445,8 +446,7 @@ const HOUSE = (product) => {
       `**Positioning is fixed.** "Personalized and Preemptive CyberSec and SRE." The
 tagline is "Earlier beats faster" — we preempt early rather than resolve fast.
 `,
-      `**Positioning is fixed.**${headline ? ` "${headline}"` : ''}
-`,
+      headline ? `**Positioning is fixed.** "${headline}"\n` : '',
     ],
     [
       `DevSemantic (it is SRE); imperative slogans like "Stop chasing alerts".`,

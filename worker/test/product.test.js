@@ -176,6 +176,18 @@ test('the Engineering house rules carry its headline and none of the CyberSec po
   assert.match(rules, /ending with a full\s+stop\. Never cryptic internal framing/);
 });
 
+test('with no headline there is no "Positioning is fixed" to quote, and no lead-in for it', () => {
+  // The lead-in announces a quoted line. With nothing to quote it read
+  // "**Positioning is fixed.**" and then the solutions-company sentences, as
+  // if they were the fixed line.
+  for (const definition of ['', ' ! ']) {
+    const rules = house(withTools({ ...ENGINEERING, definition }));
+    assert.doesNotMatch(rules, /Positioning is fixed/, JSON.stringify(definition));
+    assert.match(rules, /\n\nVikat is a SOLUTIONS company, not a tool company/, 'and the paragraph is otherwise whole');
+    assert.match(rules, /working in tandem with what you already own/);
+  }
+});
+
 test('the Engineering deck rules leave out the suite and the security examples', () => {
   const p = withTools(ENGINEERING);
   const rules = app(p);
