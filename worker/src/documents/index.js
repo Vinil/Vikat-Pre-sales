@@ -11,7 +11,7 @@
  */
 
 import { normaliseSpec, fileNameFor, DISCLOSURE_LABELS } from './spec.js';
-import { renderPptx } from './pptx.js';
+import { renderPptx, fitsCover } from './pptx.js';
 import { brandFor } from './house.js';
 import { productOf } from '../product.js';
 import { inspectPptx, inspectionSummary } from './inspect.js';
@@ -61,6 +61,31 @@ function withoutForeignSuite(spec, product) {
         `${productOf(product).name} deck.`,
     ],
   };
+}
+
+/**
+ * A product's positioning line that the deck could not carry, said.
+ *
+ * Another product's cover and close carry its definition's headline, and a
+ * headline past three cover lines is a paragraph: the renderer leaves it off
+ * both and writes nothing in its place (fitsCover). Left there, neither the
+ * model nor the rep knows the deck has no positioning line, or why. Said, the
+ * model can tell the rep, and the rep can tell whoever owns the definition,
+ * which is where the line gets shorter. A deck only, as for the suite.
+ *
+ * @returns {string[]}  The note, if any.
+ */
+function lineLeftOff(spec, product, metrics) {
+  const { positioningLine } = brandFor(product);
+  if (spec.format !== 'pptx' || !positioningLine || fitsCover(positioningLine, metrics)) return [];
+
+  const { name } = productOf(product);
+  return [
+    `The headline of the ${name} definition was left off the cover and the close: at that length it is ` +
+      'a paragraph, not a cover line. Do not write a line in its place; tell the rep, so that whoever ' +
+      `owns the ${name} definition can shorten it. The headline is the definition up to its first ` +
+      'colon, or all of it when there is none.',
+  ];
 }
 
 /**
@@ -175,7 +200,13 @@ export async function createDocument(input, ctx) {
   const inspection = {
     ...rendered,
     problems: [...rendered.problems, ...brand.problems, ...outreach.problems],
-    notes: [...leftOut, ...rendered.notes, ...brand.notes, ...outreach.notes],
+    notes: [
+      ...leftOut,
+      ...lineLeftOff(spec, product, fonts.metrics),
+      ...rendered.notes,
+      ...brand.notes,
+      ...outreach.notes,
+    ],
   };
 
   const fileName = fileNameFor(spec, isoDate);

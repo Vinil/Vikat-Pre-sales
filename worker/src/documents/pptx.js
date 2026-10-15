@@ -465,6 +465,20 @@ const COVER_LINE_WIDTH = CONTENT_WIDTH * 0.8;
 const POSITIONING_LINES = 3;
 
 /**
+ * Whether a positioning line is a line, by POSITIONING_LINES.
+ *
+ * Exported because a line left off is said: createDocument asks the same
+ * question with the same metrics, so the rep is told exactly when the deck
+ * has no positioning line, and why.
+ *
+ * @param {string} line
+ * @param {{ body: import('./measure.js').FontMetrics }} fonts
+ */
+export function fitsCover(line, fonts) {
+  return wrap(line, fonts.body, SIZE.coverSub, COVER_LINE_WIDTH * 72).length <= POSITIONING_LINES;
+}
+
+/**
  * The cover's positioning line and tagline, set as one line in two voices.
  *
  * Measured rather than fixed at one line's height only because another
@@ -1346,11 +1360,8 @@ export function renderPptx(spec, meta, fonts) {
 
   // A positioning line is a line: past POSITIONING_LINES it is a paragraph,
   // and goes on neither the cover nor the close. The instruction set's is one
-  // line and never reaches this.
-  if (
-    brand.positioningLine &&
-    wrap(brand.positioningLine, fonts.body, SIZE.coverSub, COVER_LINE_WIDTH * 72).length > POSITIONING_LINES
-  ) {
+  // line and never reaches this. createDocument tells the rep (lineLeftOff).
+  if (brand.positioningLine && !fitsCover(brand.positioningLine, fonts)) {
     brand = { ...brand, positioningLine: null };
   }
 

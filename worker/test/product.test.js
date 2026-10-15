@@ -644,3 +644,62 @@ test('a suite slide an Engineering deck leaves out is out of the count and the c
     /The suite slide "Where the kill time goes" was left out: the suite deep dive belongs to the security line, and this is a Vikat Engineering deck\./,
   );
 });
+
+test('a headline left off the cover and the close is said, exactly when it is left off', async () => {
+  // A cover without its line is a shorter cover, and nothing may write a
+  // shorter line in its place. Left off in silence, though, neither the model
+  // nor the rep knows the deck has no positioning line, or why, and nobody
+  // tells whoever owns the definition.
+  const cfg = loadConfig({});
+  const storage = createStorage({ VIKAT_KV: fakeKV() }, cfg);
+  const build = (product, format = 'pptx') =>
+    createDocument(
+      {
+        format,
+        title: 'Release faster at Northwind',
+        audience: 'Northwind',
+        disclosure: 'external_ok',
+        content: '## context | Where the release time goes\nMost of the cycle is spent waiting for a test run.',
+      },
+      {
+        storage,
+        user: { email: 'rep@vikat.ai', name: 'Rep' },
+        env: {},
+        cfg,
+        fonts: loadFonts(),
+        product,
+        isoDate: '2026-10-16T00:00:00.000Z',
+      },
+    );
+  const said = /The headline of the Vikat Engineering definition was left off the cover and the close/;
+
+  // Either side of the limit, the note is there exactly when the cover has no line.
+  const both = { on: 0, off: 0 };
+  for (const definition of [
+    ENGINEERING.definition,
+    ENGINEERING.definition.replace(':', ','),
+    NO_COLON_LONG,
+    `${NO_COLON_LONG} ${NO_COLON_LONG}`.slice(0, 600),
+  ]) {
+    const result = await build({ ...ENGINEERING, definition });
+    assert.equal(result.ok, true, result.error);
+    const stored = await storage.getDocument(result.id);
+    const cover = slides(new Uint8Array(stored.bytes))[0];
+    const onCover = layoutOf(cover).boxes.some((b) => b.words === definitionHeadline(definition));
+    assert.equal(said.test(result.inspection), !onCover, `${definition.length} characters, on the cover ${onCover}`);
+    both[onCover ? 'on' : 'off'] += 1;
+  }
+  assert.ok(both.on && both.off, `both sides of the limit: ${JSON.stringify(both)}`);
+
+  // Nothing to say where nothing was left off, or where nothing is branded.
+  const long = { ...ENGINEERING, definition: `${NO_COLON_LONG} ${NO_COLON_LONG}`.slice(0, 600) };
+  for (const [label, result] of [
+    ['no product', await build(null)],
+    ['SecSemantic', await build(SECSEMANTIC)],
+    ['a pdf', await build(long, 'pdf')],
+    ['a docx', await build(long, 'docx')],
+  ]) {
+    assert.equal(result.ok, true, `${label}: ${result.error}`);
+    assert.doesNotMatch(result.inspection, /left off the cover/, label);
+  }
+});
