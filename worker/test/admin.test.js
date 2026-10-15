@@ -826,30 +826,49 @@ test('every invisible and direction-changing character goes, one at a time', asy
   }
 });
 
-test('no source file carries an invisible or direction-changing character', () => {
+test('no hand-written code carries an invisible or direction-changing character', () => {
   // Written as \u escapes, these say what they are. Typed in raw they are
   // invisible in an editor and in review, GitHub flags the file as hiding
   // text, and an editor or formatter that normalises them changes what the
   // sanitiser removes without any test noticing.
+  //
+  // Code a person writes, and only that. The knowledge base is built from the
+  // public site and SharePoint (scripts/build-knowledge.js, sync-sharepoint.js),
+  // and the nightly sync and every deploy rebuild it and then run this suite
+  // before shipping. A "&#8203;" on a web page, or an emoji in a synced
+  // document, decodes to exactly these characters; scanned, one of them would
+  // fail the sync and every deploy until someone found this test. So data is
+  // not read (the .json under src/knowledge, the frozen prompts in fixtures),
+  // and neither is a module that says it is generated.
   const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.join(here, '..');
   const hidden = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+  const generated = (text) => /^\/\*\*\n \* \S+ \u2014 GENERATED FILE\./.test(text);
 
   const files = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (/\.(js|mjs|json|txt)$/.test(entry.name)) files.push(full);
+      else if (/\.m?js$/.test(entry.name)) {
+        const text = fs.readFileSync(full, 'utf8');
+        if (!generated(text)) files.push({ name: path.relative(root, full), text });
+      }
     }
   };
-  walk(path.join(here, '..', 'src'));
+  walk(path.join(root, 'src'));
   walk(here);
 
-  const found = files.flatMap((file) =>
-    fs
-      .readFileSync(file, 'utf8')
-      .split('\n')
-      .flatMap((line, i) => (hidden.test(line) ? [`${path.relative(path.join(here, '..'), file)}:${i + 1}`] : [])),
+  // What it reads: both sanitisers and this file, and nothing generated.
+  const names = files.map((f) => f.name.split(path.sep).join('/'));
+  for (const name of ['src/admin.js', 'src/index.js', 'test/admin.test.js']) {
+    assert.ok(names.includes(name), `${name} is not scanned`);
+  }
+  assert.ok(!names.includes('src/knowledge.js'), 'the generated knowledge base is scanned');
+  assert.deepEqual(names.filter((n) => n.startsWith('src/knowledge/')), [], 'synced knowledge is scanned');
+
+  const found = files.flatMap(({ name, text }) =>
+    text.split('\n').flatMap((line, i) => (hidden.test(line) ? [`${name}:${i + 1}`] : [])),
   );
   assert.deepEqual(found, []);
 });
