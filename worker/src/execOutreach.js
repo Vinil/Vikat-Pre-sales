@@ -23,6 +23,8 @@
  * reading it.
  */
 
+import { productOf, sellsSecurity, definitionHeadline } from './product.js';
+
 /**
  * What the model is told, so that most of the checks below never fire.
  *
@@ -264,6 +266,55 @@ const REAL_LINES = [
   '"Personalized and Preemptive CyberSec and SRE." (the presentation instruction set)',
 ].join(' or ');
 
+const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * With a product, its own wording is sanctioned as well.
+ *
+ * The lines above are the security line's. An Engineering document that says
+ * who we are by naming the product, or in its definition's own headline, is
+ * doing exactly what this rule asks — saying it the same way every time — and
+ * refusing it would send the rep to "Personalized and Preemptive CyberSec and
+ * SRE." for a deck about software delivery.
+ *
+ * Matched on the whole sentence, not the 70 characters the pattern captures:
+ * the headline alone can be longer than that. And matched as words: a name or
+ * headline can be a word or two long, and as bare text "AI" is inside
+ * "certain", which let any invented line through that happened to spell it.
+ *
+ * @param {string} sentence
+ * @param {import('./product.js').Product|null|undefined} product
+ */
+function inProductWords(sentence, product) {
+  if (!product) return false;
+  const said = flat(sentence);
+  const name = flat(product.name);
+  const headline = flat(definitionHeadline(product.definition)).replace(/\.$/, '');
+  return saysWords(said, name) || saysWords(said, headline);
+}
+
+/**
+ * Whether `words` are in `said` with no letter or digit run on at either edge.
+ *
+ * Not \b, which is ASCII-only and needs a word character at the edge itself:
+ * it would never match a name ending in a symbol ("C++"), and it splits
+ * "Vikat Ingeniería" mid-word.
+ */
+function saysWords(said, words) {
+  if (!words) return false;
+  const escaped = words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escaped}(?![\\p{L}\\p{M}\\p{N}])`, 'u').test(said);
+}
+
+/** What to say instead, for the product the document is about. */
+function realLinesFor(product) {
+  if (!product) return REAL_LINES;
+  const { name } = product;
+  const headline = definitionHeadline(product.definition);
+  if (sellsSecurity(product)) return `${REAL_LINES}, or name ${name}`;
+  return headline ? `"${headline}" (the ${name} definition), or name ${name}` : `the name ${name}`;
+}
+
 // --- The trust anchors a stranger needs -------------------------------------
 
 /**
@@ -456,6 +507,9 @@ export function outreachText(spec) {
  * @param {boolean} [opts.customerFacing]  Defaults to true for external_ok.
  * @param {string[]} [opts.forbidden]        Customer names that may not be printed.
  * @param {string}  [opts.recipient]       Who it is addressed to, for the recap check.
+ * @param {import('./product.js').Product|null} [opts.product]
+ *        What the document is selling, when the page says so. Its own name
+ *        and definition headline then count as a sanctioned "Vikat is" line.
  * @returns {{ problems: string[], notes: string[] }}
  */
 export function checkExecOutreach(spec, opts = {}) {
@@ -530,13 +584,21 @@ export function checkExecOutreach(spec, opts = {}) {
     }
   }
 
-  // A self-description nobody approved.
+  // A self-description nobody approved. A product with no name is no product
+  // (productOf): it sanctions nothing, and there is no name to point at.
+  const product = productOf(opts.product);
   const described = SELF_DESCRIPTION.exec(text);
-  if (customerFacing && described && !SANCTIONED_SELF.some((re) => re.test(described[1]))) {
+  const sentence = described ? text.slice(described.index).split(/(?<=[.!?])\s|\n/)[0] : '';
+  if (
+    customerFacing &&
+    described &&
+    !SANCTIONED_SELF.some((re) => re.test(described[1])) &&
+    !inProductWords(sentence, product)
+  ) {
     problems.push(
       `"Vikat is ${described[1].trim()}" is not a line this company uses anywhere. Saying who we are ` +
         'is the one sentence that has to be the same every time, and it has been different in every ' +
-        `document. Use ${REAL_LINES}.`,
+        `document. Use ${realLinesFor(product)}.`,
     );
   }
 

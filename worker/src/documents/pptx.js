@@ -24,9 +24,8 @@ import { DISCLOSURE_LABELS, pageStamp } from './spec.js';
 import { wrap } from './measure.js';
 import * as part from './ooxml.js';
 import {
-  GEOMETRY, FLOORS, FINE_PRINT, DATA_NOTE, PATENTS_PENDING, WORDMARK_TAG,
-  POSITIONING_LINE, DECK_TAGLINE, WHO_WE_ARE, DARK, SUITE, DENSITY,
-  carriesModeledFigure,
+  GEOMETRY, FLOORS, FINE_PRINT, DATA_NOTE, PATENTS_PENDING, DARK, SUITE, DENSITY,
+  carriesModeledFigure, brandFor,
 } from './house.js';
 import * as comp from './components.js';
 
@@ -71,6 +70,19 @@ const CONTENT_WIDTH = SLIDE.widthIn - M.left - M.right;
 
 let shapeId = 1;
 const nextId = () => (shapeId += 1);
+
+/**
+ * Which product the deck being drawn is for: its tag, cover line, tagline,
+ * suite and standing copy (see brandFor in house.js).
+ *
+ * Set once at the top of renderPptx, the way shapeId is reset there, rather
+ * than passed down. Every slide ends in footer(), eighteen calls across the
+ * layouts, and the tag is the one thing on that line that depends on the
+ * product. Threading it through each of them is a parameter the next layout
+ * forgets, and a slide that forgets it goes out saying CYBERSEC. Rendering is
+ * synchronous, so one deck never sees another's.
+ */
+let brand = brandFor(null);
 
 function frame({ x, y, w, h }) {
   return `<a:off x="${emu(x)}" y="${emu(y)}"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/>`;
@@ -234,7 +246,7 @@ function wordmark(x, y, onDark, w = 1.9) {
  * on it: a slide gets screenshotted and forwarded without the deck, and the
  * footer is how a reader knows who is claiming what they are reading.
  */
-function footer(spec, onDark, pageLabel, tag = WORDMARK_TAG) {
+function footer(spec, onDark, pageLabel, tag = brand.tag) {
   const label = pageStamp(spec.disclosure);
   const color = onDark ? ON_NAVY.muted : INK.muted;
   const faint = onDark ? ON_NAVY.muted : INK.muted;
@@ -410,14 +422,9 @@ function coverSlide(spec, meta, fonts) {
 
     // §1.2: the cover carries the positioning line plus the tagline. Locked
     // copy, both of them, so they are constants rather than something a deck
-    // gets to paraphrase.
-    inlineText(
-      { x: M.left, y: coverTitleTop + titleHeight + (spec.subtitle ? 1.06 : 0.34), w: CONTENT_WIDTH * 0.8, h: 0.34 },
-      [
-        { text: `${POSITIONING_LINE} `, role: 'body', size: SIZE.coverSub, lineHeight: 1.3, color: ON_NAVY.body },
-        { text: DECK_TAGLINE, role: 'heading', size: SIZE.coverSub, lineHeight: 1.3, color: COLOR.paleTeal },
-      ],
-    ),
+    // gets to paraphrase. Another product's deck carries its own definition's
+    // headline and no tagline (brandFor), and one with neither carries nothing.
+    coverLine(coverTitleTop + titleHeight + (spec.subtitle ? 1.06 : 0.34), fonts),
   ];
 
   // The gradient ground and the furniture that hangs off the slide edges are
@@ -427,12 +434,80 @@ function coverSlide(spec, meta, fonts) {
     slideXml(
       ground +
         comp.waveMotif(M.left, 5.66, CONTENT_WIDTH, 0.4, { onDark: true }) +
-        comp.suiteWordmarks(M.left, 6.24, CONTENT_WIDTH * 0.52, { onDark: true }) +
+        // The Sec, Dev and Pro wordmarks are the security suite. On another
+        // product's cover they would announce a product the deck is not about.
+        (brand.suite ? comp.suiteWordmarks(M.left, 6.24, CONTENT_WIDTH * 0.52, { onDark: true }) : '') +
         settle(block, 2.2) +
         footer(spec, true, meta.date),
       bg(COLOR.deepNavy),
     )
   );
+}
+
+/** How wide the cover sets its positioning line. */
+const COVER_LINE_WIDTH = CONTENT_WIDTH * 0.8;
+
+/**
+ * The most lines a positioning line may take, at the cover's width.
+ *
+ * The instruction set's line takes one. Another product's is its definition's
+ * headline, and a definition with no colon in it is all headline, up to the
+ * 600 characters the portal allows. That is a paragraph. Under the longest
+ * title and subtitle the spec allows, the cover has room for three lines
+ * above the wave and a fourth runs into it, so three is the limit (a test
+ * holds that worst case). On the narrower close the same words take up to
+ * four lines, and grow up into the room the tagline leaves (see closeLine).
+ *
+ * Past three, the line goes on neither slide. A cover without its line is a
+ * shorter cover; one with a paragraph over its artwork is a broken one, and
+ * nothing here may write a shorter line in its place.
+ */
+const POSITIONING_LINES = 3;
+
+/**
+ * Whether a positioning line is a line, by POSITIONING_LINES.
+ *
+ * Exported because a line left off is said: createDocument asks the same
+ * question with the same metrics, so the rep is told exactly when the deck
+ * has no positioning line, and why.
+ *
+ * @param {string} line
+ * @param {{ body: import('./measure.js').FontMetrics }} fonts
+ */
+export function fitsCover(line, fonts) {
+  return wrap(line, fonts.body, SIZE.coverSub, COVER_LINE_WIDTH * 72).length <= POSITIONING_LINES;
+}
+
+/**
+ * The cover's positioning line and tagline, set as one line in two voices.
+ *
+ * Measured rather than fixed at one line's height only because another
+ * product's line is its own definition's headline, whose length nobody here
+ * chose. The instruction set's pair fits one line, so its box is the 0.34 it
+ * always was.
+ */
+function coverLine(y, fonts) {
+  const runs = [
+    brand.positioningLine && {
+      text: brand.deckTagline ? `${brand.positioningLine} ` : brand.positioningLine,
+      role: 'body',
+      size: SIZE.coverSub,
+      lineHeight: 1.3,
+      color: ON_NAVY.body,
+    },
+    brand.deckTagline && {
+      text: brand.deckTagline,
+      role: 'heading',
+      size: SIZE.coverSub,
+      lineHeight: 1.3,
+      color: COLOR.paleTeal,
+    },
+  ].filter(Boolean);
+  if (!runs.length) return '';
+
+  const width = COVER_LINE_WIDTH;
+  const h = Math.max(0.34, heightOf(runs.map((r) => r.text).join(''), fonts.body, SIZE.coverSub, width, 1.3));
+  return inlineText({ x: M.left, y, w: width, h }, runs);
 }
 
 /**
@@ -1154,18 +1229,19 @@ function contentSlide(spec, section, meta, pageLabel, fonts) {
  * own more often than any other and the four things it must carry are the
  * four things nobody puts back by hand.
  */
-function closingSlide(spec, meta) {
+function closingSlide(spec, meta, fonts) {
   const shapes = [
     rect({ x: 0, y: 0, w: SLIDE.widthIn, h: SLIDE.heightIn }, gradientFill()),
     wordmark(M.left, 1.3, true),
 
-    text({ x: M.left, y: 2.5, w: CONTENT_WIDTH * 0.8, h: 1.0 }, [
-      { text: DECK_TAGLINE, role: 'display', size: SIZE.sectionTitle, tracking: -0.03, lineHeight: 1.1, color: ON_NAVY.strong },
-    ]),
+    // Another product's deck has no tagline and closes on its own line alone.
+    brand.deckTagline
+      ? text({ x: M.left, y: 2.5, w: CONTENT_WIDTH * 0.8, h: 1.0 }, [
+          { text: brand.deckTagline, role: 'display', size: SIZE.sectionTitle, tracking: -0.03, lineHeight: 1.1, color: ON_NAVY.strong },
+        ])
+      : '',
 
-    text({ x: M.left, y: 3.62, w: CONTENT_WIDTH * 0.62, h: 0.5 }, [
-      { text: POSITIONING_LINE, role: 'body', size: SIZE.coverSub, lineHeight: 1.4, color: ON_NAVY.body },
-    ]),
+    closeLine(fonts),
 
     text({ x: M.left, y: 4.34, w: CONTENT_WIDTH * 0.7, h: 0.4 }, [
       { text: meta.preparedBy, role: 'body', size: SIZE.body, lineHeight: 1.4, color: ON_NAVY.body },
@@ -1187,6 +1263,32 @@ function closingSlide(spec, meta) {
 }
 
 /**
+ * The close's positioning line.
+ *
+ * Its box was sized for the instruction set's line, which is one line, and for
+ * that line it is still the box it was: 0.5 high, at 3.62. Another product's
+ * line is its definition's headline, up to four lines here (POSITIONING_LINES
+ * is counted at the wider cover), and a fixed box let it run over "prepared
+ * by" and the disclaimer while the box itself sat neatly inside the slide.
+ *
+ * So the box is measured, keeps its bottom edge, and grows UP, into the room
+ * the tagline would have: a deck that has a tagline carries the instruction
+ * set's one line, which never grows, and on a deck without one nothing else is
+ * there. Growing down instead moves the disclaimer block into the wave and the
+ * footer within two extra lines; growing up moves nothing else at all.
+ */
+function closeLine(fonts) {
+  if (!brand.positioningLine) return '';
+
+  const width = CONTENT_WIDTH * 0.62;
+  const bottom = 3.62 + 0.5;
+  const h = Math.max(0.5, heightOf(brand.positioningLine, fonts.body, SIZE.coverSub, width, 1.4));
+  return text({ x: M.left, y: bottom - h, w: width, h }, [
+    { text: brand.positioningLine, role: 'body', size: SIZE.coverSub, lineHeight: 1.4, color: ON_NAVY.body },
+  ]);
+}
+
+/**
  * §1.2 step 5 and §3.4: the credentials close, before the thank you.
  *
  * Every line on it is approved standing copy from the instruction set. That
@@ -1198,7 +1300,7 @@ function closingSlide(spec, meta) {
 function whoWeAreSlide(spec, meta, pageLabel, fonts) {
   return contentSlide(
     spec,
-    { eyebrow: WHO_WE_ARE.eyebrow, title: WHO_WE_ARE.title, body: '', points: WHO_WE_ARE.points },
+    { eyebrow: brand.whoWeAre.eyebrow, title: brand.whoWeAre.title, body: '', points: brand.whoWeAre.points },
     meta,
     pageLabel,
     fonts,
@@ -1240,7 +1342,11 @@ const sectionText = (s) =>
  * Render a spec as a .pptx.
  *
  * @param {object} spec  A spec already through normaliseSpec().
- * @param {{ preparedBy: string, isoDate: string }} meta
+ * @param {{ preparedBy: string, isoDate: string, product?: import('../product.js').Product|null }} meta
+ *        `product` is what the rep is selling, when the page around the
+ *        assistant says so. It decides the tag, the cover and close lines, the
+ *        suite and the standing copy (brandFor). Absent, the deck is the one
+ *        the instruction set describes.
  * @param {{ display: import('./measure.js').FontMetrics, body: import('./measure.js').FontMetrics }} fonts
  *        Metrics only — PowerPoint resolves the typefaces by name. These are
  *        what let the layout know how tall a block will be before placing the
@@ -1250,26 +1356,42 @@ const sectionText = (s) =>
 export function renderPptx(spec, meta, fonts) {
   shapeId = 1;
   comp.resetIds();
+  brand = brandFor(meta.product);
+
+  // A positioning line is a line: past POSITIONING_LINES it is a paragraph,
+  // and goes on neither the cover nor the close. The instruction set's is one
+  // line and never reaches this. createDocument tells the rep (lineLeftOff).
+  if (brand.positioningLine && !fitsCover(brand.positioningLine, fonts)) {
+    brand = { ...brand, positioningLine: null };
+  }
 
   const date = meta.isoDate.slice(0, 10);
   const year = Number(date.slice(0, 4));
   const context = { date, year, preparedBy: meta.preparedBy };
 
+  // The suite deep dive is a SecSemantic or DevSemantic slide by definition:
+  // the suite name is its headline and its tag. On another product's deck it
+  // is a slide about a different product, so it is left out rather than drawn.
+  // The model is told not to write one, and createDocument takes out any it
+  // writes anyway before this runs, so the rep is told (withoutForeignSuite).
+  // This is for every other caller.
+  const sections = brand.suite ? spec.sections : spec.sections.filter((s) => s.layout !== 'suite');
+
   // §3.4 makes the credentials close a required slide, unless the deck
   // already has one of its own — two "who we are" slides is worse than none.
-  const wantsWhoWeAre = spec.format === 'pptx' && !spec.sections.some(isCredentials);
-  const total = spec.sections.length + 2 + (wantsWhoWeAre ? 1 : 0);
+  const wantsWhoWeAre = spec.format === 'pptx' && !sections.some(isCredentials);
+  const total = sections.length + 2 + (wantsWhoWeAre ? 1 : 0);
 
   const slides = [
     coverSlide(spec, context, fonts),
-    ...spec.sections.map((s, i) => {
+    ...sections.map((s, i) => {
       const label = `${i + 2} / ${total}`;
       const draw = s.layout && DRAWN[s.layout];
       const built = draw ? draw(spec, s, context, label, fonts) : contentSlide(spec, s, context, label, fonts);
       return carriesModeledFigure(sectionText(s)) ? withDataNote(built) : built;
     }),
     ...(wantsWhoWeAre ? [whoWeAreSlide(spec, context, `${total - 1} / ${total}`, fonts)] : []),
-    closingSlide(spec, context),
+    closingSlide(spec, context, fonts),
   ];
 
   /** @type {Record<string, Uint8Array>} */

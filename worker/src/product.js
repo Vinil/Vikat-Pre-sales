@@ -1,0 +1,92 @@
+/**
+ * product.js — which of Vikat's products a rep is selling, when the page
+ * around the assistant says so.
+ *
+ * Vikat sells more than one thing, and the assistant was written when it sold
+ * one: every prompt, every deck and one of the outreach checks assume the
+ * security line. A page that embeds the assistant and knows better — the sales
+ * portal, which knows which product a rep is working — can now say so, as
+ *
+ *   { key, name, definition, line }
+ *
+ * where `name` and `definition` are the product's own wording, written by the
+ * people who own it, and `line` is "security" or "engineering".
+ *
+ * Nothing here supplies wording of its own. A product's name and definition
+ * are the only product copy that ever comes from this path; everything else
+ * either stays as it is or is left out.
+ *
+ * No product — Vinil's own deployment, every conversation it has ever had —
+ * means exactly what it meant before this file existed. That is the default
+ * every caller falls back to, and the tests pin it byte for byte.
+ */
+
+/**
+ * @typedef {{ key: string, name: string, definition: string, line: string }} Product
+ */
+
+/**
+ * The product, tidied, or null when there is no product to speak of.
+ *
+ * A product with no name is not one. Every sentence written for a product
+ * names it, and with a blank name they read "the rep is selling ." and "Use
+ * the name .": worse than saying nothing, so a blank name means what no
+ * product means. The page that sends a product should never send that, and
+ * this is where it does not matter whether it did.
+ *
+ * Every entry point (the prompt, the deck brand, the outreach check) passes
+ * what it was given through here first, so the rest of the code can take a
+ * product's name and definition as they are: trimmed strings, the name never
+ * empty, the definition possibly so.
+ *
+ * @param {unknown} product
+ * @returns {Product|null}
+ */
+export function productOf(product) {
+  if (!product || typeof product !== 'object') return null;
+
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const name = text(product.name);
+  if (!name) return null;
+
+  return { key: text(product.key), name, definition: text(product.definition), line: text(product.line) };
+}
+
+/**
+ * Is this conversation on the security line, where everything written so far
+ * already applies?
+ *
+ * Yes when no product is given, which is what keeps every existing deployment
+ * unchanged. A line that is not "security" counts as not security, rather than
+ * falling back to it: a deck about the wrong product wearing CYBERSEC on every
+ * slide is the failure this exists to stop, and the only other line there is
+ * today is Engineering.
+ *
+ * @param {unknown} product
+ */
+export function sellsSecurity(product) {
+  const p = productOf(product);
+  return !p || p.line === 'security';
+}
+
+/**
+ * The product's one-line claim: its definition up to the first colon, ending
+ * in a full stop.
+ *
+ * A definition is written to be read in full, and a cover has room for one
+ * line. "Engineering capacity from Vikat for software companies and digital
+ * teams: product development, QA automation…" already says which part is the
+ * claim and which part is the list, so the cut is the writer's own rather
+ * than a paraphrase of it. Empty when there is no definition to cut.
+ *
+ * Whatever the claim already ended in goes before the full stop does: "Ship
+ * faster!" would otherwise go on the cover as "Ship faster!.", and the house
+ * copy check flags a deck for the exclamation point.
+ *
+ * @param {string|null|undefined} definition
+ * @returns {string}
+ */
+export function definitionHeadline(definition) {
+  const head = String(definition || '').split(':')[0].trim().replace(/[\s.!?…]+$/, '');
+  return head ? `${head}.` : '';
+}

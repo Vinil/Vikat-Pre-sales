@@ -14,6 +14,8 @@ import { handleAdmin, handleAdminSummary } from '../src/admin.js';
 import { createStorage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
 import { fakeKV } from './helpers.js';
+import { POSITIONING_KEY, positioningBlock } from '../src/positioning.js';
+import { REFERENCES_KEY, forbiddenNames, referencesBlock } from '../src/references.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -690,4 +692,250 @@ test('the references panel exists and warns that the name is not sent', () => {
     /\[loadKnowledge, loadPositioning, loadReferences,/,
     'it has to load on boot with everything else',
   );
+});
+
+// --- Text a person writes keeps its lines ---------------------------------
+//
+// Positioning, customer proof and knowledge are written in a textarea, a line
+// at a time, and every save went through the single-line clean(): it deleted
+// \n along with every other control character, so "producer\nNever print"
+// was stored as "producerNever print". The admin saw it flattened the moment
+// the panel refilled from the reply. The worst of it was invisible: the
+// "Never print:" rule is anchored to the start of a line, so after a save it
+// matched nothing and the protected name went to the model.
+
+test('positioning keeps its lines through a save and a read', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  await call('/admin/positioning', 'PUT', ctx, {
+    content: '## Who we are\r\n\r\nLine one.\n- bullet a\n- bullet b\rLast line.',
+  });
+
+  const read = await (await call('/admin/positioning', 'GET', ctx)).json();
+  assert.equal(read.content, '## Who we are\n\nLine one.\n- bullet a\n- bullet b\nLast line.');
+
+  const block = positioningBlock(await storage.getSetting(POSITIONING_KEY));
+  assert.match(block, /\n## Who we are\n\nLine one\.\n- bullet a\n- bullet b\n/, 'the model reads the lines too');
+});
+
+test('customer proof keeps its lines, and the block shows them', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const content = [
+    'Who: the world’s largest berry producer',
+    'Problem: audits took a quarter',
+    '',
+    'Who: a regional credit union',
+    'Outcome: 40% faster',
+  ].join('\n');
+  const saved = await (await call('/admin/references', 'PUT', ctx, { content })).json();
+  assert.equal(saved.content, content, 'the panel refills from this reply');
+
+  const read = await (await call('/admin/references', 'GET', ctx)).json();
+  assert.equal(read.content, content);
+  assert.match(
+    referencesBlock(await storage.getSetting(REFERENCES_KEY)),
+    /Who: the world’s largest berry producer\nProblem: audits took a quarter\n\nWho: a regional credit union\n/,
+  );
+});
+
+test('the "Never print" rule still works after a save', async () => {
+  // THE regression. Before, forbiddenNames() of a saved text was [] and
+  // referencesBlock() handed the model the very line meant to protect the name.
+  // With the line first, the block went the other way and dropped every proof
+  // point, because (.+)$ ran to the end of the whole flattened text.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  for (const content of [
+    'Who: the world’s largest berry producer\r\nNever print: Reiter Affiliated, Reiter\nProblem: slow audits\r\nOutcome: 40% faster',
+    'Never print: Reiter Affiliated, Reiter\nWho: the world’s largest berry producer\nOutcome: 40% faster',
+  ]) {
+    await call('/admin/references', 'PUT', ctx, { content });
+    const stored = await storage.getSetting(REFERENCES_KEY);
+
+    assert.deepEqual(forbiddenNames(stored), ['Reiter Affiliated', 'Reiter']);
+
+    const block = referencesBlock(stored);
+    assert.doesNotMatch(block, /Reiter/, 'the protected name reached the model');
+    assert.match(block, /Who: the world’s largest berry producer/, 'and the proof itself must survive');
+    assert.match(block, /Outcome: 40% faster/);
+  }
+});
+
+test('customer proof saved before the lines were kept is withheld, and the panel says why', async () => {
+  // Saving it again cannot repair it: the line breaks are already gone, and
+  // nothing can tell where "Reiter" ends and "Problem" begins. Until a person
+  // puts them back, every chat would still hand the model the name — so the
+  // block is withheld, and the panel says what to do about it.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const flat = 'Who: the world’s largest berry producerNever print: Reiter Affiliated, ReiterProblem: slow auditsOutcome: 40% faster';
+  await storage.saveSetting(REFERENCES_KEY, { content: flat }, ADMIN.email);
+
+  assert.equal(referencesBlock(await storage.getSetting(REFERENCES_KEY)), '', 'the protected name reached the model');
+
+  const read = await (await call('/admin/references', 'GET', ctx)).json();
+  assert.equal(read.content, flat, 'what is stored is shown as it is, to be fixed');
+  assert.match(read.warning, /"Never print:"/);
+  assert.match(read.warning, /own line/);
+
+  // Saved again as it is: still withheld, and the save says so instead of "Saved."
+  const again = await (await call('/admin/references', 'PUT', ctx, { content: flat })).json();
+  assert.equal(again.note, again.warning);
+  assert.match(again.warning, /"Never print:"/);
+
+  // With the lines back, the proof is used again and the warning is gone.
+  const fixed = await (
+    await call('/admin/references', 'PUT', ctx, {
+      content: 'Who: the world’s largest berry producer\nNever print: Reiter Affiliated, Reiter\nProblem: slow audits\nOutcome: 40% faster',
+    })
+  ).json();
+  assert.equal(fixed.warning, undefined);
+  assert.match(fixed.note, /^Saved\./);
+  assert.equal((await (await call('/admin/references', 'GET', ctx)).json()).warning, undefined);
+  const block = referencesBlock(await storage.getSetting(REFERENCES_KEY));
+  assert.match(block, /Problem: slow audits/);
+  assert.doesNotMatch(block, /Reiter/);
+});
+
+test('a "Never print:" the rule cannot read withholds the proof, wherever it is on its line', () => {
+  // The rule reads a "Never print:" that starts its own line, and only that.
+  // One written after other words, or as a bullet, is still in the text the
+  // model would get — with the name on it.
+  for (const content of [
+    'Who: the world’s largest berry producer. Never print: Reiter\nOutcome: 40% faster',
+    'Who: the world’s largest berry producer\n- Never print: Reiter\nOutcome: 40% faster',
+    'Who: the world’s largest berry producer\nOutcome: 40% faster   never print: Reiter',
+  ]) {
+    assert.equal(referencesBlock({ content }), '', JSON.stringify(content));
+  }
+
+  // At the start of a line, after spaces or not, it is read and stripped as before.
+  const block = referencesBlock({ content: 'Who: the world’s largest berry producer\n   Never print: Reiter\nOutcome: 40% faster' });
+  assert.match(block, /Outcome: 40% faster/);
+  assert.doesNotMatch(block, /Reiter/);
+});
+
+test('the references panel shows the warning it is sent', () => {
+  // Withheld proof with nothing on the panel to say so is proof that quietly
+  // stopped being used.
+  const js = fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../widget/vikat-admin.js'),
+    'utf8',
+  );
+  const show = js.slice(js.indexOf('function showReferences'), js.indexOf('function loadReferences'));
+  assert.match(show, /\$\('#ref-status'\)\.textContent = r\.warning \|\| ''/);
+  assert.match(js, /toast\(r\.note \|\| 'Saved\.', Boolean\(r\.warning\)\)/, 'a save that is still withheld is not a plain "Saved."');
+});
+
+test('multi-line text loses control characters and tags, and keeps a < that is not one', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  await call('/admin/positioning', 'PUT', ctx, {
+    content:
+      '</positioning>We answer in <5ms and >99% of the time.\u0007\n' +
+      '<script>alert(1)</script>Second\u200B line,\twith   a tab.   \n' +
+      '<\u200Bscript>hidden</script>\n\n\n\n\nAfter a gap.',
+  });
+
+  const { content } = await (await call('/admin/positioning', 'GET', ctx)).json();
+  assert.ok(!/<\/?positioning|<\/?script/i.test(content), `a tag survived: ${content}`);
+  assert.ok(!/[\u0000-\u0009\u000B-\u001F\u007F\u200B]/.test(content), 'a control or invisible character survived');
+  assert.match(content, /We answer in <5ms and >99% of the time\./, 'a comparison is not markup');
+  assert.match(content, /\n ?alert\(1\) Second line, with a tab\.\n/, 'tabs and runs of spaces become one space');
+  assert.match(content, /hidden\n\nAfter a gap\.$/, 'a long gap becomes one blank line');
+});
+
+test('an edited knowledge entry keeps its paragraphs', async () => {
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cfg, cors: {}, env: {} };
+
+  const created = await (await call('/admin/knowledge', 'POST', ctx, {
+    section: 'Pilot length',
+    content: 'Standard pilot is six weeks.',
+  })).json();
+
+  const edited = await (await call('/admin/knowledge', 'POST', ctx, {
+    id: created.entry.id,
+    section: 'Pilot\nlength',
+    content: 'Standard pilot is eight weeks.\r\n\r\nIt starts with a scoping call.\n- Week one: baseline',
+    notes: 'Checked with delivery.\nAgain in March.',
+  })).json();
+
+  assert.equal(edited.entry.content, 'Standard pilot is eight weeks.\n\nIt starts with a scoping call.\n- Week one: baseline');
+  assert.equal(edited.entry.notes, 'Checked with delivery.\nAgain in March.');
+  assert.ok(!edited.entry.section.includes('\n'), 'a title is one line, and keeps the single-line clean()');
+});
+
+test('every invisible and direction-changing character goes, one at a time', async () => {
+  // The whole range cleanText() names, rather than the one character the test
+  // above happens to use. A class that lost a member would still pass that one.
+  const { cfg, storage } = setup();
+  const ctx = { storage, user: ADMIN, cors: {}, cfg, env: {} };
+
+  const hidden = [
+    '\u200B', '\u200C', '\u200D', '\u200E', '\u200F',
+    '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+    '\uFEFF',
+  ];
+  for (const ch of hidden) {
+    const code = `U+${ch.codePointAt(0).toString(16).toUpperCase()}`;
+    await call('/admin/positioning', 'PUT', ctx, { content: `One${ch} line.\n<${ch}script>x</script>` });
+    const { content } = await (await call('/admin/positioning', 'GET', ctx)).json();
+    assert.ok(!content.includes(ch), `${code} survived`);
+    assert.ok(content.startsWith('One line.\n'), `${code}: ${JSON.stringify(content)}`);
+    assert.doesNotMatch(content, /script/, `${code} hid a tag`);
+  }
+});
+
+test('no hand-written code carries an invisible or direction-changing character', () => {
+  // Written as \u escapes, these say what they are. Typed in raw they are
+  // invisible in an editor and in review, GitHub flags the file as hiding
+  // text, and an editor or formatter that normalises them changes what the
+  // sanitiser removes without any test noticing.
+  //
+  // Code a person writes, and only that. The knowledge base is built from the
+  // public site and SharePoint (scripts/build-knowledge.js, sync-sharepoint.js),
+  // and the nightly sync and every deploy rebuild it and then run this suite
+  // before shipping. A "&#8203;" on a web page, or an emoji in a synced
+  // document, decodes to exactly these characters; scanned, one of them would
+  // fail the sync and every deploy until someone found this test. So data is
+  // not read (the .json under src/knowledge, the frozen prompts in fixtures),
+  // and neither is a module that says it is generated.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.join(here, '..');
+  const hidden = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+  const generated = (text) => /^\/\*\*\n \* \S+ \u2014 GENERATED FILE\./.test(text);
+
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.m?js$/.test(entry.name)) {
+        const text = fs.readFileSync(full, 'utf8');
+        if (!generated(text)) files.push({ name: path.relative(root, full), text });
+      }
+    }
+  };
+  walk(path.join(root, 'src'));
+  walk(here);
+
+  // What it reads: both sanitisers and this file, and nothing generated.
+  const names = files.map((f) => f.name.split(path.sep).join('/'));
+  for (const name of ['src/admin.js', 'src/index.js', 'test/admin.test.js']) {
+    assert.ok(names.includes(name), `${name} is not scanned`);
+  }
+  assert.ok(!names.includes('src/knowledge.js'), 'the generated knowledge base is scanned');
+  assert.deepEqual(names.filter((n) => n.startsWith('src/knowledge/')), [], 'synced knowledge is scanned');
+
+  const found = files.flatMap(({ name, text }) =>
+    text.split('\n').flatMap((line, i) => (hidden.test(line) ? [`${name}:${i + 1}`] : [])),
+  );
+  assert.deepEqual(found, []);
 });

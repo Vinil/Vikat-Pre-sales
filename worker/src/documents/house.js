@@ -18,6 +18,8 @@
  * checked from the XML, and what cannot is said plainly rather than implied.
  */
 
+import { productOf, sellsSecurity, definitionHeadline } from '../product.js';
+
 // --- §4.1 Colour ----------------------------------------------------------
 
 /** The cream theme. Default for every content slide (§3.3). */
@@ -230,6 +232,17 @@ export const SUITE_WORDMARKS = [
 ];
 
 /**
+ * The one "who we are" point that belongs to the security line. The graph the
+ * engineers feed, and the predictions it makes earlier every month, are the
+ * Semantic Context Plane's: "earlier" is the CyberSec and SRE thesis, and on
+ * any other product's deck this sentence describes a platform it does not
+ * have.
+ */
+const INTO_THE_GRAPH =
+  'Named Vikat engineers work inside your team and feed every incident, change, and decision ' +
+  'back into the graph. Your context never goes stale, so predictions get earlier every month.';
+
+/**
  * §1.1 and §2.4, as the credentials close (§1.2 step 5). Every line here is
  * approved standing copy from the instruction set: a slide about who we are is
  * exactly where an invented capability would go unnoticed, so nothing on it is
@@ -241,8 +254,7 @@ export const WHO_WE_ARE = {
   points: [
     'We bring the platform, the process, and the people, and we contract for outcomes.',
     'We layer alongside your toolchains. No replacement required.',
-    'Named Vikat engineers work inside your team and feed every incident, change, and decision ' +
-      'back into the graph. Your context never goes stale, so predictions get earlier every month.',
+    INTO_THE_GRAPH,
   ],
 };
 
@@ -251,6 +263,56 @@ export const PATENTS_PENDING =
   'Patents pending on the Semantic Context Plane and the Semantic Context Loop.';
 
 export const DISCLAIMER_BLOCK = [FINE_PRINT, PATENTS_PENDING, DATA_NOTE];
+
+// --- Which product the deck is for ------------------------------------------
+
+/**
+ * The wordmark tag on an Engineering deck. Two spaces, as WORDMARK_TAG has
+ * them: it is the same lockup with the other line's name in it.
+ */
+export const ENGINEERING_TAG = 'VIKAT  ENGINEERING';
+
+/**
+ * The parts of the deck that say which product it is for.
+ *
+ * Everything above is the instruction set, and the instruction set was
+ * written for the security line: the tag, the cover line, the tagline, the
+ * suite wordmarks and one of the "who we are" points all say CyberSec, SRE or
+ * SecSemantic. An Engineering deck built from them alone carries
+ * "VIKAT  CYBERSEC" on every slide.
+ *
+ * No product, or a security one, is the instruction set exactly — the same
+ * constants, not copies of them. An Engineering deck swaps in only what the
+ * product itself supplies (its definition's headline, see product.js) and
+ * otherwise LEAVES OUT: no tagline, no suite, and the standing copy minus the
+ * one security point. Nothing is written for it here, because a line nobody
+ * approved on a cover is worse than a shorter cover.
+ *
+ * @param {import('../product.js').Product|null|undefined} product
+ * @returns {{ tag: string, positioningLine: string|null, deckTagline: string|null, suite: boolean,
+ *             whoWeAre: { eyebrow: string, title: string, points: string[] } }}
+ */
+export function brandFor(product) {
+  // A product with no name is no product (productOf), and gets today's deck.
+  const p = productOf(product);
+  if (sellsSecurity(p)) {
+    return {
+      tag: WORDMARK_TAG,
+      positioningLine: POSITIONING_LINE,
+      deckTagline: DECK_TAGLINE,
+      suite: true,
+      whoWeAre: WHO_WE_ARE,
+    };
+  }
+
+  return {
+    tag: ENGINEERING_TAG,
+    positioningLine: definitionHeadline(p.definition) || null,
+    deckTagline: null,
+    suite: false,
+    whoWeAre: { ...WHO_WE_ARE, points: WHO_WE_ARE.points.filter((p) => p !== INTO_THE_GRAPH) },
+  };
+}
 
 // --- §1.3 The metric system ------------------------------------------------
 

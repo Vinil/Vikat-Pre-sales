@@ -409,11 +409,13 @@ function compact(obj) {
  * rep's conversation continues rather than dying mid-answer.
  *
  * @param {{ name: string, input: object }} call
- * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object, messages?: Array<{role: string, content: string}>, contextText?: string }} ctx
+ * @param {{ sessionId: string, user: {email: string, name: string}, storage: import('./storage.js').Storage, env: object, cfg: object, messages?: Array<{role: string, content: string}>, contextText?: string, product?: import('./product.js').Product|null }} ctx
  *        `messages` is the conversation as the rep sent it and `contextText`
  *        any account block injected into this turn's prompt. Only
  *        draft_outreach reads them, to check a To line against — and only the
- *        rep's messages among them (see givenText).
+ *        rep's messages among them (see givenText). `product` is what the rep
+ *        is selling, when the page around the assistant says so; only
+ *        create_document reads it (see product.js).
  * @returns {Promise<{ content: string, isError?: boolean, retryable?: boolean, effect?: object }>}
  */
 export async function runTool(call, ctx) {
@@ -667,6 +669,9 @@ export async function runTool(call, ctx) {
           env,
           cfg,
           fonts: ctx.fonts,
+          // The product the rep is selling, when the page said which. A deck
+          // for it carries its own tag and cover line instead of CYBERSEC.
+          product: ctx.product ?? null,
         });
 
         if (!result.ok) {

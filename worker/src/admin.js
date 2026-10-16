@@ -17,7 +17,13 @@ import { ROLES, resolveRole, wouldLeaveNoAdmin } from './roles.js';
 import { documentStoreStatus, listLibraries, uploadDocument } from './documentStore.js';
 import { ingest, SUPPORTED_EXTENSIONS } from './ingest.js';
 import { POSITIONING_KEY, POSITIONING_MAX_CHARS } from './positioning.js';
-import { REFERENCES_KEY, REFERENCES_MAX_CHARS, REFERENCE_TEMPLATE } from './references.js';
+import {
+  REFERENCES_KEY,
+  REFERENCES_MAX_CHARS,
+  REFERENCE_TEMPLATE,
+  UNREAD_NEVER_PRINT_WARNING,
+  hasUnreadNeverPrint,
+} from './references.js';
 import { retrievalStatus, retrieve } from './retrieve.js';
 import { collateralCount } from './collateral.js';
 import { buildSystemPrompt } from './systemPrompt.js';
@@ -44,6 +50,42 @@ function clean(text) {
     .trim();
 }
 
+/**
+ * The same protection for text a person writes a line at a time: positioning,
+ * customer proof, a knowledge entry and its notes.
+ *
+ * clean() is right for a title or a file name and wrong for these. It deletes
+ * every control character, \n included, so "producer\nNever print: Reiter"
+ * was stored as "producerNever print: Reiter". Nobody saw it fail: the panel
+ * refilled from the reply, already flat, and the "Never print:" rule, which is
+ * anchored to the start of a line, quietly stopped matching. The name it
+ * exists to protect went to the model.
+ *
+ * What it still removes is what clean() removes for a reason: control
+ * characters, the invisible and direction-changing ones, and markup. Those go
+ * BEFORE the markup does: a "<" and "script>" with a zero-width space between
+ * them is not a tag while it is being looked for, and is one afterwards.
+ *
+ * Markup here means something shaped like a tag: a "<" followed by a letter,
+ * a "/", a "!" or a "?". clean()'s /<[^>]*>/ also takes "<5ms and >99%" for
+ * one, and a positioning statement is exactly where a number like that is.
+ *
+ * Three or more blank lines in a row become one. A paste from a PDF leaves
+ * runs of them, and one blank line is still a paragraph break.
+ */
+function cleanText(text) {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\uFEFF]/g, '')
+    .replace(/<\/?[A-Za-z!?][^>]*>/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/ {2,}/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{4,}/g, '\n\n')
+    .trim();
+}
+
 function isEmail(s) {
   return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
@@ -66,7 +108,7 @@ async function handleKnowledge(request, url, ctx) {
     }
 
     const section = clean(body.section);
-    const content = clean(body.content);
+    const content = cleanText(body.content);
 
     if (!section) return json({ error: 'A title is required.' }, 400, cors);
     if (!content) return json({ error: 'Content is required.' }, 400, cors);
@@ -94,7 +136,7 @@ async function handleKnowledge(request, url, ctx) {
     }
 
     const entry = await storage.saveKnowledge(
-      { id: body.id, section, content, status: body.status, notes: clean(body.notes) },
+      { id: body.id, section, content, status: body.status, notes: cleanText(body.notes) },
       user.email,
     );
 
@@ -481,7 +523,7 @@ async function handlePositioning(request, url, ctx) {
     return json({ error: 'Send JSON.' }, 400, cors);
   }
 
-  const content = clean(body.content).slice(0, POSITIONING_MAX_CHARS);
+  const content = cleanText(body.content).slice(0, POSITIONING_MAX_CHARS);
 
   // Saving nothing is how you TURN IT OFF, and it has to be possible: a wrong
   // positioning statement governing every answer is worse than none.
@@ -666,9 +708,17 @@ export async function handleAdmin(request, url, ctx) {
  * GET and PUT only. Positioning accepts a file upload because a positioning
  * statement usually arrives as one; proof points are typed, a few lines at a
  * time, as deals close.
+ *
+ * Both say when the saved text holds a "Never print:" the rule cannot read
+ * (references.js): the assistant gets none of the proof until it is fixed,
+ * and a panel that showed the text with nothing beside it would leave the
+ * admin believing it was in use. Proof saved before line breaks were kept is
+ * the usual case, and the first time anybody sees it is opening this panel.
  */
 async function handleReferences(request, url, ctx) {
   const { storage, user, cors } = ctx;
+  // Undefined when there is nothing to say, which JSON leaves out altogether.
+  const warningFor = (saved) => (hasUnreadNeverPrint(saved) ? UNREAD_NEVER_PRINT_WARNING : undefined);
 
   if (request.method === 'GET') {
     const saved = (await storage.getSetting(REFERENCES_KEY)) || null;
@@ -679,6 +729,7 @@ async function handleReferences(request, url, ctx) {
         updatedAt: saved?.updatedAt || null,
         maxChars: REFERENCES_MAX_CHARS,
         template: REFERENCE_TEMPLATE,
+        warning: warningFor(saved),
       },
       200,
       cors,
@@ -696,21 +747,26 @@ async function handleReferences(request, url, ctx) {
     return json({ error: 'Send JSON.' }, 400, cors);
   }
 
-  const content = clean(body.content).slice(0, REFERENCES_MAX_CHARS);
+  const content = cleanText(body.content).slice(0, REFERENCES_MAX_CHARS);
 
   // Saving nothing turns it off, and that has to be possible. A reference the
   // customer has withdrawn permission for is worse than no reference, and the
   // person who finds that out needs to be able to act in one step.
   const saved = await storage.saveSetting(REFERENCES_KEY, { content }, user.email);
+  const warning = warningFor(saved);
 
   return json(
     {
       content: saved.content,
       updatedBy: saved.updatedBy,
       updatedAt: saved.updatedAt,
-      note: content
-        ? 'Saved. Outreach carries one of these from the next message on.'
-        : 'Cleared. Outreach will name no customers at all, which is the safe default.',
+      // Not "Saved." when the assistant still gets none of it.
+      note:
+        warning ||
+        (content
+          ? 'Saved. Outreach carries one of these from the next message on.'
+          : 'Cleared. Outreach will name no customers at all, which is the safe default.'),
+      warning,
     },
     200,
     cors,
